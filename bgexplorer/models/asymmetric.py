@@ -2,12 +2,22 @@ from scipy.stats import norm, halfnorm, rv_continuous
 import numpy as np
 import operator
 import io
+from copy import copy
+from warnings import warn
+from collections import defaultdict
+from functools import reduce
+import threading
+from contextlib import contextmanager
 from typing import Union, Optional, Tuple
-NumOrArray = Union[int, float, np.ndarray]
+import logging
 try:
     import pint
 except ImportError:
     pint = None
+
+NumOrArray = Union[int, float, np.ndarray]
+log = logging.getLogger(__name__)
+
 
 class AsymmetricErrorDistribution(rv_continuous):
     """ Scipy rv_continuous defined by AsymmetricError data """
@@ -43,17 +53,21 @@ class AsymmetricErrorDistribution(rv_continuous):
         return prefix*np.exp(experand)
 
     def _ppf(self, q):
-        if self.s0 <= 0:
-            return halfnorm(self.mode, self.s1).ppf(q)
         qpup = (1+q-2*self.qlow)/(2*(1-self.qlow))
-        return np.where(q < self.qlow, norm(self.mode, self.s0).ppf(q/self.qlow/2),
-                        norm(self.mode, self.s1).ppf(qpup))
+        return np.where(self.s0 <= 0, halfnorm(self.mode, self.s1).ppf(q),
+                        np.where(q < self.qlow,
+                                 norm(self.mode, self.s0).ppf(q/self.qlow/2),
+                                 norm(self.mode, self.s1).ppf(qpup))
+                        )
 
     def _cdf(self, x):
         if self.s0 <= 0:
             return halfnorm(self.mode, self.s1).cdf(x)
-        return np.where(x < self.mode, norm(self.mode, self.s0).cdf(x)*self.qlow*2,
-                        norm(self.mode, self.s1).cdf(x)*(1-self.qlow)*2 + 2*self.qlow-1)
+        return np.where(x < self.mode,
+                        norm(self.mode, self.s0).cdf(x)*self.qlow * 2,
+                        norm(self.mode, self.s1).cdf(x) *
+                            (1-self.qlow) * 2 + 2 * self.qlow-1
+                        )
 
 
 class AsymmetricError:
@@ -85,9 +99,10 @@ class AsymmetricError:
     represeatation, we are going to fudge some things. The AsymmetricError
     is represented by a mode and upper and lower standard deviation. Math
     operations treat the two sigmas identically , i.e.
-    if z = f(x,y), var_z = (df/dx)^2 var_x + (df/dy)^2 var_y, where var = sigma**2
+    if z = f(x,y), var_z = (df/dx)^2 var_x + (df/dy)^2 var_y,
+    where var = sigma**2.
     An upper limit would be represented as 0+s1-0, where s1 is determined from
-    the provided confidence limit. If a measurement with significant probability
+    the confidence limit. If a measurement with significant probability
     less than zero is provided, the lower uncertainty is set to the mode. I.e.
     1+/-5 is converted to 1+5-1. The minimum value can be set with the
     `setminlowerz` classmethod, i.e., if set to 2, 1+/-5 would become 1+5-0.5
@@ -97,22 +112,35 @@ class AsymmetricError:
     10+/-0.1 + 1+5-1 = 11+5-1. The uncertainties add as though independent
     gaussians, and the modes behave as expected.
 
+    The values (modes and sigmas) may be numpy arrays, and everything should
+    work as expected. Slicing is supported.
+    Currenly only linear operations (+-*/) are supported. Correlations are
+    handled automatically, e.g. `x + 2 -x = 2 +/- 0`. This works only so long
+    as the object is in memory; i.e. correlation information is not stored
+    when serializing. Therefore, when loading AEs from some source, identical
+    values must refer to the same python object. The easiest way to do this
+    is to memoize the loading function.
+
     The class also has methods to get the pdf and ppf (quantile). These are
     calculated assuming a piecewise distribution of the form
     sqrt(2/pi) 1/(s0+s1) exp(-(x-mode)**2/(2*sigma**2),
         where sigma = s0 if x < mode else s1
-    It's important to stress that this PDF definition is NOT compatible with the
-    defined behavior for adding these objects!
+    It's important to stress that this PDF definition is NOT compatible with
+    the defined behavior for adding these objects!
     """
-    __slots__ = ('mode', 's0', 's1', '_v0', '_v1', '_modesq')
+    __slots__ = ('mode', 's0', 's1', '_v0', '_v1', '_modesq', '_weights', 'id', '_expression')
     _minmeanz = 1
+
     @classmethod
     def setminlowerz(cls, zmin):
         cls._minmeanz = zmin
 
     def __init__(self, value: NumOrArray, sigma: NumOrArray,
                  sigmaup: Optional[NumOrArray] = None,
-                 forceposdef: bool = False):
+                 forceposdef: bool = False,
+                 weights: Optional[dict] = None,
+                 id: Optional[str] = None,
+                 expression: Optional['LinearExpression'] = None):
         """ Constructor. For symmetric errors, supply the mean and
         standard deviation. For asymmetric errors, supply the mode,
         lower sigma, and upper sigma.
@@ -129,6 +157,9 @@ class AsymmetricError:
         self._v0 = None
         self._v1 = None
         self._modesq = None
+        self._weights = weights
+        self.id = id
+        self._expression = expression
 
         if (forceposdef and np.isscalar(self.mode) and
                 self.mode < self.s0*self._minmeanz):
@@ -153,6 +184,57 @@ class AsymmetricError:
             self._modesq = self.mode**2
         return self._modesq
 
+    @property
+    def nominal_value(self):
+        return self.mode
+
+    @property
+    def sigma(self):
+        """ alias for s0 """
+        return self.s0
+
+    @property
+    def sigmaup(self):
+        return self.s1
+
+    @property
+    def weights(self):
+        return (self._weights if self._weights is not None
+                else {self: np.array([1, 1])}
+                )
+
+    @property
+    def expression(self):
+        return (self._expression if self._expression is not None
+                else LinearExpression(self))
+
+    _threadlocal = threading.local()
+    _threadlocal.ignore_correlations = False
+
+    @classmethod
+    def set_ignore_correlations(cls, ignore: bool):
+        """ If ignore is true, simplify calculations by ignoring possible
+        correlations between variables
+        """
+        cls._threadlocal.ignore_correlations = ignore
+
+    @classmethod
+    def get_ignore_correlations(cls):
+        return cls._threadlocal.ignore_correlations
+
+    @classmethod
+    @contextmanager
+    def ignore_correlations(cls, ignore: bool = True):
+        """ A context manager to set the ignore condition and restore
+        on exiting the context
+        """
+        previous_value = cls.get_ignore_correlations()
+        cls.set_ignore_correlations(ignore)
+        try:
+            yield ignore
+        finally:
+            cls.set_ignore_correlations(previous_value)
+
     def serialize(self, compressarrays: bool = True) -> Tuple:
         """ Convert to a tuple for storage """
         result = (self.mode, self.s0, self.s1)
@@ -165,8 +247,15 @@ class AsymmetricError:
             result = (buf.getvalue(),)
         return result
 
+    def todict(self) -> dict:
+        """ Convert to a dictionary, with keys 'value', 'sigma', and 'sigmaup'
+        """
+        ser = self.serialize(compressarrays=False)
+        return dict(zip(('value', 'sigma', 'sigmaup'), ser))
+
     @staticmethod
-    def serializeq(asym: 'AsymmetricErrors', compressarrays: bool = True) -> Tuple:
+    def serializeq(asym: 'AsymmetricError', compressarrays: bool = True
+                   ) -> Tuple:
         """ Serialize a Quantity with units """
         result = asym.serialize(compressarrays=compressarrays)
         if hasattr(asym, 'units') and str(asym.units) != 'dimensionless':
@@ -174,7 +263,7 @@ class AsymmetricError:
         return result
 
     @classmethod
-    def deserialize(cls, val: Tuple, unit_registry = None,
+    def deserialize(cls, val: Tuple, unit_registry=None,
                     force_quantity: bool = False) -> 'AsymmetricError':
         """ Construct an AsymmetricError from it's serialized represeation
         If the serialized object contained a unit, unit_registry must be a
@@ -201,7 +290,8 @@ class AsymmetricError:
         return result
 
     @classmethod
-    def fromlimit(cls, limit: float, quantile: float = 0.9) -> 'AsymmetricError':
+    def fromlimit(cls, limit: float, quantile: float = 0.9
+                  ) -> 'AsymmetricError':
         z = norm.isf((1.-quantile)/2.)
         sigmaup = limit / z
         return cls(0, 0, sigmaup)
@@ -211,18 +301,20 @@ class AsymmetricError:
         if val.startswith('<'):
             return cls.fromlimit(float(val[1:]))
         mode, e1 = val.split('+')
-        s1, s0 = val.split('-')
+        s1, s0 = e1.split('-')
         s1 = float(s1) if (s1 and s1 != '/') else None
         return cls(float(mode), float(s0), s1)
 
     @classmethod
-    def _fromcounts_scalar(cls, counts: float, forceposdef: bool) -> 'AsymmetricError':
+    def _fromcounts_scalar(cls, counts: float, forceposdef: bool
+                           ) -> 'AsymmetricError':
         s0 = np.sqrt(counts)
         s1 = s0 if counts > 0 else 1.3983007
         return cls(counts, s0, s1, forceposdef)
 
     @classmethod
-    def _fromcounts_array(cls, counts: np.ndarray, forceposdef: bool) -> 'AsymmetricError':
+    def _fromcounts_array(cls, counts: np.ndarray, forceposdef: bool
+                          ) -> 'AsymmetricError':
         s0 = np.sqrt(counts)
         s1 = np.copy(s0)
         s1[s1 == 0] = 1.3983007
@@ -232,7 +324,8 @@ class AsymmetricError:
         return cls(counts, s0, s1)
 
     @classmethod
-    def fromcounts(cls, counts: NumOrArray, forceposdef: bool = False) -> 'AsymmetricError':
+    def fromcounts(cls, counts: NumOrArray, forceposdef: bool = False
+                   ) -> 'AsymmetricError':
         """ convert integer counts """
         if np.isscalar(counts):
             return cls._fromcounts_scalar(counts, forceposdef)
@@ -242,6 +335,8 @@ class AsymmetricError:
     def isupperlimit(self, strict: bool = True) -> bool:
         if not np.isscalar(self.mode):
             return None
+        if self.s1 == 0:
+            return False
         if strict:
             return (self.mode == 0 and self.s0 == 0)
         return self.mode <= self.s0 * self._minmeanz
@@ -259,16 +354,23 @@ class AsymmetricError:
     def qlow(self):
         """ Fraction of probability in lower half, equivalent to the cdf
         at mode """
-        return self.s0 / (self.s0 + self.s1)
+        return np.where(self.s0 > 0, self.s0 / (self.s0 + self.s1), 0)
 
     def alpha(self, q):
         """ Effective alpha parameter for a given quantile """
         return np.where(q < self.qlow, q / self.qlow, (1.-q)/(1.-self.qlow))
 
     def ppf(self, q):
-        return AsymmetricErrorDistribution(self).ppf(q)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return AsymmetricErrorDistribution(self)._ppf(q)
+
+    def get_upper_limit(self, quantile=0.9):
+        """ alias for ppf """
+        return self.ppf(quantile)
 
     def __format__(self, format_spec):
+        if not np.isscalar(self.mode):
+            format_spec = ''
         format_spec = ''.join(['{:', format_spec, '}'])
         if self.isupperlimit():
             return ''.join(['<', format_spec.format(self.ppf(0.9))])
@@ -283,18 +385,30 @@ class AsymmetricError:
         return "{}".format(self)
 
     def __repr__(self):
-        return f"AsymmetricError{self.serialize(compressarrays=False)}"
+        return f"AsymmetricError({self.serialize(compressarrays=False)})"
 
     # Operator overloads
     # TODO: combine the redundancies here
     # TODO: implement iadd, isub, etc.
+
+    @staticmethod
+    def _addweights(w1, w2):
+        """ Add the weights when adding two AEs """
+        return {k: w1.get(k, 0) + w2.get(k, 0)
+                for k in set(w1).union(set(w2))}
+
+    @staticmethod
+    def _scaleweights(weights, scalar):
+        return {k: np.array([v[0]*scalar, v[1]*scalar])
+                for k, v in weights.items()}
 
     def rezero(self, inplace=False):
         """ Zero the sigmas of all entries with zero mode.  See `addtreatzero`
         for a description of why you'd use this.
         """
         if not inplace:
-            result = AsymmetricError(self.mode, self.s0, self.s1)
+            result = AsymmetricError(self.mode, self.s0, self.s1,
+                                     weights=self.weights)
             if not np.isscalar(self.s1):
                 result.s1 = self.s1.copy()
             result.rezero(inplace=True)
@@ -310,8 +424,8 @@ class AsymmetricError:
 
     def addtreatzero(self, other: 'AsymmetricError'):
         """ In some cases, such as rebinning a histogram, upper limits should
-        not combine. E.g., if I have an AsymmetricError representing a histogram
-        of counts and want to integrate to get the total number of counts,
+        not combine. E.g., for an AsymmetricError representing a histogram
+        of counts, to integrate to get the total number of counts,
         any bins with zero entries should not contribute to the total error.
         In that case, use this method to perform the addition properly
 
@@ -334,72 +448,145 @@ class AsymmetricError:
     def average(self, other, weight1=1, weight2=1):
         return (self*weight1).addtreatzero(other*weight2)/(weight1 + weight2)
 
+    @classmethod
+    def _calcfromweights(cls, mode, weights):
+        """ Create a new AsymmetricErrors object from weights """
+        v0, v1 = (0, 0)
+        for var, weight in weights.items():
+            w0, w1 = weight
+            v0 += ((w0 > 0) * var.v0 + (w0 <= 0) * var.v1) * w0**2
+            v1 += ((w1 > 0) * var.v1 + (w1 <= 0) * var.v0) * w1**2
+        return cls(mode, np.sqrt(v0), np.sqrt(v1), weights=weights)
+
     def __neg__(self):
-        return AsymmetricError(-self.mode, self.s1, self.s0)
+        if self.get_ignore_correlations():
+            return AsymmetricError(-self.mode, self.s1, self.s0)
+        return (self.expression * -1).evaluate()
+        #return AsymmetricError(-self.mode, self.s1, self.s0,
+        #                       weights=self._scaleweights(self.weights, -1))
 
     def __add__(self, other):
-        try:
-            return AsymmetricError(self.mode + other.mode,
-                                   np.sqrt(self.v0 + other.v0),
-                                   np.sqrt(self.v1 + other.v1))
-        except AttributeError:
-            return AsymmetricError(self.mode + other, self.s0, self.s1)
+        if self.get_ignore_correlations():
+            try:
+                return AsymmetricError(self.mode + other.mode,
+                                       np.sqrt(self.v0 + other.v0),
+                                       np.sqrt(self.v1 + other.v1))
+            except AttributeError:
+                return AsymmetricError(self.mode + other, self.s0, self.s1)
+        return (self.expression + other).evaluate()
+
+        #try:
+        #    weights = self._addweights(self.weights, other.weights)
+        #    return AsymmetricError._calcfromweights(self.mode + other.mode,
+        #                                            weights=weights)
+        #except AttributeError:
+        #    return AsymmetricError(self.mode + other, self.s0, self.s1,
+        #                           weights=self.weights)
 
     def __sub__(self, other):
-        try:
-            return AsymmetricError(self.mode - other.mode,
-                                   np.sqrt(self.v0 + other.v1),
-                                   np.sqrt(self.v1 + other.v0))
-        except AttributeError:
-            return AsymmetricError(self.mode - other, self.s0, self.s1)
+        return self + (-other)
+        #try:
+        #    otherw = self._scaleweights(other.weights, -1)
+        #    weights = self._addweights(self.weights, otherw)
+        #    return AsymmetricError._calcfromweights(self.mode-other.mode,
+        #                                            weights)
+        #except AttributeError:
+        #    return AsymmetricError(self.mode - other, self.s0, self.s1,
+        #                           weights=self.weights)
 
     def __mul__(self, other):
-        try:
-            return AsymmetricError(self.mode * other.mode,
-                                   np.sqrt(self.v0*other.modesq +
-                                           other.v0*self.modesq +
-                                           self.v0 * other.v0),
-                                   np.sqrt(self.v1*other.modesq +
-                                           other.v1*self.modesq +
-                                           self.v1 + other.v1))
-        except AttributeError:
-            pass
+        """ Note that this differs from the usual formula for error prop,
+        which is var(f) = x**2 * var(y) + y**2 * var(x)
+        we take a second term in the expansion to handle the case when
+        the nominal value is zero as is the case with upper limits
+        var(f) = x**2 * var(y) + y**2 * var(x) + var(x) * var(y)
+        """
         # test for pint Quantities
         if hasattr(other, 'dimensionality'):
             other = 1*other  # ensure it's a quantity
             return other.__class__(self*other.m, other.u)
-        return AsymmetricError(self.mode * other, self.s0*other, self.s1*other)
+
+        if self.get_ignore_correlations():
+            # when the multiplier is negative, our error distributions switch
+            try:
+                v0 = (other.mode >= 0) * self.v0 + (other.mode < 0) * self.v1
+                v1 = (other.mode >= 0) * self.v1 + (other.mode < 0) * self.v0
+                return AsymmetricError(self.mode * other.mode,
+                                       np.sqrt(other.modesq * v0 +
+                                               self.modesq * other.v0 +
+                                               v0 * other.v0),
+                                       np.sqrt(other.modesq * v1 +
+                                               self.modesq * other.v1 +
+                                               v1 * other.v1)
+                                       )
+            except AttributeError:
+                s0 = (other >= 0) * self.s0 + (other < 0) * self.s1
+                s1 = (other >= 0) * self.s1 + (other < 0) * self.s0
+                return AsymmetricError(self.mode * other,
+                                       s0 * np.abs(other),
+                                       s1 * np.abs(other))
+        return (self.expression * other).evaluate()
+        #try:
+        #    w1 = self._scaleweights(self.weights,
+        #                            [np.sqrt(other.modesq + other.v0 / 2),
+        #                             np.sqrt(other.modesq + other.v1 / 2)]
+        #                            )
+        #    w2 = self._scaleweights(other.weights,
+        #                            [np.sqrt(self.modesq + self.v0 / 2),
+        #                             np.sqrt(self.modesq + self.v1 / 2)]
+        #                            )
+        #    return AsymmetricError._calcfromweights(self.mode*other.mode,
+        #                                            self._addweights(w1, w2))
+        #except AttributeError:
+        #    pass
+        #return AsymmetricError(self.mode * other, self.s0*other, self.s1*other,
+        #                       weights=self._scaleweights(self.weights, other))
+
+    def inverse(self):
+        """ return a new AsymmetricError equal to 1/self """
+        if not self.get_ignore_correlations():
+            warn("Cannot track correlations for non-linear operations")
+        return AsymmetricError(1./self.mode, self.s1/self.modesq,
+                               self.s0/self.modesq)
+        #weights = self._scaleweights(self.weights, -1./self.modesq)
+        #return AsymmetricError(1./self.mode, self.s1/self.modesq,
+        #                       self.s0/self.modesq, weights=weights)
 
     # todo: not clear this is being done correctly.
     def __truediv__(self, other):
-        try:
-            return AsymmetricError(self.mode / other.mode,
-                                   np.sqrt(self.v0/other.modesq +
-                                           other.v1*self.modesq/other.modesq**2 +
-                                           other.v1**2 * self.modesq/other.modesq**3 +
-                                           self.v0*other.v1/other.modesq**2),
-                                   np.sqrt(self.v1/other.modesq +
-                                           other.v0*self.modesq/other.modesq**2 +
-                                           other.v0**2 * self.modesq/other.modesq**3 +
-                                           self.v1*other.v0/other.modesq**2))
-        except AttributeError:
-            return AsymmetricError(self.mode / other, self.s0/other, self.s1/other)
+        # test for pint Quantities
+        if hasattr(other, 'dimensionality'):
+            other = 1./other  # ensure it's a quantity
+            return other.__class__(self*other.m, other.u)
+
+        if self.get_ignore_correlations():
+            try:
+                return self * other.inverse()
+            except AttributeError:
+                return self * (1 / other)
+        # this will raise an exception if the expression is complicated
+        # do we want to silently fall back to ignoring correlations
+        return (self.expression / other).evaluate()
+
+        #try:
+        #    return self * other.inverse()
+        #except AttributeError:
+        #    pass
+        #return AsymmetricError(self.mode / other, self.s0/other, self.s1/other,
+        #                       weights=self._scaleweights(self.weights,
+        #                                                  1 / other))
 
     def __radd__(self, other):
         return self + other
 
     def __rsub__(self, other):
-        # if isinstance(other, AsymmetricError), then other.__add__ will be called
-        return AsymmetricError(other-self.mode, self.s1, self.s0)
+        return -self + other
 
     def __rmul__(self, other):
         return self * other
 
     def __rtruediv__(self, other):
-        if self.isupperlimit():
-            return AsymmetricError(np.inf, other/self.s1, 0)
-        return AsymmetricError(other / self.mode, other*self.s1/self.modesq,
-                               other*self.s0/self.modesq)
+        return self.inverse() * other
 
     # NB: comparison operators test ONLY the mean, which is not great
     def _compare(self, other, op):
@@ -407,9 +594,6 @@ class AsymmetricError:
             return op(self.mode, other.mode)
         except AttributeError:
             return op(self.mode, other)
-
-    def __eq__(self, other):
-        return self._compare(other, operator.eq)
 
     def __ne__(self, other):
         return self._compare(other, operator.ne)
@@ -429,17 +613,20 @@ class AsymmetricError:
     def __bool__(self):
         return bool(self.mode)
 
+    # allow different instances to be dict keys based on id
     def __hash__(self):
-        return id(self)
+        return hash(self.id) if self.id else super().__hash__()
+
+    def __eq__(self, other):
+        if not isinstance(other, AsymmetricError):
+            return NotImplemented
+        if self.id:
+            return self.id == other.id
+        return super().__eq__(other)
 
     # array-specific stuff
     def __len__(self):
         return len(self.mode)
-
-    #@property
-    #def __array_interface__(self):
-        # todo: handle scalar case
-    #    return self.mode.__array_interface__
 
     def __getitem__(self, *args, **kwargs):
         return AsymmetricError(self.mode.__getitem__(*args, **kwargs),
@@ -457,7 +644,7 @@ class AsymmetricError:
                                  np.sqrt(np.sum(weighted.v0)),
                                  np.sqrt(np.sum(weighted.v1)))
 
-        # todo: should we check for all s1's to be equal? not sensible state otherwsie
+        # todo: check for all s1's to be equal? not sensible state otherwsie
         if result.mode == 0:
             if weights is None or np.isscalar(weights):
                 # self.mode is all zeros
@@ -468,13 +655,188 @@ class AsymmetricError:
 
         return result
 
-    # def __array__ufunc__(ufunc, method, *inputs, **kwargs):
+    # Numpy array functions
+    def sum(self):
+        """ alias for integrate """
+        return self.integrate()
+
+    def dot(self, other):
+        """ alias for integrate """
+        return self.integrate(other)
+
+    @property
+    def shape(self):
+        return np.shape(self.mode)
+
+    @property
+    def size(self):
+        return np.size(self.mode)
+
+    def __array__ufunc__(self, ufunc, method, *inputs, **kwargs):
+        if method != '__call__':
+            return NotImplemented
+        handled = {np.add: self.__add__,
+                   np.subtract: self.__sub__,
+                   np.multiply: self.__mul__,
+                   np.true_divide: self.__truediv__,
+                   }
+        if ufunc not in handled:
+            return NotImplemented
+        other = inputs[1] if inputs[0] is self else inputs[0]
+        return handled[ufunc](other)
 
     def __array_function__(self, func, types, args, kwargs):
-        if func not in (np.sum, np.dot):
-            return NotImplemented
         if func is np.sum:
             return self.integrate()
         elif func is np.dot:
             weights = args[1] if args[0] is self else args[0]
             return self.integrate(weights)
+
+        # pass off handlnig to mode (handles things like zeros_like)
+        args = (a if a is not self else self.mode for a in args)
+        try:
+            result = func(*args, **kwargs)
+        except Exception:
+            return NotImplemented
+        warn(f"AsymmetricError uncertainties may be lost in method {func}")
+        return result
+
+
+class LinearExpression:
+    """ to evaluate correlations between linear combinations of random
+    variables, this class keeps track of each independent term
+    """
+    @staticmethod
+    def _defaultcoefficient():
+        return 0
+
+    def __init__(self, *variables, coefficient=1, offset=None):
+        # coefficients is a dictionary with sets of AsymmetricError variables
+        # as keys and scalar coefficients as values
+        self.coefficients = defaultdict(self._defaultcoefficient)
+        if offset:
+            self.coefficients[frozenset()] = offset
+        if variables:
+            self.coefficients[frozenset(variables)] = coefficient
+
+    @property
+    def variables(self):
+        """ Get list of all variables """
+        return set().union(*self.coefficients.keys())
+
+    def evaluate(self) -> 'AsymmetricError':
+        disjoint = (len(self.variables) ==
+                    sum(len(key) for key in self.coefficients.keys()))
+        if disjoint:
+            # all of these variables are uncorrelated
+            with AsymmetricError.ignore_correlations():
+                # this will return a float if there are no variables
+                res = sum(reduce(operator.mul, key, coeff)
+                          for key, coeff in self.coefficients.items())
+                if not isinstance(res, AsymmetricError):
+                    res = AsymmetricError(res, 0)
+                res._expression = self
+                return res
+
+        # if we get here, there are variables that span different
+        # expressions, so we need to take the partial derivative
+        # var(f) = sum_i [|df/dx_i|**2 + var(df/dx_i)/2] * var(x_i)
+
+        mode = sum(reduce(operator.mul, (v.mode for v in key), coeff)
+                   for key, coeff in self.coefficients.items())
+        v0, v1 = (0, 0)
+        for variable in self.variables:
+            val = self.partialderivative(variable).evaluate()
+            v0 += (val.modesq + val.v0 / 2) * (
+                (val.mode >= 0) * variable.v0 + (val.mode < 0) * variable.v1)
+            v1 += (val.modesq + val.v1 / 2) * (
+                (val.mode >= 0) * variable.v1 + (val.mode < 0) * variable.v0)
+        return AsymmetricError(mode, np.sqrt(v0), np.sqrt(v1),
+                               expression=self)
+
+    def partialderivative(self, variable) -> 'LinearExpression':
+        result = LinearExpression()
+        for key, val in self.coefficients.items():
+            if variable in key:
+                result.coefficients[key.difference({variable})] = val
+        return result
+
+    def __copy__(self) -> 'LinearExpression':
+        result = LinearExpression()
+        result.coefficients.update(self.coefficients)
+        return result
+
+    def __add__(self, other):
+        if hasattr(other, 'expression'):
+            other = other.expression
+        if not isinstance(other, LinearExpression):
+            # this is a plain offset
+            other = LinearExpression(offset=other)
+        result = copy(self)
+        for key, val in other.coefficients.items():
+            result.coefficients[key] += val
+        return result
+
+    def __sub__(self, other):
+        return self + (-other)
+
+    def __mul__(self, other):
+        # accepts a scalar, a random variable, or a LinearExpression
+        if hasattr(other, 'expression'):
+            other = other.expression
+        if isinstance(other, LinearExpression):
+            result = LinearExpression()
+            # take the outer product
+            for key1, val1 in self.coefficients.items():
+                for key2, val2 in other.coefficients.items():
+                    if not key1.isdisjoint(key2):
+                        raise KeyError("Only linear expressions are allowed")
+                    result.coefficients[key1.union(key2)] = val1 * val2
+        else:
+            result = copy(self)
+            for key in self.coefficients.keys():
+                result.coefficients[key] *= other
+        return result
+
+    def __truediv__(self, other):
+        variable = other
+        coefficient = None
+        if hasattr(other, 'expression'):
+            other = other.expression
+        if isinstance(other, LinearExpression):
+            # we can only handle a linearexpression of a single term
+            if len(other.coefficients) == 1:
+                for key, var in other.coefficients.items():
+                    variable = key
+                    coefficient = var
+            else:
+                raise NotImplementedError("Div expressions not implemented")
+            result = LinearExpression()
+            # this is a variable, must be present in every term
+            for key, val in self.coefficients.items():
+                if variable not in key:
+                    raise ValueError("Inverses not implemented yet")
+                result.coefficients[key.difference({variable})] = val
+        else:
+            result = copy(self)
+        if coefficient is not None:
+            for key in result.coefficients.keys():
+                result.coefficients[key] /= coefficient
+        return result
+
+    def __neg__(self):
+        return self * -1
+
+    def __repr__(self):
+        return f'LinearExpression<{len(self.coefficients)} terms>'
+
+    def __str__(self):
+        s =  ' + '.join('*'.join([f'({v})' for v in key]+[str(c)])
+                        for key, c in self.coefficients.items())
+        return s
+
+    def __eq__(self, other):
+        try:
+            return self.coefficients == other.coefficients
+        except AttributeError:
+            return NotImplemented
