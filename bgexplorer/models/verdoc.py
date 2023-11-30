@@ -2,15 +2,19 @@
 from mongoengine import (Document, ReferenceField, ObjectIdField,
                          StringField, QuerySet, IntField, DateTimeField,
                          signals, ValidationError, ListField)
+
+from mongoengine import CASCADE, NULLIFY, PULL
 from bson import ObjectId, DBRef
 import datetime
 from typing import Optional, List
 
 
+# FIXME: need to override update, modify, etc
 class VersionedQuerySet(QuerySet):
     """ Override queryset to keep track of the currently active tag """
     def __init__(self, *args, active_version: Optional[str] = None, **kwargs):
         """ initialize and set active_version """
+        # TODO: should we always set a default active version?
         self.active_version = active_version
         super().__init__(*args, **kwargs)
 
@@ -32,6 +36,9 @@ class VersionedQuerySet(QuerySet):
             self.active_version = tag
         return super().__call__(q_obj, **query)
 
+    def clear_query(self):
+        return self._document.objects()
+
     def select_version(self, tag: str) -> 'VersionedQuerySet':
         """ Filter the collection for the given tag and set active_version """
         # Todo: do we need to clear any existing calls here?
@@ -40,6 +47,126 @@ class VersionedQuerySet(QuerySet):
     def select_tag(self, tag: str) -> 'VersionedQuerySet':
         """ alias for select_version """
         return self.select_version(tag)
+
+    def delete(self, *args, bypass_version_control: bool = False, **kwargs):
+        """ Override base delete if active_version is set """
+        if self.active_version is not None and not bypass_version_control:
+            # instead of directly deleting, pull the currently active tag from
+            # all documents matching the filter. Then delete all documents
+            # with empty version_tags
+            qs = self.clone()
+            count = qs.update(pull__version_tags=self.active_version,
+                              bypass_version_control=True)
+            # empty version tags objects are deleted by the update call
+            return count
+        # TODO: should this cause an error? how to prevent accidental
+        # TODO: where to check if version is protected?
+        return super().delete(*args, **kwargs)
+
+    def prepare_edit(self) -> List[ObjectId]:
+        """ Find all documents matching the current query with more than
+        one version_tag. Pop the current active_version from that document,
+        then clone a new document with the same original_id and only the
+        active version.
+
+        Returns a list of the original_ids for all updated objects
+        """
+        if self.active_version is None:
+            raise ValueError("Must set active_version before prepare_edit")
+
+        qs = self.clone()
+        # TODO: possible race condition, this should be a transaction
+        # we have to save the IDs here because after the pull, those
+        # documents won't match the query anymore
+        tobefixed = qs(version_tags__1__exists=True).scalar('id',
+                                                            'original_id')
+        if not tobefixed:
+            return []
+        tobefixed, originalids = list(zip(*tobefixed))
+        qs = qs.clear_query().filter(id__in=tobefixed)
+        qs.update(pull__version_tags=self.active_version,
+                  bypass_version_control=True, bypass_reverse_delete=True)
+        qs.aggregate([{'$project': {'_id': 0}},
+                      {'$set': {'version_tags': [self.active_version],
+                                }
+                       },
+                      {'$merge': qs._collection.name}
+                      ])
+        return originalids
+
+    def handle_reverse_delete(self, write_concern=None):
+        # this is copied straight from BaseQueryset
+        queryset = self.clone()
+        doc = queryset._document
+        delete_rules = doc._meta.get("delete_rules") or {}
+        delete_rules = list(delete_rules.items())
+        tag_query = dict()
+        if self.active_version is not None:
+            tag_query['version_tags'] = self.active_version
+        for rule_entry, rule in delete_rules:
+            document_cls, field_name = rule_entry
+            if document_cls._meta.get("abstract"):
+                continue
+
+            if rule == CASCADE:
+                cascade_refs = set()
+                # Handle recursive reference
+                if doc._collection == document_cls._collection:
+                    for ref in queryset:
+                        cascade_refs.add(ref.id)
+                refs = document_cls.objects(**tag_query,
+                    **{field_name + "__in": self, "pk__nin": cascade_refs}
+                )
+                if refs.count() > 0:
+                    refs.delete(write_concern=write_concern,
+                                cascade_refs=cascade_refs)
+            elif rule == NULLIFY:
+                document_cls.objects(**{field_name + "__in": self},
+                                     **tag_query).update(
+                    write_concern=write_concern,
+                    **{"unset__%s" % field_name: 1}
+                )
+            elif rule == PULL:
+                document_cls.objects(**{field_name + "__in": self},
+                                     **tag_query).update(
+                    write_concern=write_concern,
+                    **{"pull_all__%s" % field_name: self}
+                )
+
+    def update(self, *args, bypass_version_control: bool = False,
+               bypass_reverse_delete: bool = False, **kwargs):
+        """ If trying to update a document with multiple version tags,
+        we need to remove the active_version and switch to upsert.
+        This will almost certainly cause problems if the update arguments
+        don't fully-specify the document or rely on ID
+        """
+        if self.active_version is not None and not bypass_version_control:
+            originalids = self.prepare_edit()
+            if originalids and '_id' in self._query or 'id' in self._query:
+                raise KeyError("Can't update on id with multiple versions")
+            kwargs['inc__revision'] = 1
+            kwargs['set__modified'] = datetime.datetime.now()
+
+        delete_after = False
+        if 'pull__version_tags' in kwargs:
+            delete_after = True
+            if not bypass_reverse_delete:
+                # removing a version tag is equivalent to deleting
+                write_concern=kwargs.get('write_concern')
+                self.handle_reverse_delete(write_concern=write_concern)
+
+        count = super().update(*args, **kwargs)
+        if count and delete_after:
+            # remove any object with empty version_tags
+            self._collection.delete_many({'version_tags': {'$size': 0}})
+        return count
+
+    def modify(self, *args, bypass_version_control: bool = False, **kwargs):
+        if self.active_version is not None and not bypass_version_control:
+            self.prepare_edit()
+            kwargs['inc__revision'] = 1
+            kwargs['set__modified'] = datetime.datetime.now()
+        return super().modify(*args, **kwargs)
 
 
 class VersionedDocument(Document):
@@ -64,7 +191,10 @@ class VersionedDocument(Document):
     revision = IntField(default=0)
     modified = DateTimeField(default=datetime.datetime.now)
 
-    meta = {'abstract': True, 'queryset_class': VersionedQuerySet}
+    enteredby = StringField(verbose_name="Data entered by")
+
+    meta = {'abstract': True, 'queryset_class': VersionedQuerySet,
+            'indexes': ['version_tags'],}
 
     def __init__(self, *args, version_tag: Optional[str] = None,
                  active_version: Optional[str] = None, **kwargs):
@@ -115,15 +245,15 @@ class VersionedDocument(Document):
         """ Create a new collection-wide version tag. For every document
         in the collection with `fromtag`, add `newtag` to its tags list.
         """
-        cls.objects(version_tags=fromtag).update(push__version_tags=newtag)
+        cls.objects(version_tags=fromtag).update(bypass_version_control=True,
+                                                 push__version_tags=newtag)
 
     @classmethod
     def delete_tag(cls, tag: str) -> None:
         """ Remove the version tag `tag` from all documents in the collection
         If any documents contain *only* this tag, they are deleted.
         """
-        cls.objects(version_tags=tag, version_tags__size=1).delete()
-        cls.objects(version_tags=tag).update(pull__version_tags=tag)
+        cls.objects.select_tag(tag).delete()
 
     @classmethod
     def list_tags(cls) -> List[str]:
@@ -140,6 +270,10 @@ class VersionedDocument(Document):
         """ See `VersionedQuerySet.select_tag` """
         return cls.objects.select_tag(tag)
 
+    @classmethod
+    def get_default_tag(cls):
+        return cls._DEFAULT_TAG
+
     def clean(self) -> None:
         """ called during validation.
         Make sure original_id and active_version are both set
@@ -149,9 +283,28 @@ class VersionedDocument(Document):
         if self.active_version is None:
             raise ValidationError("active_version must be set before saving")
 
+    @property
+    def _object_key(self):
+        """ If active_version is set, replace 'pk' in object key with
+        original_id and version_tags.  This is so that when we call
+        `delete`, the internally-generated queryset will have an
+        active_version set, so will respect version control properly.
 
-class VersionedDynamicDocument(VersionedDocument):
+        If this contains a shard key it will probably not work...
+        """
+        select_dict = super()._object_key
+        # note we check the private _active_version so objects with only one
+        # version tag still reference by pk
+        if self._active_version is not None:
+            select_dict.pop('pk', None)
+            select_dict['original_id'] = self.original_id
+            select_dict['version_tags'] = self._active_version
+        return select_dict
+
+
+class DynamicVersionedDocument(VersionedDocument):
     _dynamic = True
+    meta = {'abstract': True, 'queryset_class': VersionedQuerySet}
 
     def __delattr__(self, *args, **kwargs):
         """Delete the attribute by setting to None and allowing _delta
@@ -174,20 +327,15 @@ def pre_save_post_validation(sender, document=None, created=False, **kwargs):
     if document is None or not isinstance(document, VersionedDocument):
         return
     # if this version already exists in the db with multiple tags,
-    # we need to remove this tag from the previous
-    if len(document.version_tags) > 1:
-        newtags = [document.active_version]
-        dbversion = sender.objects(id=document.id)\
-                          .modify(pull__version_tags=document.active_version)
-        if dbversion and not created:
-            # expect to update, so need a new entry
-            dbversion.version_tags = newtags
-            dbversion.id = None
-            dbversion._created = True
-            # TODO: need some error handling
-            sender.objects.insert(dbversion)
-            document.id = dbversion.id
-        document.version_tags = newtags
+    # we need to remove this tag from the previous, create a new one,
+    # and update our ID to match the new one
+    if not created and len(document.version_tags) > 1:
+        sender.select_tag(document.active_version)\
+              .filter(id=document.id).prepare_edit()
+        document.id = sender.select_tag(document.active_version)\
+                            .filter(original_id=document.original_id)\
+                            .scalar('id').get()
+        document.version_tags = [document.active_version]
     document.revision += 1
     document.modified = datetime.datetime.now()
 
@@ -203,6 +351,7 @@ class VersionedReferenceField(ReferenceField):
 
     Reverse delete rules have not been tested and will probably not work!
     """
+    # TODO: handle reverse_delete_rules
     def __init__(self, document_type, *args, **kwargs):
         if not isinstance(document_type, str) and not issubclass(
             document_type, VersionedDocument
@@ -248,3 +397,36 @@ class VersionedReferenceField(ReferenceField):
             document = DBRef(document._get_collection_name(),
                              document.original_id)
         return super().to_mongo(document)
+
+
+"""
+        I thought this would be a good way to do it atomically, but now I'm
+        not sure if it would work at all
+
+        qs = self.clone()
+        filt = {'input': '$version_tags',
+                'as': 'this',
+                'cond': {'$ne': ['$$this', self.active_version]},
+                }
+        qs(version_tags__size__gt=1).aggregate([
+            # split version_tags into nested arrays with active and others
+            {'$set': {'version_tags': [[self.active_version],
+                                       {'$filter': filt}]},
+            # make a new document for active
+            {'$unwind': '$version_tags'},
+            # delete the _id for the active tag
+            {'$set': {'_id': {'$cond': {
+                'if': {'$eq': ['$version_tags', [self.active_version]]},
+                'then': '$$REMOVE',
+                'else': '$_id',
+                },
+             },
+             # write back to the collection, copying the  new document
+             # and upating tags on old
+             # this will attempt to merge the whole thing, is that
+             # inefficient, compared to update?
+             # plus if the new insert happens before the merge, it will
+             # violate unique constraints...
+             {'$merge': self._collection.name}
+            ])
+        """

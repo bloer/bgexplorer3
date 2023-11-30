@@ -23,6 +23,7 @@ dependencies = [
     "pint",
     "blinker",
     "mongoengine",
+    "mendeleev",
 ]
 
 [project.optional-dependencies]

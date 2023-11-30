@@ -18,7 +18,7 @@ class NormMultiplier(Enum):
     flux = 'flux'
     flux_per_sr = 'flux_per_sr'
     none = 'none'
-    
+
     @property
     def units(self):
         unitstr = None
@@ -30,8 +30,12 @@ class NormMultiplier(Enum):
             unitstr = '1/s/cm**2/sr'
         return unitreg(unitstr)
 
+    def check(self, emissionrate):
+        """ check if emissionrate has the right units """
+        return self.units.check(emissionrate)
+
 class HitEfficiency(DynamicDocument):
-    """ Document describing how efficiently radiation from a given source at 
+    """ Document describing how efficiently radiation from a given source at
     a given location is converted to hits in the sensitive detector. Usually
     these are produced by Monte Carlo simulations. This is a DynamicDocument
     so any metadata is permitted
@@ -43,21 +47,21 @@ class HitEfficiency(DynamicDocument):
        distribution (str): whether the source is distributed in the bulk,
                            on a surface, or some other way
        norm (NormMultiplier): To convert HitEfficiency to rates in detector,
-                              multiply by emission rate in some units, 
+                              multiply by emission rate in some units,
                               usually 'rate' (decays/s), but can be
                               'flux' (primaries/s/cm**2)
-                              'flux_per_sr' (primaries/s/cm**2/sr) or 
+                              'flux_per_sr' (primaries/s/cm**2/sr) or
                               'none' (HitEff is absolutely normalized)
        values (dict): Single-value hit efficiencies (as asymmetric uncertainties
                       with units), such as integral counts over some ROI
        spectra (dict): histograms of hit efficiencies
-    
+
     Suggested metadata:
        nprimaries: number of primary particles simulated
-       primary_spectrum: filename or representation of the spectrum of 
+       primary_spectrum: filename or representation of the spectrum of
                          particles thrown e.g. simulating (alpha,n) neutrons
-       primary_particle: name of primary particle 
-       primary_yield: when simulating e.g. neutrons or equilibrium gammas, the 
+       primary_particle: name of primary particle
+       primary_yield: when simulating e.g. neutrons or equilibrium gammas, the
               average neutrons or gammas emitted per parent isotope decay
        biasweight: any biasing applied to the simulation
        livetime: In rare cases the simulation or spectrum is absolutely
@@ -70,21 +74,21 @@ class HitEfficiency(DynamicDocument):
 
     If nprimaries is provided, the simulation livetime will be displayed where
     appropriate as (nprimaries*biasweight / (emissionrate*yield))
-    
-    Queries against the database are made against (source, location, distr.). 
-    Multiple responses are grouped by (primary_particle, primary_spectrum). 
-    So e.g. 
+
+    Queries against the database are made against (source, location, distr.).
+    Multiple responses are grouped by (primary_particle, primary_spectrum).
+    So e.g.
     """
     # required metadata and results
     source = StringField(required=True)
     location = StringField(required=True)
     distribution = StringField(required=False, default='bulk')
     norm = EnumField(NormMultiplier, required=False, default='rate')
-    values = MapField(UncertainQuantityField(allownone=True), 
+    values = MapField(UncertainQuantityField(allownone=True),
                       required=False, default=dict)
     spectra = MapField(HistogramField(allownone=True),
                        required=False, default=dict)
-    
+
     # book-keeping
     revision = IntField(required=True, default=-1)
     created = DateTimeField(required=True, default=datetime.datetime.now)
@@ -101,15 +105,22 @@ class HitEfficiency(DynamicDocument):
     files = SortedListField(StringField(), required=False)
     uuids = SortedListField(UUIDField(), required=False)
     date = DynamicField(required=False)
-    
+
     # for internal use
     values_keys = ListField(StringField())
     spectra_keys = ListField(StringField())
-    
+
     meta = {
         'indexes': ['location', 'distribution', 'source', 'version', 'date',
                     'values_keys', 'spectra_keys']
     }
+
+    def __init__(self, *args, **kwargs):
+        """ Set an ID on all values and spectra to track correlations """
+        for key, val in self.values.items():
+            val.id = '.'.join([str(self.id), 'v', key])
+        for key, val in self.spectra.items():
+            val.id = '.'.join([str(self.id), 's', key])
 
     def clean(self):
         self.values_keys = list(self.values)
@@ -124,15 +135,25 @@ class HitEfficiency(DynamicDocument):
     def get_livetime(self, emissionrate=None):
         if self.livetime is not None:
             return self.livetime
+        # discard uncertainties
         try:
-            return (self.nprimaries * self.biasweight / 
+            if emissionrate.isupperlimit():
+                emissionrate = emissionrate.get_upper_limit() * emissionrate.u
+            else:
+                emissionrate = emissionrate.nominal_value * emissionrate.u
+        except AttributeError:
+            # emissionrate is None
+            pass
+
+        try:
+            return (self.nprimaries * self.biasweight /
                     (emissionrate * self.primary_yield))
         except (AttributeError, TypeError):
             # nprimaries not provided
             pass
         except Exception:
             key = (self.location, self.distribution, self.source)
-            log.error("Error calculating livetime for HitEfficiency %s", 
+            log.error("Error calculating livetime for HitEfficiency %s",
                       self.key)
         return None
 
@@ -163,9 +184,9 @@ class HitEffDbConfig(Document):
 
     @property
     def display_columns(self):
-        return ['source', 'location', 'primary_particle', 'nprimaries', 
+        return ['source', 'location', 'primary_particle', 'nprimaries',
                 'livetime'] + self.extra_columns
-    
+
     @property
     def collection_name(self):
         return '.'.join('hitefficiency', self.name)
@@ -193,7 +214,7 @@ class HitEffDbConfig(Document):
         return hiteff
 
     def validate_json(self, hiteff: str, convert: bool = True):
-        """ validate entry from json represencation. 
+        """ validate entry from json represencation.
         If 'convert' is True (default), convert units"""
         try:
             entry = HitEfficiency.from_json(hiteff)
@@ -201,7 +222,7 @@ class HitEffDbConfig(Document):
             raise ValidationError from e
         return self.validate_entry(eff, convert)
 
-    def find_entries(self, source: str, location: str, 
+    def find_entries(self, source: str, location: str,
                      distribution: Optional[str] = None,
                      idonly: bool = False, includespectra: bool = False):
         """ Find results in the database in the right collection
@@ -218,7 +239,7 @@ class HitEffDbConfig(Document):
             result = result.exclude('spectra')
         return result
 
-    def get_entry(self, entryid: Union[str, bson.ObjectId], 
+    def get_entry(self, entryid: Union[str, bson.ObjectId],
                   includespectra: bool=True):
         queryset = self.queryset
         if not includespectra:
@@ -233,9 +254,9 @@ class HitEffDbConfig(Document):
         return entry
 
 
-    def update_from_collection(self, reload: bool = False, 
+    def update_from_collection(self, reload: bool = False,
                                dosave: bool = True) -> 'HitEffDbConfig':
-        """ Inspect the entries in a collection and populate a config entry. 
+        """ Inspect the entries in a collection and populate a config entry.
         This is useful to update the config view based on what's actually
         in the collection
         """
@@ -253,4 +274,4 @@ class HitEffDbConfig(Document):
             self.save()
         return self
 
-    
+
