@@ -1,17 +1,24 @@
 from mongoengine import Document, DynamicDocument, EmbeddedDocument
 from mongoengine.fields import (StringField, MapField, UUIDField, ListField,
                                 SortedListField, IntField, DynamicField,
-                                EnumField, EmbeddedDocumentField, BooleanField)
+                                EnumField, BooleanField, DateTimeField,
+                                FloatField, DictField, EmbeddedDocumentField)
 from mongoengine.errors import ValidationError
 from mongoengine.context_managers import switch_collection
-from .fields import UncertainQuantityField, HistogramField, UnitField
+import bson
+from .verdoc import DynamicVersionedDocument
+from .fields import (QuantityField, UncertainQuantityField, HistogramField,
+                     UnitField)
+from .common import units as unitreg
 from typing import Union, Optional
+from enum import Enum
 import logging
 import datetime
 log = logging.getLogger(__name__)
 
 
 dbalias = "hiteffdb"
+
 
 class NormMultiplier(Enum):
     rate = 'rate'
@@ -34,7 +41,8 @@ class NormMultiplier(Enum):
         """ check if emissionrate has the right units """
         return self.units.check(emissionrate)
 
-class HitEfficiency(DynamicDocument):
+
+class HitEfficiency(DynamicVersionedDocument):
     """ Document describing how efficiently radiation from a given source at
     a given location is converted to hits in the sensitive detector. Usually
     these are produced by Monte Carlo simulations. This is a DynamicDocument
@@ -52,7 +60,7 @@ class HitEfficiency(DynamicDocument):
                               'flux' (primaries/s/cm**2)
                               'flux_per_sr' (primaries/s/cm**2/sr) or
                               'none' (HitEff is absolutely normalized)
-       values (dict): Single-value hit efficiencies (as asymmetric uncertainties
+       values (dict): Single-value hit efficiencies (as asym. uncertainties
                       with units), such as integral counts over some ROI
        spectra (dict): histograms of hit efficiencies
 
@@ -105,6 +113,7 @@ class HitEfficiency(DynamicDocument):
     files = SortedListField(StringField(), required=False)
     uuids = SortedListField(UUIDField(), required=False)
     date = DynamicField(required=False)
+    metadata = DictField()
 
     # for internal use
     values_keys = ListField(StringField())
@@ -152,7 +161,6 @@ class HitEfficiency(DynamicDocument):
             # nprimaries not provided
             pass
         except Exception:
-            key = (self.location, self.distribution, self.source)
             log.error("Error calculating livetime for HitEfficiency %s",
                       self.key)
         return None
@@ -176,10 +184,8 @@ class HitEffDbConfig(Document):
     """ Configure the HitEfficiency database """
     name = StringField(required=True, default='default', unique=True)
     match_distribution = BooleanField(required=False, default=True)
-    #display_values = EmbeddedDocumentListField(HitEffConfig())
-    #display_spectra = EmbeddedDocumentListField(HitEffConfig())
-    display_values = MapField(HitEffConfig(), required=True)
-    display_spectra = MapField(HitEffConfig(), required=True)
+    display_values = MapField(EmbeddedDocumentField(HitEffConfig), required=True)
+    display_spectra = MapField(EmbeddedDocumentField(HitEffConfig), required=True)
     extra_columns = ListField(StringField(), required=False, default=list)
 
     @property
@@ -206,9 +212,9 @@ class HitEffDbConfig(Document):
                 if result is None:
                     continue
                 testval = result.u * hiteff.norm.units
-                if not.testval.is_compatible_with(config.display_unit):
+                if not testval.is_compatible_with(config.display_unit):
                     raise ValidationError(f"Entry {config.key} in {hiteff.key}"
-                                           " has wrong units {result.u}")
+                                          f" has wrong units {result.u}")
                 if convert:
                     entrylist[config.key] = result.to(config.display_unit)
         return hiteff
@@ -217,7 +223,7 @@ class HitEffDbConfig(Document):
         """ validate entry from json represencation.
         If 'convert' is True (default), convert units"""
         try:
-            entry = HitEfficiency.from_json(hiteff)
+            eff = HitEfficiency.from_json(hiteff)
         except Exception as e:
             raise ValidationError from e
         return self.validate_entry(eff, convert)
@@ -226,7 +232,7 @@ class HitEffDbConfig(Document):
                      distribution: Optional[str] = None,
                      idonly: bool = False, includespectra: bool = False):
         """ Find results in the database in the right collection
-        if `idonly` is True, return only the id attribute and not the doc itself
+        if `idonly` is True, return only the id attribute and not doc itself
         if `includespectra` is False, spectra are omitted
         """
         query = dict(source=str(source), location=str(location))
@@ -240,7 +246,7 @@ class HitEffDbConfig(Document):
         return result
 
     def get_entry(self, entryid: Union[str, bson.ObjectId],
-                  includespectra: bool=True):
+                  includespectra: bool = True):
         queryset = self.queryset
         if not includespectra:
             queryset = queryset.exclude('spectra')
@@ -252,7 +258,6 @@ class HitEffDbConfig(Document):
         with switch_collection(HitEfficiency, self.collection_name):
             entry.save()
         return entry
-
 
     def update_from_collection(self, reload: bool = False,
                                dosave: bool = True) -> 'HitEffDbConfig':
@@ -273,5 +278,3 @@ class HitEffDbConfig(Document):
         if dosave:
             self.save()
         return self
-
-

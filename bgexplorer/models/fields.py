@@ -100,6 +100,9 @@ class UnitField(BaseField):
         if not isinstance(value, pint.Unit):
             self.error(f"{value} is not a pint Unit")
 
+    def prepare_query_value(self, op, value):
+        return self.to_mongo(value)
+
 
 # regexes to test asymmetric quantities
 _refloat = r'([0-9.]+(?:[eE][+-]?\d+)?)'
@@ -221,6 +224,9 @@ class QuantityField(BaseField):
             self.error(f'Value must have units compatible with {self.units}')
         if self.forceasym and not isinstance(value.m, AsymmetricError):
             self.error('Numeric part of quantity must be an AsymmetricError')
+
+    def prepare_query_value(self, op, value):
+        return self.to_mongo(value)
 
 
 class UncertainQuantityField(QuantityField):

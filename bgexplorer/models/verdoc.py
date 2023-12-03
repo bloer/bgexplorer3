@@ -63,36 +63,42 @@ class VersionedQuerySet(QuerySet):
         # TODO: where to check if version is protected?
         return super().delete(*args, **kwargs)
 
-    def prepare_edit(self) -> List[ObjectId]:
+    def prepare_edit(self) -> 'VersionedQuerySet':
         """ Find all documents matching the current query with more than
         one version_tag. Pop the current active_version from that document,
         then clone a new document with the same original_id and only the
         active version.
 
-        Returns a list of the original_ids for all updated objects
+        Returns a queryset pointing to the same objects refernced by
+        (original_id, version_tags=active_version)
         """
         if self.active_version is None:
             raise ValueError("Must set active_version before prepare_edit")
 
-        qs = self.clone()
         # TODO: possible race condition, this should be a transaction
-        # we have to save the IDs here because after the pull, those
-        # documents won't match the query anymore
-        tobefixed = qs(version_tags__1__exists=True).scalar('id',
-                                                            'original_id')
-        if not tobefixed:
-            return []
-        tobefixed, originalids = list(zip(*tobefixed))
-        qs = qs.clear_query().filter(id__in=tobefixed)
-        qs.update(pull__version_tags=self.active_version,
-                  bypass_version_control=True, bypass_reverse_delete=True)
-        qs.aggregate([{'$project': {'_id': 0}},
-                      {'$set': {'version_tags': [self.active_version],
-                                }
-                       },
-                      {'$merge': qs._collection.name}
-                      ])
-        return originalids
+
+        # first, get the list of matching objects before we mess with things
+        matchids = list(self.scalar('original_id'))
+        # if not matchids:
+        #    return self.clear_query().none()
+
+        response = self.clear_query().filter(original_id__in=matchids,
+                                             version_tags=self.active_version)
+
+        # now find all matches with more than 1 version tag. Update the
+        # existing one to remove the active version, then create a clone
+        # with a new ID and active_version
+        tobefixed = list(response(version_tags__1__exists=True).scalar('id'))
+        if tobefixed:
+            qs = self.clear_query()(id__in=tobefixed)
+            qs.update(pull__version_tags=self.active_version,
+                      bypass_version_control=True,
+                      bypass_reverse_delete=True)
+            qs.aggregate([{'$unset': '_id'},
+                          {'$set': {'version_tags': [self.active_version]}},
+                          {'$merge': qs._collection.name},
+                          ])
+        return response
 
     def handle_reverse_delete(self, write_concern=None):
         # this is copied straight from BaseQueryset
@@ -100,13 +106,14 @@ class VersionedQuerySet(QuerySet):
         doc = queryset._document
         delete_rules = doc._meta.get("delete_rules") or {}
         delete_rules = list(delete_rules.items())
-        tag_query = dict()
-        if self.active_version is not None:
-            tag_query['version_tags'] = self.active_version
         for rule_entry, rule in delete_rules:
             document_cls, field_name = rule_entry
             if document_cls._meta.get("abstract"):
                 continue
+            tag_query = dict()
+            if (self.active_version is not None and
+                    issubclass(document_cls, VersionedDocument)):
+                tag_query['version_tags'] = self.active_version
 
             if rule == CASCADE:
                 cascade_refs = set()
@@ -114,7 +121,8 @@ class VersionedQuerySet(QuerySet):
                 if doc._collection == document_cls._collection:
                     for ref in queryset:
                         cascade_refs.add(ref.id)
-                refs = document_cls.objects(**tag_query,
+                refs = document_cls.objects(
+                    **tag_query,
                     **{field_name + "__in": self, "pk__nin": cascade_refs}
                 )
                 if refs.count() > 0:
@@ -140,10 +148,9 @@ class VersionedQuerySet(QuerySet):
         This will almost certainly cause problems if the update arguments
         don't fully-specify the document or rely on ID
         """
+        qs = self.clone()
         if self.active_version is not None and not bypass_version_control:
-            originalids = self.prepare_edit()
-            if originalids and '_id' in self._query or 'id' in self._query:
-                raise KeyError("Can't update on id with multiple versions")
+            qs = self.prepare_edit()
             kwargs['inc__revision'] = 1
             kwargs['set__modified'] = datetime.datetime.now()
 
@@ -152,21 +159,23 @@ class VersionedQuerySet(QuerySet):
             delete_after = True
             if not bypass_reverse_delete:
                 # removing a version tag is equivalent to deleting
-                write_concern=kwargs.get('write_concern')
-                self.handle_reverse_delete(write_concern=write_concern)
+                write_concern = kwargs.get('write_concern')
+                qs.handle_reverse_delete(write_concern=write_concern)
 
-        count = super().update(*args, **kwargs)
+        count = QuerySet.update(qs, *args, **kwargs)
         if count and delete_after:
             # remove any object with empty version_tags
             self._collection.delete_many({'version_tags': {'$size': 0}})
         return count
 
     def modify(self, *args, bypass_version_control: bool = False, **kwargs):
+        qs = self.clone()
         if self.active_version is not None and not bypass_version_control:
-            self.prepare_edit()
+            qs = self.prepare_edit()
             kwargs['inc__revision'] = 1
             kwargs['set__modified'] = datetime.datetime.now()
-        return super().modify(*args, **kwargs)
+        # TODO: this doesn't handle most of modify's args
+        return QuerySet.modify(qs, *args, **kwargs)
 
 
 class VersionedDocument(Document):
@@ -194,7 +203,8 @@ class VersionedDocument(Document):
     enteredby = StringField(verbose_name="Data entered by")
 
     meta = {'abstract': True, 'queryset_class': VersionedQuerySet,
-            'indexes': ['version_tags'],}
+            'indexes': ['version_tags'],
+            }
 
     def __init__(self, *args, version_tag: Optional[str] = None,
                  active_version: Optional[str] = None, **kwargs):

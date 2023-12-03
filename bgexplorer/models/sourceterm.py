@@ -1,13 +1,23 @@
-from functools import cached_property
+from functools import cached_property, reduce
+import operator
+import mongoengine
 from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
-                         StringField, BooleanField, MapField,
-                         SortedListField, CASCADE)
+                         StringField, BooleanField, MapField, Document,
+                         SortedListField, CASCADE, PULL, ReferenceField)
 from .verdoc import VersionedDocument, VersionedReferenceField
+from .component import Component, Placement, Assembly
+from .emissionspec import EmissionSpec, EmissionSource, Multiplier
+from .fields import QuantityField, UncertainQuantityField, HistogramField
+from .hiteff import HitEfficiency
+from .isotope import concentration_to_rate
+from .common import units, addnone, multnone
+
+from typing import List
 
 
 class SourceTerm(VersionedDocument):
     # these fields are keys used for finding SourceTerms in the db
-    assemblyRoot = VersionedReferenceField(Component,
+    assemblyRoot = VersionedReferenceField(Component, required=True,
                                            reverse_delete_rule=CASCADE)
     assemblyPath = ListField(VersionedReferenceField(Placement),
                              reverse_delete_rule=CASCADE)
@@ -25,7 +35,7 @@ class SourceTerm(VersionedDocument):
     livetimes = ListField(QuantityField)
     # partially denormalized info
     # emissionrate = UncertainQuantityField(required=True)
-    componentName = Stringfield()
+    componentName = StringField()
     assemblyPathStr = StringField()
 
     meta = {'indexes': ['assemblyPath', 'source.id', 'hiteffs']}
@@ -39,16 +49,17 @@ class SourceTerm(VersionedDocument):
 
     @cached_property
     def emissionrate(self):
-        if self.rate is None:
+        if self.source.rate is None:
             return None
-        rate = self.rate
+        rate = self.source.rate
         # convert ppb-like units to specific activity
         if (self.source.multiplier is Multiplier.mass and
-            rate.u in ('ppt', 'ppb', 'ppq', 'percent')):
+                rate.u in ('ppt', 'ppb', 'ppq', 'percent')):
             rate = concentration_to_rate(rate, self.source.name)
         return rate * self.weight * self.rate_multiplier
 
     def clean(self):
+        super().clean()
         self.clear_results()
         # TODO: should these be cached properties rather than set by clean?
         # location is set by the component or placement closest to the leaf
@@ -61,7 +72,7 @@ class SourceTerm(VersionedDocument):
         # override distribution based on component settings
         self.distribution = self.source.multiplier.default_distribution()
         if (self.component.treat_surface_as_bulk
-            and self.distribution.find('surface') != -1:
+                and self.distribution.find('surface') != -1):
             self.distribution = 'bulk'
 
         self.weight = reduce(operator.mul,
@@ -73,24 +84,27 @@ class SourceTerm(VersionedDocument):
         self.assemblyPathStr = '/'.join([self.assemblyRoot.name] +
                                         [p.name for p in self.assemblyPath])
         # clear cached properties1
-        del self.emissionrate
+        try:
+            del self.emissionrate
+        except AttributeError:
+            pass
         self.livetimes = [hit.get_livetime(self.emissionrate)
                           for hit in self.hiteffs]
 
-    def find_hiteffs(self, replace: bool = True) -> List[MatchedHitEff]:
+    def find_hiteffs(self, replace: bool = True) -> List[HitEfficiency]:
         hits = HitEfficiency.select_version(self.active_version)(
             source=self.source.name,
             location=self.location or self.componentName,
             distribution=self.distribution,
             ).exclude('spectra')
-        erate = self.emissionrate
         hiteffs = list(hits)
 
         if replace:
             self.modify(set__hiteffs=hiteffs,
-                        set__hiteffs_auto=True)
+                        set__hiteffs_auto=True,
                         set__livetimes=[hit.get_livetime(self.emissionrate)
-                                        for hit in hiteffs]
+                                        for hit in hiteffs],
+                        )
         return hiteffs
 
     def clear_results(self):
@@ -107,21 +121,30 @@ class SourceTerm(VersionedDocument):
         Returns the upserted entry without modifying self
         """
         self.validate()
-        assemblyIds = [c.id for c in self.assemblyPath]
-        query = SourceTerm.objects(version_tag=self.active_version,
+        query = SourceTerm.objects(version_tags=self.active_version,
                                    assemblyRoot=self.assemblyRoot,
-                                   source__id=source.id,
+                                   source__id=self.source.id,
                                    spec=self.spec)
         if self.assemblyPath:
             query = query(assemblyPath__0=self.assemblyPath[0])
-        st = query.upsert_one(
-                              set__location=self.location,
-                              set__distribution=self.distribution,
-                              set__weight=self.weight,
-                              set__rate_multiplier=self.rate_multiplier,
-                              set__componentName=component.name,
-                              set__assemblyPathStr=self.assemblyPathStr,
-                              )
+        update_dict = dict(set_on_insert__id=self.id,
+                           set_on_insert__original_id=self.original_id,
+                           set_on_insert__version_tags=[self.active_version],
+                           set_on_insert__assemblyRoot=self.assemblyRoot,
+                           set_on_insert__assemblyPath=self.assemblyPath,
+                           set_on_insert__spec=self.spec,
+                           set__source=self.source,
+                           set__location=self.location,
+                           set__distribution=self.distribution,
+                           set__weight=self.weight,
+                           set__rate_multiplier=self.rate_multiplier,
+                           set__componentName=self.component.name,
+                           set__assemblyPathStr=self.assemblyPathStr,
+                           )
+        if not self.hiteffs_auto:
+            update_dict['set__hiteffs_auto'] = self.hiteffs_auto
+            update_dict['set__hiteffs'] = self.hiteffs
+        st = query.upsert_one(**update_dict)
         st.clear_results()
         if update_hiteffs and st.hiteffs_auto:
             st.find_hiteffs()
@@ -147,6 +170,8 @@ class SourceTerm(VersionedDocument):
                         assemblyPath=[placement] + chsource.assemblyPath,
                         source=chsource.source,
                         spec=chsource.spec,
+                        hiteffs_auto=chsource.hiteffs_auto,
+                        hiteffs=chsource.hiteffs,
                         ).upsert()
         return st
 
@@ -179,8 +204,8 @@ class CalculatedResults(Document):
 
     @classmethod
     def _from_hiteff(cls, sourceterm: SourceTerm, hiteff: HitEfficiency
-        ) -> 'CalculatedResults':
-            erate = sourceterm.emissionrate
+                     ) -> 'CalculatedResults':
+        erate = sourceterm.emissionrate
         if not hiteff.norm.check(erate):
             raise units.DimensionalityError("incompatible emissionrate units")
         return cls(values={key: multnone(val,  erate) for key, val in
@@ -197,7 +222,7 @@ class CalculatedResults(Document):
 
     @classmethod
     def from_sourceterm(cls, sourceterm: SourceTerm, allowcache: bool = True
-        ) -> 'CalculatedResults':
+                        ) -> 'CalculatedResults':
         """ Calculalte all results for a single SourceTerm """
         if allowcache and (result := cls.from_db([sourceterm]) is not None):
             return result
@@ -216,20 +241,16 @@ class CalculatedResults(Document):
                    cls())
 
 
-
-def recursive_update(component):
-    """ After component is updated, update all assemblies containing it """
-    for parent in Assembly.select_version(component.active_version)(
-            children__component=component):
-        update_assembly(parent, component)
-
-def update_component(component):
+def update_component(sender, document, **kwargs):
+    component = document
     # first, generate the list of all source terms for this component
     sourceterms = []
-    for spec in component.reference_specs + [component]:
+    for spec in list(component.reference_specs) + [component]:
         for source in spec.sources:
-            spec=spec if spec is not component else None,
-            sourceterms.append(from_component_source(component, source, spec))
+            spec = spec if spec is not component else None
+            sourceterms.append(SourceTerm.from_component_source(component,
+                                                                source, spec)
+                               )
     # remove any that didn't match
     SourceTerm.objects(
         version_tags=component.active_version,
@@ -240,16 +261,21 @@ def update_component(component):
 
     # do we calculate the result now, or do it on demand?
     # update all assemblies containing us
-    recursive_update(component)
+    for parent in component.find_parents():
+        update_assembly(sender=None, document=parent, component=component)
     return sourceterms
 
-def update_assembly(assembly, component=None):
+
+def update_assembly(sender, document, component=None, placement=None,
+                    **kwargs):
+    assembly = document
     sourceterms = []
-    for child in self.children:
-        if component and child.component.id != component.id:
+    for child in assembly.children:
+        if (component and child.component.id != component.id or
+            placement and child.id != placement.id):
             continue
         childterms = SourceTerm.select_version(assembly.active_version)(
-            assemblyPath__0__id=child.id,
+            assemblyRoot=child.component,
             )
         for st in childterms:
             sourceterms.append(SourceTerm.from_placement(st, assembly, child))
@@ -260,11 +286,27 @@ def update_assembly(assembly, component=None):
         query = query(assemblyPath__0__component=component)
     query(id__nin=[st.id for st in sourceterms]).delete()
 
-def update_emissionspec(spec):
+    for parent in assembly.find_parents():
+        update_assembly(sender=None, document=parent, component=assembly)
+
+
+def update_placement(sender, document, **kwargs):
+    # this doesn't work!!
+    placement = document
+    return update_assembly(sender=None, document=placement.parent,
+                           placement=placement)
+
+
+
+def update_emissionspec(sender, document, **kwargs):
+    spec = document
     # find all components that own a reference to us and call update_component
     for component in Component.objects(version_tags=spec.active_version,
                                        reference_specs=spec):
-        update_component(component)
+        update_component(sender=None, document=component)
 
 
-
+mongoengine.signals.post_save.connect(update_component, sender=Component)
+mongoengine.signals.post_save.connect(update_assembly, sender=Assembly)
+mongoengine.signals.post_save.connect(update_emissionspec,
+                                      sender=EmissionSpec)

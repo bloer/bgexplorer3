@@ -1,65 +1,45 @@
-from mongoengine import Document, StringField, EnumField
-from enum import Enum
-
-from fields import QuantityField
-from common import units, validate_unit
-
-class Distribution(Enum):
-    BULK = 'bulk'
-    SURFACE = 'surface'
-    SURFACE_IN = 'surface_in'
-    SURFACE_OUT = 'surface_out'
-    FLUX = 'flux'
-    OTHER = 'other'
+from mongoengine import (EmbeddedDocument, StringField, EmbeddedDocumentField,
+                         EmbeddedDocumentListField)
+from .emissionspec import EmissionSpec
+from .fields import UncertainQuantityField, AttachmentsField
 
 
-class BgSource(Document):
-    name = StringField(max_length=32, required=True)
-    distribution = EnumField(Distribution, default=Distribution.BULK)
-    particle = StringField(max_length=2)
-    spectrum = StringField(max_length=2)
-    rate = QuantityField(required=True)
-    assay = ReferenceField('Assay', reverse_delete_rule=CASCADE)
-    generated_from = ReferenceField('BgSource', reverse_delete_rule=CASCADE)
-    weight = FloatField(default=1)
-
-    def clean(self):
-        if self.distribution == Distribution.BULK:
-            validate_unit(self.rate, 'Bq/kg')
-        elif self.distribution in [Distribution.SURFACE,
-                                   Distribution.SURFACE_IN,
-                                   Distribution.SURFACE_OUT]:
-            validate_unit(self.rate, 'Bq/cm**2')
-        elif self.distribution == Distribution.FLUX:
-            try:
-                validate_unit(self.rate, '1/cm**s/s')
-            except ValidationError:
-                validate_unit(self.rate, '1/cm**s/s/sr')
-
-    def generate_extra(self, assay):
-        """ Generate extra BgSources based on an original contaminant.
-        For example, for U238, typically generate spontaneous fission
-        and/or alpha,n neutron spectra or U235.
-        """
-        pass
-
-    def emissionrate(self, component):
-        multiplier = 1
-        if self.distribution == Distribution.BULK:
-            multiplier = component.mass
-        elif self.distribution == Distribution.SURFACE:
-            multiplier = component.surface_area
-        elif self.distribution == Distribution.SURFACE_IN:
-            multiplier = component.surface_in
-        elif self.distribution == Distribution.SURFACE_OUT:
-            multiplier = component.surface_out
-        return self.rate * weight * multiplier
+class SampleInfo(EmbeddedDocument):
+    sampleid = StringField(verbose_name="Sample ID")
+    description = StringField(verbose_name='Description')
+    vendor = StringField(verbose_name='Vendor/producer')
+    partnum = StringField(verbose_name="Vendor part number/identifier")
+    batch = StringField(verbose_name='Batch number/ID')
+    purchased = DateField(verbose_name="Purchase date")
+    received = DateField(verbose_name="Date received")
+    owner = StringField(verbose_name='Sample owner')
+    ownercontact = StringField(verbose_name='Owner contact info')
+    notes = StringField(verbose_name='Additional Notes')
 
 
-class Assay(Document):
-    name = StringField(max_length=32)
-    sources = ListField(ReferenceField(BgSource))
+class MeasurementResult(EmbeddedDocument):
+    label = StringField(required=True)
+    value = UncertainQuantityField(required=True)
 
-    def clean(self):
-        for source in self.sources:
-            source.save()
+
+class MeasurementInfo(EmbeddedDocument):
+    technique = StringField(verbose_name='Measurement technique')
+    institution = StringField(verbose_name='Institution/Location')
+    instrument = StringField(verbose_name='Instrument used')
+    received = SringField(verbose_name="Date sample received")
+    date = StringField(verbose_name='Measurement date')
+    operator = StringField(verbose_name='Operator',
+                           help_text='Name of person who made measurement')
+    operatorcontact = StringField(verbose_name='Operator contact info')
+    notes = StringField(verbose_name='Additional Notes')
+    results = EmbeddedDocumentListField(MeasurementResult)
+
+
+class Assay(EmissionSpec):
+    """ An emission spec based on material or surface assay measurement """
+    sample = EmbeddedDocumentField(SampleInfo,
+                                   verbose_name="Sample Information")
+    measurement = EmbeddedDocumentField(MeasurementResult,
+                                        verbose_name="Measurement details")
+    extra_metadata = DictField()
+    attachments = AttachmentsField()

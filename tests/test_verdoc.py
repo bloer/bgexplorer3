@@ -136,7 +136,6 @@ class TestVersionedDocument(unittest.TestCase):
         self.assertEqual(A.select_tag(A.get_default_tag()).get().name, 'a1 changed')
 
     def test7_modify(self):
-        return
         a1 = A(name="a1").save()
         A.create_tag('v1')
         a1 = A.select_tag(self.default_tag).get()
