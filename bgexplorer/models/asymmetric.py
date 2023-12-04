@@ -385,7 +385,7 @@ class AsymmetricError:
         return "{}".format(self)
 
     def __repr__(self):
-        return f"AsymmetricError({self.serialize(compressarrays=False)})"
+        return f"AsymmetricError{self.serialize(compressarrays=False)}"
 
     # Operator overloads
     # TODO: combine the redundancies here
@@ -831,7 +831,7 @@ class LinearExpression:
         return f'LinearExpression<{len(self.coefficients)} terms>'
 
     def __str__(self):
-        s =  ' + '.join('*'.join([f'({v})' for v in key]+[str(c)])
+        s =  ' + '.join('*'.join([f'({v.id or v})' for v in key]+[str(c)])
                         for key, c in self.coefficients.items())
         return s
 
