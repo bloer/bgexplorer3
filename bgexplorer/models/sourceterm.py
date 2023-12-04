@@ -101,7 +101,7 @@ class SourceTerm(VersionedDocument):
         hiteffs = list(hits)
         if hiteffs and replace:
             self.hiteffs = hiteffs
-            self.hiteffs_auto = False
+            self.hiteffs_auto = True
             self.save()
             #livetimes = [hit.get_livetime(self.emissionrate)
             #             for hit in hiteffs]
@@ -351,13 +351,25 @@ def update_emissionspec(sender, document, **kwargs):
 def update_hiteff(sender, document, **kwargs):
     hiteff = document
     # reverse the usual hiteff query to find all SourceTerms that would match
-    terms = SourceTerm.select_version(hiteff.active_version)(
+    matches = SourceTerm.select_version(hiteff.active_version)(
         hiteffs_auto=True,
         source__name=hiteff.source,
         location=hiteff.location,
         distribution=hiteff.distribution)
-    for st in terms:
+    for st in matches(hiteffs__ne=hiteff):
         st.hiteffs.append(hiteff)
+        # do save instead of push to force recalculation of livetimes
+        # this is so stupidly inefficient, there's got to be a better way
+        st.save()
+    # remove ourselves from any sourceterm that no longer matches
+    toremove = SourceTerm.select_version(hiteff.active_version)(
+        hiteffs_auto=True,
+        hiteffs=hiteff,
+        original_id__nin=matches.scalar('original_id'),
+        )
+    for st in toremove:
+        st.hiteffs = [h for h in st.hiteffs
+                      if h.original_id != hiteff.original_id]
         st.save()
 
 

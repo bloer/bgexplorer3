@@ -269,7 +269,11 @@ class TestSourceTerm(unittest.TestCase):
         self.assertAlmostEqual(val.s0, 10.903300234332724)
         self.assertAlmostEqual(val.s1, 13.212474184422296)
 
-
+        # test that hiteffs are removed appropriately
+        h1.location = 'somewhere else'
+        h1.save()
+        st = SourceTerm.objects(assemblyRoot=c1, source__name='Th232').first()
+        self.assertEqual(len(st.hiteffs), 0)
 
 
 
