@@ -12,7 +12,7 @@ from .hiteff import HitEfficiency
 from .isotope import concentration_to_rate
 from .common import units, addnone, multnone
 
-from typing import List
+from typing import List, Optional
 
 
 class SourceTerm(VersionedDocument):
@@ -32,7 +32,7 @@ class SourceTerm(VersionedDocument):
     hiteffs = ListField(VersionedReferenceField(HitEfficiency,
                                                 reverse_delete_rule=PULL))
     hiteffs_auto = BooleanField(default=True)
-    livetimes = ListField(QuantityField)
+    livetimes = ListField(QuantityField(units='day', allownone=True))
     # partially denormalized info
     # emissionrate = UncertainQuantityField(required=True)
     componentName = StringField()
@@ -69,6 +69,7 @@ class SourceTerm(VersionedDocument):
                              placement.parent.location)
             if self.location:
                 break
+        self.location = self.location or self.assemblyRoot.location
         # override distribution based on component settings
         self.distribution = self.source.multiplier.default_distribution()
         if (self.component.treat_surface_as_bulk
@@ -98,13 +99,17 @@ class SourceTerm(VersionedDocument):
             distribution=self.distribution,
             ).exclude('spectra')
         hiteffs = list(hits)
-
-        if replace:
-            self.modify(set__hiteffs=hiteffs,
-                        set__hiteffs_auto=True,
-                        set__livetimes=[hit.get_livetime(self.emissionrate)
-                                        for hit in hiteffs],
-                        )
+        if hiteffs and replace:
+            self.hiteffs = hiteffs
+            self.hiteffs_auto = False
+            self.save()
+            #livetimes = [hit.get_livetime(self.emissionrate)
+            #             for hit in hiteffs]
+            #print("\n!!!!!!!", hiteffs, livetimes)
+            #self.modify(set__hiteffs=hiteffs,
+            #            set__hiteffs_auto=True,
+            #            set__livetimes=livetimes,
+            #            )
         return hiteffs
 
     def clear_results(self):
@@ -144,6 +149,8 @@ class SourceTerm(VersionedDocument):
         if not self.hiteffs_auto:
             update_dict['set__hiteffs_auto'] = self.hiteffs_auto
             update_dict['set__hiteffs'] = self.hiteffs
+        else:
+            update_dict['set_on_insert__hiteffs_auto'] = True
         st = query.upsert_one(**update_dict)
         st.clear_results()
         if update_hiteffs and st.hiteffs_auto:
@@ -188,6 +195,34 @@ class CalculatedResults(Document):
                                              reverse_delete_rule=CASCADE))
     meta = {'indexes': ['sources']}
 
+    @classmethod
+    def for_component(cls, component: Component,
+                      relativeto: Optional[Component] = None):
+        query = SourceTerm.select_version(component.active_version)
+        if relativeto is None:
+            query = query(assemblyRoot=component)
+        else:
+            placements = Placements.objects(
+                version_tags=component.active_version,
+                component=component)
+            query = query(assemblyRoot=relativeto,
+                          assemblyPath__in=placements)
+        return cls.from_sourceterms(query)
+
+
+    def ito_reduced_units(self):
+        for v in self.values.values():
+            try:
+                v.ito_reduced_units()
+            except AttributeError:
+                pass
+        for v in self.spectra.values():
+            try:
+                v.hist.ito_reduced_units()
+            except AttributeError:
+                pass
+        return self
+
     def __add__(self, other):
         if not isinstance(other, CalculatedResults):
             raise TypeError('CalculatedResults can only add with others')
@@ -200,7 +235,7 @@ class CalculatedResults(Document):
         for key in set(self.spectra).union(other.spectra):
             result.spectra[key] = addnone(self.spectra.get(key),
                                           other.spectra.get(key))
-        return result
+        return result.ito_reduced_units()
 
     @classmethod
     def _from_hiteff(cls, sourceterm: SourceTerm, hiteff: HitEfficiency
@@ -212,7 +247,7 @@ class CalculatedResults(Document):
                            hiteff.values.items() if val is not None},
                    spectra={key: multnone(val, erate) for key, val in
                             hiteff.spectra.items() if val is not None},
-                   )
+                   ).ito_reduced_units()
 
     @classmethod
     def from_db(cls, sourceterms: List[SourceTerm]):
@@ -226,9 +261,14 @@ class CalculatedResults(Document):
         """ Calculalte all results for a single SourceTerm """
         if allowcache and (result := cls.from_db([sourceterm]) is not None):
             return result
-        return sum((cls._from_hiteff(sourceterm, h)
-                    for h in sourceterm.hiteffs),
-                   cls(sources=[sourceterm]))
+        result = sum((cls._from_hiteff(sourceterm, h)
+                      for h in sourceterm.hiteffs),
+                     cls(sources=[sourceterm]))
+        try:
+            result.ito_reduced_units()
+        except AttributeError:
+            pass
+        return result
 
     @classmethod
     def from_sourceterms(cls, sourceterms: List[SourceTerm],
@@ -236,9 +276,14 @@ class CalculatedResults(Document):
         if allowcache and (result := cls.from_db(sourceterms) is not None):
             return result
         # even if subs are cached, re-calculate to pick up correlations
-        return sum((cls.from_sourceterm(st, allowcache=False)
-                    for st in sourceterms),
-                   cls())
+        result = sum((cls.from_sourceterm(st, allowcache=False)
+                      for st in sourceterms),
+                     cls())
+        try:
+            result.ito_reduced_units()
+        except AttributeError:
+            pass
+        return result
 
 
 def update_component(sender, document, **kwargs):
@@ -296,8 +341,6 @@ def update_placement(sender, document, **kwargs):
     return update_assembly(sender=None, document=placement.parent,
                            placement=placement)
 
-
-
 def update_emissionspec(sender, document, **kwargs):
     spec = document
     # find all components that own a reference to us and call update_component
@@ -305,8 +348,21 @@ def update_emissionspec(sender, document, **kwargs):
                                        reference_specs=spec):
         update_component(sender=None, document=component)
 
+def update_hiteff(sender, document, **kwargs):
+    hiteff = document
+    # reverse the usual hiteff query to find all SourceTerms that would match
+    terms = SourceTerm.select_version(hiteff.active_version)(
+        hiteffs_auto=True,
+        source__name=hiteff.source,
+        location=hiteff.location,
+        distribution=hiteff.distribution)
+    for st in terms:
+        st.hiteffs.append(hiteff)
+        st.save()
+
 
 mongoengine.signals.post_save.connect(update_component, sender=Component)
 mongoengine.signals.post_save.connect(update_assembly, sender=Assembly)
 mongoengine.signals.post_save.connect(update_emissionspec,
                                       sender=EmissionSpec)
+mongoengine.signals.post_save.connect(update_hiteff, sender=HitEfficiency)
