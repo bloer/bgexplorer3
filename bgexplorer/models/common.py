@@ -26,9 +26,9 @@ def validate_unit(value, unit, allow_none=True):
 
 def opnone(a, b, op):
     if a is None:
-        return a
-    elif b is None:
         return b
+    elif b is None:
+        return a
     return op(a, b)
 
 def addnone(a, b):
