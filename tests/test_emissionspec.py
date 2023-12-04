@@ -100,4 +100,7 @@ class TestEmission(unittest.TestCase):
         spec.validate()
         self.assertEqual(len(spec.sources), 0)
 
-
+    def test4_rateid(self):
+        # test that emissionrate has an id assigned
+        source = EmissionSource(name="U238", rate="10 +- 0.2 Bq/kg")
+        self.assertEqual(source.rate.id, source.id)
