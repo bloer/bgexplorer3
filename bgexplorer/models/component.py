@@ -47,6 +47,9 @@ class Component(VersionedDocument):
     inner_surface_area = QuantityField(units='m**2', default=0 * units.cm**2)
     outer_surface_area = QuantityField(units='m**2', default=0 * units.cm**2)
     treat_surface_as_bulk = BooleanField(default=False)
+    distribution = StringField(
+        help_text="Override default distribution from rate units"
+    )
 
     location = StringField(
         verbose_name="HitEfficiency Location",
@@ -112,15 +115,15 @@ class Assembly(Component):
             placement.parent = self
             placement.save()
         if self.children:
-            self.mass = self.sumoverchildren('mass')
-            self.volume = self.sumoverchildren('volume')
-            self.inner_surface_area = self.sumoverchildren('inner_surface_area')
-            self.outer_surface_area = self.sumoverchildren('outer_surface_area')
+            for attr in ('mass', 'volume', 'inner_surface_area',
+                         'outer_surface_area'):
+                setattr(self, attr, self.sumoverchildren(attr))
         else:
             self.mass = 0*units.kg
             self.volume = 0*units.m**3
             self.inner_surface_area = 0*units.cm**2
             self.outer_surface_area = 0*units.cm**2
+
 
 def post_save_assembly(sender, document, **kwargs):
     assembly = document
@@ -129,7 +132,9 @@ def post_save_assembly(sender, document, **kwargs):
         original_id__nin=[p.original_id for p in assembly.children]
     ).delete()
 
+
 signals.post_save.connect(post_save_assembly, sender=Assembly)
+
 
 class Placement(VersionedDocument):
     parent = VersionedReferenceField('Assembly', required=True,
