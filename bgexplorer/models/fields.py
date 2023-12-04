@@ -133,7 +133,7 @@ class QuantityField(BaseField):
         if not hasattr(units, 'dimensionality') and units is not None:
             units = unitreg(units)
         self.units = units
-        self.allownone = allownone,
+        self.allownone = allownone
         self.convert = convert
         if self.units is None:
             self.convert = False
@@ -207,7 +207,8 @@ class QuantityField(BaseField):
     def to_mongo(self, value):
         if _fromstr := getattr(value, '_fromstr', None):
             return _fromstr
-
+        if value is None:
+            return value
         result = dict(value=value.m)
         if isinstance(value.m, AsymmetricError):
             result = value.m.todict()
@@ -216,10 +217,10 @@ class QuantityField(BaseField):
         return result
 
     def validate(self, value):
-        if value is None and self.allownone is True:
+        if value is None and self.allownone:
             return
         if not isinstance(value, pint.Quantity):
-            self.error('Value must be a pint Quantity')
+            self.error(f'Value must be a pint Quantity, got {value}')
         if self.units is not None and not value.is_compatible_with(self.units):
             self.error(f'Value must have units compatible with {self.units}')
         if self.forceasym and not isinstance(value.m, AsymmetricError):
