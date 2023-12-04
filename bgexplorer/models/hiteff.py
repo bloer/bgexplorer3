@@ -91,16 +91,12 @@ class HitEfficiency(DynamicVersionedDocument):
     source = StringField(required=True)
     location = StringField(required=True)
     distribution = StringField(required=False, default='bulk')
-    norm = EnumField(NormMultiplier, required=False, default='rate')
+    norm = EnumField(NormMultiplier, required=False,
+                     default=NormMultiplier.rate)
     values = MapField(UncertainQuantityField(allownone=True),
                       required=False, default=dict)
     spectra = MapField(HistogramField(allownone=True),
                        required=False, default=dict)
-
-    # book-keeping
-    revision = IntField(required=True, default=-1)
-    created = DateTimeField(required=True, default=datetime.datetime.now)
-    modified = DateTimeField(required=True, default=datetime.datetime.now)
 
     # optional but suggested metadata
     nprimaries = IntField(required=False)
@@ -126,16 +122,19 @@ class HitEfficiency(DynamicVersionedDocument):
 
     def __init__(self, *args, **kwargs):
         """ Set an ID on all values and spectra to track correlations """
+        super().__init__(*args, **kwargs)
         for key, val in self.values.items():
-            val.id = '.'.join([str(self.id), 'v', key])
+            if val is not None:
+                val.m.id = '.'.join([str(self.id), 'v', key])
         for key, val in self.spectra.items():
-            val.id = '.'.join([str(self.id), 's', key])
+            if val is not None:
+                val.hist.m.id = '.'.join([str(self.id), 's', key])
+        # use a post-init signal
 
     def clean(self):
+        super().clean()
         self.values_keys = list(self.values)
         self.spectra_keys = list(self.spectra)
-        self.revision = self.revision + 1
-        self.modified = datetime.datetime.now()
 
     @property
     def key(self):

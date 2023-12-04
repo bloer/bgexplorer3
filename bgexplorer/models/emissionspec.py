@@ -78,6 +78,8 @@ class Multiplier(Enum):
                 None: None}[self]
 
     def determine_distribution(self, component):
+        if component.distribution:
+            return component.distribution
         dist = self.default_distribution()
         if component.treat_surface_as_bulk and dist.find('surface') != -1:
             dist = 'bulk'
@@ -103,6 +105,8 @@ class EmissionSource(EmbeddedDocument):
     def __init__(self, *args, **kwargs):
         """ Set id on rate so that correlations are tracked appropriately """
         super().__init__(*args, **kwargs)
+        if self.rate is not None:
+            self.rate.m.id = self.id
 
     def clean(self):
         """ make sure multiplier has a sensible value """
@@ -118,12 +122,6 @@ class EmissionSource(EmbeddedDocument):
 
             self.error("to specify rate as concentration, `name` must be "
                        "an isotope")
-
-    def __getattr__(self, name):
-        result = super().__getattr__(name)
-        if name == 'rate' and isinstance(result, Quantity):
-            result.m.id = self.id
-        return result
 
 
 class EmissionSpec(DynamicVersionedDocument):
