@@ -3,6 +3,7 @@ from typing import Union
 import operator
 from pint import Quantity
 from pint.errors import DimensionalityError
+from mongoengine.errors import ValidationError
 
 units = pint.UnitRegistry()
 pint.set_application_registry(units)
