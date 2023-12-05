@@ -104,7 +104,7 @@ class HitEffDbConfig(EmbeddedDocument):
 
 class VersionSettings(Document):
     """ This class contains user-configurable settings """
-    version_tag = StringField(unique=True, default=True)
+    version_tag = StringField(unique=True, required=True)
     modified = DateTimeField(default=datetime.datetime.now)
     editable = BooleanField(required=True, default=True)
     addsources = EmbeddedDocumentListField(AddSource,
