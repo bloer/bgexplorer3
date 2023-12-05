@@ -1,6 +1,8 @@
 from mongoengine import (Document, DateTimeField, StringField, BooleanField,
                          EmbeddedDocument, EmbeddedDocumentListField,
-                         FloatField, EnumField, signals)
+                         FloatField, EnumField, signals, MapField,
+                         EmbeddedDocumentField, ListField)
+from .fields import UnitField
 from warnings import warn
 from enum import Enum
 import datetime
@@ -55,6 +57,51 @@ def _default_auto_sources():
             ]
 
 
+class HitEffConfig(EmbeddedDocument):
+    """ Configure settings for displaying and querying HitEfficiencies """
+    key = StringField(required=True)
+    display_name = StringField(required=False, default=None)
+    display_unit = UnitField(required=False, default=None)
+    description = StringField(default=None)
+    link_spectrum = StringField(required=False, default=None)
+    hide = BooleanField(required=False, default=False)
+
+    @property
+    def title(self):
+        return self.display_name or self.key
+
+
+class HitEffDbConfig(EmbeddedDocument):
+    """ Configure the HitEfficiency database """
+    query_distribution = BooleanField(default=True)
+    display_values = MapField(EmbeddedDocumentField(HitEffConfig),
+                              default=dict)
+    display_spectra = MapField(EmbeddedDocumentField(HitEffConfig),
+                               default=dict)
+    extra_columns = ListField(StringField())
+
+    def update_from(self, hiteff):
+        """Update display settings from a HitEfficiency """
+        for k, v in hiteff.values.items():
+            try:
+                unit = (1 * v.u * hiteff.norm.units).to_reduced_units().u
+            except AttributeError:
+                unit = None
+            self.display_values.setdefault(
+                k,
+                HitEffConfig(key=k, display_unit=unit)
+                )
+        for k, v in hiteff.spectra.items():
+            try:
+                unit = (1 * v.hist.u * hiteff.norm.units).to_reduced_units().u
+            except AttributeError:
+                unit = None
+            self.display_spectra.setdefault(
+                k,
+                HitEffConfig(key=k, display_unit=unit)
+                )
+
+
 class VersionSettings(Document):
     """ This class contains user-configurable settings """
     version_tag = StringField(unique=True, default=True)
@@ -62,6 +109,8 @@ class VersionSettings(Document):
     editable = BooleanField(required=True, default=True)
     addsources = EmbeddedDocumentListField(AddSource,
                                            default=_default_auto_sources)
+    hiteffdbconfig = EmbeddedDocumentField(HitEffDbConfig,
+                                           default=HitEffDbConfig)
 
 
 class ApplicationSettings(Document):

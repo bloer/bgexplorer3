@@ -11,7 +11,7 @@ from .fields import QuantityField, UncertainQuantityField, HistogramField
 from .hiteff import HitEfficiency
 from .isotope import concentration_to_rate
 from .common import units, addnone, multnone
-
+from . import settings
 from typing import List, Optional
 
 
@@ -96,20 +96,15 @@ class SourceTerm(VersionedDocument):
         hits = HitEfficiency.select_version(self.active_version)(
             source=self.source.name,
             location=self.location or self.componentName,
-            distribution=self.distribution,
-            ).exclude('spectra')
-        hiteffs = list(hits)
+            )
+        if settings.get_settings(self.active_version).hiteffdbconfig\
+                .query_distribution:
+            hits = hits(distribution=self.distribution)
+        hiteffs = list(hits.exclude('spectra'))
         if hiteffs and replace:
             self.hiteffs = hiteffs
             self.hiteffs_auto = True
             self.save()
-            #livetimes = [hit.get_livetime(self.emissionrate)
-            #             for hit in hiteffs]
-            #print("\n!!!!!!!", hiteffs, livetimes)
-            #self.modify(set__hiteffs=hiteffs,
-            #            set__hiteffs_auto=True,
-            #            set__livetimes=livetimes,
-            #            )
         return hiteffs
 
     def clear_results(self):
@@ -202,13 +197,12 @@ class CalculatedResults(Document):
         if relativeto is None:
             query = query(assemblyRoot=component)
         else:
-            placements = Placements.objects(
+            placements = Placement.objects(
                 version_tags=component.active_version,
                 component=component)
             query = query(assemblyRoot=relativeto,
                           assemblyPath__in=placements)
         return cls.from_sourceterms(query)
-
 
     def ito_reduced_units(self):
         for v in self.values.values():
@@ -317,7 +311,7 @@ def update_assembly(sender, document, component=None, placement=None,
     sourceterms = []
     for child in assembly.children:
         if (component and child.component.id != component.id or
-            placement and child.id != placement.id):
+                placement and child.id != placement.id):
             continue
         childterms = SourceTerm.select_version(assembly.active_version)(
             assemblyRoot=child.component,
@@ -341,12 +335,14 @@ def update_placement(sender, document, **kwargs):
     return update_assembly(sender=None, document=placement.parent,
                            placement=placement)
 
+
 def update_emissionspec(sender, document, **kwargs):
     spec = document
     # find all components that own a reference to us and call update_component
     for component in Component.objects(version_tags=spec.active_version,
                                        reference_specs=spec):
         update_component(sender=None, document=component)
+
 
 def update_hiteff(sender, document, **kwargs):
     hiteff = document
@@ -355,7 +351,10 @@ def update_hiteff(sender, document, **kwargs):
         hiteffs_auto=True,
         source__name=hiteff.source,
         location=hiteff.location,
-        distribution=hiteff.distribution)
+        )
+    if settings.get_settings(hiteff.active_version).hiteffdbconfig\
+            .query_distribution:
+        matches = matches(distribution=hiteff.distribution)
     for st in matches(hiteffs__ne=hiteff):
         st.hiteffs.append(hiteff)
         # do save instead of push to force recalculation of livetimes
@@ -371,6 +370,10 @@ def update_hiteff(sender, document, **kwargs):
         st.hiteffs = [h for h in st.hiteffs
                       if h.original_id != hiteff.original_id]
         st.save()
+
+    # update default units
+    settings.get_settings(hiteff.active_version).hiteffdbconfig\
+        .update_from(hiteff)
 
 
 mongoengine.signals.post_save.connect(update_component, sender=Component)
