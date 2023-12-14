@@ -85,7 +85,7 @@ class Histogram(object):
             weights = weights * (bins[1:]-bins[:-1])
 
         result = self.hist.dot(weights)
-        # np.dot on a Quantity of AsymmetricError loses units
+        # np.dot on a Quantity of AsymmetricUncertainty loses units
         # so see if we need to find them again
         if hasattr(self.hist, 'u') and not hasattr(result, 'u'):
             result = result * (self.hist.u * getattr(self.bin_edges, 'u', 1))

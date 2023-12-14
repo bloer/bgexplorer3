@@ -6,7 +6,7 @@ import pint
 import warnings
 from bgexplorer.models.fields import *
 from bgexplorer.models.common import units, DimensionalityError
-from bgexplorer.models.asymmetric import AsymmetricError
+from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.histogram import Histogram
 
 class TestDoc(Document):
@@ -36,12 +36,12 @@ class TestFields(unittest.TestCase):
         self.test.val = 1
         self.assertIsInstance(self.test.val, pint.Quantity)
 
-        self.test.val = AsymmetricError(10, 1)
+        self.test.val = AsymmetricUncertainty(10, 1)
         self.assertIsInstance(self.test.val, pint.Quantity)
-        self.assertIsInstance(self.test.val.m, AsymmetricError)
+        self.assertIsInstance(self.test.val.m, AsymmetricUncertainty)
 
         self.test.uval = 1
-        self.assertIsInstance(self.test.val.m, AsymmetricError)
+        self.assertIsInstance(self.test.val.m, AsymmetricUncertainty)
 
     def test1_units(self):
         self.test.qval = 20
@@ -71,14 +71,14 @@ class TestFields(unittest.TestCase):
         fromstr = "10 +/- 1"
         self.test.val = fromstr
         self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
-        self.assertIsInstance(self.test.val.m, AsymmetricError)
+        self.assertIsInstance(self.test.val.m, AsymmetricUncertainty)
         self.assertEqual(self.test.val.mode, 10)
         self.assertEqual(self.test.val.s0, 1)
 
         fromstr = "10 +- 1"
         self.test.val = fromstr
         self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
-        self.assertIsInstance(self.test.val.m, AsymmetricError)
+        self.assertIsInstance(self.test.val.m, AsymmetricUncertainty)
         self.assertEqual(self.test.val.mode, 10)
         self.assertEqual(self.test.val.s0, 1)
 
@@ -86,7 +86,7 @@ class TestFields(unittest.TestCase):
         fromstr = "10+1-2"
         self.test.val = fromstr
         self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
-        self.assertIsInstance(self.test.val.m, AsymmetricError)
+        self.assertIsInstance(self.test.val.m, AsymmetricUncertainty)
         self.assertEqual(self.test.val.mode, 10)
         self.assertEqual(self.test.val.s1, 1)
         self.assertEqual(self.test.val.s0, 2)
@@ -94,7 +94,7 @@ class TestFields(unittest.TestCase):
         fromstr = "< 10"
         self.test.val = fromstr
         self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
-        self.assertIsInstance(self.test.val.m, AsymmetricError)
+        self.assertIsInstance(self.test.val.m, AsymmetricUncertainty)
         self.assertAlmostEqual(self.test.val.get_upper_limit(), 10)
 
         fromstr = "10 keV"
@@ -119,11 +119,11 @@ class TestFields(unittest.TestCase):
         self.test.hval = Histogram(np.arange(20))
         self.assertIsInstance(self.test.hval, Histogram)
         self.assertIsInstance(self.test.hval.hist, pint.Quantity)
-        self.assertIsInstance(self.test.hval.hist.m, AsymmetricError)
+        self.assertIsInstance(self.test.hval.hist.m, AsymmetricUncertainty)
         self.assertIsInstance(self.test.hval.hist.mode, np.ndarray)
 
     def test5_json(self):
-        test = TestDoc(val=1, qval=2, uval=AsymmetricError(3,1),
+        test = TestDoc(val=1, qval=2, uval=AsymmetricUncertainty(3,1),
                        hval=Histogram(np.arange(50)))
         warnings.simplefilter('ignore')
         json = test.to_json()
@@ -156,7 +156,7 @@ class TestFields(unittest.TestCase):
 
 
     def test5_save(self):
-        test = TestDoc(val=1, qval=2, uval=AsymmetricError(3,1),
+        test = TestDoc(val=1, qval=2, uval=AsymmetricUncertainty(3,1),
                        hval=Histogram(np.arange(50)))
         test.save()
         test2 = TestDoc.objects.get()

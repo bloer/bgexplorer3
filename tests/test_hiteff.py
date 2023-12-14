@@ -2,7 +2,7 @@ import unittest
 from mongoengine import connect, disconnect
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
-from bgexplorer.models.asymmetric import AsymmetricError
+from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.settings import VersionSettings, SpectrumROI, get_settings
 import numpy as np
@@ -35,7 +35,7 @@ class TestHitEFficiency(unittest.TestCase):
                     v1="10 +- 1 dru/mBq",
                     v2="<3 dru/mBq"),
                 spectra = dict(
-                    v1=Histogram(AsymmetricError.fromcounts(np.arange(10))*units('dru/mBq')),
+                    v1=Histogram(AsymmetricUncertainty.fromcounts(np.arange(10))*units('dru/mBq')),
                 ))
         h.save()
         h = HitEfficiency.objects.get()
@@ -55,7 +55,7 @@ class TestHitEFficiency(unittest.TestCase):
         h = HitEfficiency(source="h", location="h", values=dict(
             v1="10 +- 1 dru/mBq",
             v2="<3 dru/mBq"), spectra = dict(
-            v1=Histogram(AsymmetricError.fromcounts(np.array([0,0,0,0,3,4,5,6,7,8]))*units('dru/mBq'),
+            v1=Histogram(AsymmetricUncertainty.fromcounts(np.array([0,0,0,0,3,4,5,6,7,8]))*units('dru/mBq'),
                          np.array([0,1,2,3,4,5,6,7,8,9,10])*units.keV),
             ))
         h.save()

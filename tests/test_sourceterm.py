@@ -6,7 +6,7 @@ from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.sourceterm import SourceTerm, CalculatedResults
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
-from bgexplorer.models.asymmetric import AsymmetricError
+from bgexplorer.models.asymmetric import AsymmetricUncertainty
 import numpy as np
 
 class TestSourceTerm(unittest.TestCase):
@@ -42,20 +42,20 @@ class TestSourceTerm(unittest.TestCase):
                        sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
                        reference_specs=[e1]).save()
         self.assertEqual(SourceTerm.objects.count(), 3)
-        emissionrates = dict(Th232=AsymmetricError(20, 2)*units('mBq/kg'),
-                             K40=AsymmetricError.fromlimit(50)*units('mBq/kg'),
-                             Co60=AsymmetricError(40, 0.4)*units('mBq/kg'))
+        emissionrates = dict(Th232=AsymmetricUncertainty(20, 2)*units('mBq/kg'),
+                             K40=AsymmetricUncertainty.fromlimit(50)*units('mBq/kg'),
+                             Co60=AsymmetricUncertainty(40, 0.4)*units('mBq/kg'))
         for st in SourceTerm.objects:
             self.assertAlmostEqual(st.emissionrate.mode, emissionrates[st.source.name].mode)
             self.assertAlmostEqual(st.emissionrate.s0, emissionrates[st.source.name].s0)
 
         e1.reload() # without this, we get a weakref deleted error...
-        e1.sources[0].rate = AsymmetricError(8, 2)*units('mBq/kg')
+        e1.sources[0].rate = AsymmetricUncertainty(8, 2)*units('mBq/kg')
         e1.save()
         self.assertEqual(SourceTerm.objects.count(), 3)
-        emissionrates = dict(Th232=AsymmetricError(16, 4)*units('mBq/kg'),
-                             K40=AsymmetricError.fromlimit(50)*units('mBq/kg'),
-                             Co60=AsymmetricError(40, 0.4)*units('mBq/kg'))
+        emissionrates = dict(Th232=AsymmetricUncertainty(16, 4)*units('mBq/kg'),
+                             K40=AsymmetricUncertainty.fromlimit(50)*units('mBq/kg'),
+                             Co60=AsymmetricUncertainty(40, 0.4)*units('mBq/kg'))
         for st in SourceTerm.objects:
             self.assertAlmostEqual(st.emissionrate.mode, emissionrates[st.source.name].mode)
             self.assertAlmostEqual(st.emissionrate.s0, emissionrates[st.source.name].s0)
@@ -63,9 +63,9 @@ class TestSourceTerm(unittest.TestCase):
         c1.mass = 4*units.kg
         c1.save()
         self.assertEqual(SourceTerm.objects.count(), 3)
-        emissionrates = dict(Th232=AsymmetricError(32, 8)*units('mBq/kg'),
-                             K40=AsymmetricError.fromlimit(100)*units('mBq/kg'),
-                             Co60=AsymmetricError(80, 0.8)*units('mBq/kg'))
+        emissionrates = dict(Th232=AsymmetricUncertainty(32, 8)*units('mBq/kg'),
+                             K40=AsymmetricUncertainty.fromlimit(100)*units('mBq/kg'),
+                             Co60=AsymmetricUncertainty(80, 0.8)*units('mBq/kg'))
         for st in SourceTerm.objects:
             self.assertAlmostEqual(st.emissionrate.mode, emissionrates[st.source.name].mode)
             self.assertAlmostEqual(st.emissionrate.s0, emissionrates[st.source.name].s0)
@@ -107,13 +107,13 @@ class TestSourceTerm(unittest.TestCase):
     def test3_hiteffs(self):
         """ Test that queries find HitEfficiencies """
         h1 = HitEfficiency(source="Th232", location="c1 location",
-                           values=dict(v1=AsymmetricError(0.1, 0.02)*units('dru/mBq'))).save()
+                           values=dict(v1=AsymmetricUncertainty(0.1, 0.02)*units('dru/mBq'))).save()
         h2 = HitEfficiency(source="Th232", location="a1 location",
-                           values=dict(v1=AsymmetricError(0.5, 0.05)*units('dru/mBq'))).save()
+                           values=dict(v1=AsymmetricUncertainty(0.5, 0.05)*units('dru/mBq'))).save()
         h3 = HitEfficiency(source="Co60", location="c2 placement location",
-                           values=dict(v1=AsymmetricError(0.3, 0.02)*units('dru/mBq'))).save()
+                           values=dict(v1=AsymmetricUncertainty(0.3, 0.02)*units('dru/mBq'))).save()
         h4 = HitEfficiency(source="custom", location='',
-                           values=dict(v1=AsymmetricError(0.01, 0.002)*units('dru/mBq'))).save()
+                           values=dict(v1=AsymmetricUncertainty(0.01, 0.002)*units('dru/mBq'))).save()
         e1 = EmissionSpec(name="e1", sources=[EmissionSource(name="Th232", rate="10 +- 1 mBq/kg"),
                                               EmissionSource(name="K40", rate="<25 mBq/kg")]).save()
         c1 = Component(name="c1", mass="2 kg", location="c1 location",
@@ -197,9 +197,9 @@ class TestSourceTerm(unittest.TestCase):
 
         # now add a new hiteff that would match our custom one
         h5 = HitEfficiency(source="K40", location="c2 placement location",
-                           values=dict(v1=AsymmetricError(0.02, 0.002)*units('dru/mBq'))).save()
+                           values=dict(v1=AsymmetricUncertainty(0.02, 0.002)*units('dru/mBq'))).save()
         h6 = HitEfficiency(source="K40", location="a1 location",
-                           values=dict(v1=AsymmetricError(0.03, 0.002)*units('dru/mBq'))).save()
+                           values=dict(v1=AsymmetricUncertainty(0.03, 0.002)*units('dru/mBq'))).save()
         for st in SourceTerm.objects(source__name="K40"):
             if st.assemblyPathStr == "a1/c1":
                 self.assertEqual(len(st.hiteffs), 0)

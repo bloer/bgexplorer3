@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from numpy.testing import *
-from bgexplorer.models.asymmetric import AsymmetricError
+from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.common import units
 
 class TestAsymmetric(unittest.TestCase):
@@ -14,12 +14,12 @@ class TestAsymmetric(unittest.TestCase):
         pass
 
     def setUp(self):
-        self.a = AsymmetricError(10, 0.2)
-        self.b = AsymmetricError(5, 0.05)
-        self.c = AsymmetricError(8, 1, 0.1)
-        self.lim1 = AsymmetricError.fromlimit(3)
-        self.lim2 = AsymmetricError.fromlimit(5)
-        self.arr = AsymmetricError.fromcounts(np.array([4,5,6]))
+        self.a = AsymmetricUncertainty(10, 0.2)
+        self.b = AsymmetricUncertainty(5, 0.05)
+        self.c = AsymmetricUncertainty(8, 1, 0.1)
+        self.lim1 = AsymmetricUncertainty.fromlimit(3)
+        self.lim2 = AsymmetricUncertainty.fromlimit(5)
+        self.arr = AsymmetricUncertainty.fromcounts(np.array([4,5,6]))
         self.constant = 24
         self.scalar = 2.5
 
@@ -29,7 +29,7 @@ class TestAsymmetric(unittest.TestCase):
 
     def test1_add(self):
         x = self.a + self.constant
-        self.assertIsInstance(x, AsymmetricError)
+        self.assertIsInstance(x, AsymmetricUncertainty)
         self.assertAlmostEqual(x.mode, self.a.mode + self.constant)
         self.assertEqual(x.s0, self.a.s0)
 
@@ -65,7 +65,7 @@ class TestAsymmetric(unittest.TestCase):
 
     def test2_sub(self):
         x = self.a - self.constant
-        self.assertIsInstance(x, AsymmetricError)
+        self.assertIsInstance(x, AsymmetricUncertainty)
         self.assertAlmostEqual(x.mode, self.a.mode - self.constant)
         self.assertEqual(x.s0, self.a.s0)
 
@@ -85,7 +85,7 @@ class TestAsymmetric(unittest.TestCase):
 
     def test3_mult(self):
         x = self.a * self.scalar
-        self.assertIsInstance(x, AsymmetricError)
+        self.assertIsInstance(x, AsymmetricUncertainty)
         self.assertAlmostEqual(x.mode, self.a.mode * self.scalar)
         self.assertAlmostEqual(x.s0, self.a.s0 * self.scalar)
 
@@ -117,20 +117,20 @@ class TestAsymmetric(unittest.TestCase):
     def test3_mult_units(self):
         x = self.a * units.keV
         self.assertIsInstance(x, units.Quantity)
-        self.assertIsInstance(x.m, AsymmetricError)
+        self.assertIsInstance(x.m, AsymmetricUncertainty)
         self.assertEqual(x.mode, self.a.mode)
         self.assertEqual(x.s0, self.a.s0)
 
         q = units('30 keV')
         x = self.a * q
         self.assertIsInstance(x, units.Quantity)
-        self.assertIsInstance(x.m, AsymmetricError)
+        self.assertIsInstance(x.m, AsymmetricUncertainty)
         self.assertAlmostEqual(x.mode, self.a.mode * q.m)
         self.assertAlmostEqual(x.s0, self.a.s0 * q.m)
 
     def test4_div(self):
         x = self.a / self.scalar
-        self.assertIsInstance(x, AsymmetricError)
+        self.assertIsInstance(x, AsymmetricUncertainty)
         self.assertAlmostEqual(x.mode, self.a.mode / self.scalar)
         self.assertAlmostEqual(x.s0, self.a.s0 / self.scalar)
 
@@ -143,7 +143,7 @@ class TestAsymmetric(unittest.TestCase):
 
         x = self.a * self.b + self.a * self.c
         y = self.a * (self.b + self.c)
-        with AsymmetricError.ignore_correlations():
+        with AsymmetricUncertainty.ignore_correlations():
             z = self.a * self.b + self.a * self.c
         self.assertAlmostEqual(x.mode, y.mode)
         self.assertAlmostEqual(x.s0, y.s0)

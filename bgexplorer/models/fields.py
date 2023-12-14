@@ -1,5 +1,4 @@
-from mongoengine import (EmbeddedDocument, EmbeddedDocumentListField,
-                         ValidationError)
+from mongoengine import (EmbeddedDocument, EmbeddedDocumentListField)
 from mongoengine.fields import BaseField, StringField, BinaryField
 import pint
 import logging
@@ -10,7 +9,7 @@ import json
 import re
 from collections.abc import Mapping
 
-from .asymmetric import AsymmetricError
+from .asymmetric import AsymmetricUncertainty
 from .histogram import Histogram
 from .common import units as unitreg
 
@@ -125,7 +124,7 @@ class QuantityField(BaseField):
                    allow the value to be None. If an int or float, convert
                    None to that value
         convert: if True, convert provided value to units
-        forceasym: if True, force the value to be an AsymmetricError
+        forceasym: if True, force the value to be an AsymmetricUncertainty
     """
     def __init__(self, *args,
                  units: Optional[UnitType] = None,
@@ -166,9 +165,9 @@ class QuantityField(BaseField):
         sigmaup = float(sigmaup) * exponent if sigmaup is not None else None
 
         if limit:
-            result = AsymmetricError.fromlimit(limit, quantile)
+            result = AsymmetricUncertainty.fromlimit(limit, quantile)
         elif sigma is not None:
-            result = AsymmetricError(val, sigma, sigmaup)
+            result = AsymmetricUncertainty(val, sigma, sigmaup)
         else:
             result = val
         unit = unit or self.units
@@ -193,15 +192,15 @@ class QuantityField(BaseField):
         if isinstance(value, Mapping):
             units = value.pop('units', units)
             if 'sigma' in value:
-                value = AsymmetricError(**value)
+                value = AsymmetricUncertainty(**value)
             else:
                 value = value['value']
 
         if not isinstance(value, pint.Quantity):
             value = pint.Quantity(value, units)
 
-        if self.forceasym and not isinstance(value.m, AsymmetricError):
-            value = pint.Quantity(AsymmetricError(value.m, 0), value.u)
+        if self.forceasym and not isinstance(value.m, AsymmetricUncertainty):
+            value = pint.Quantity(AsymmetricUncertainty(value.m, 0), value.u)
 
         if self.convert:
             value.ito(self.units)
@@ -214,7 +213,7 @@ class QuantityField(BaseField):
         if value is None:
             return value
         result = dict(value=value.m)
-        if isinstance(value.m, AsymmetricError):
+        if isinstance(value.m, AsymmetricUncertainty):
             result = value.m.todict()
         if not value.dimensionless:
             result['units'] = utostr(value.u)
@@ -227,8 +226,8 @@ class QuantityField(BaseField):
             self.error(f'Value must be a pint Quantity, got {value}')
         if self.units is not None and not value.is_compatible_with(self.units):
             self.error(f'Value must have units compatible with {self.units}')
-        if self.forceasym and not isinstance(value.m, AsymmetricError):
-            self.error('Numeric part of quantity must be an AsymmetricError')
+        if self.forceasym and not isinstance(value.m, AsymmetricUncertainty):
+            self.error('Numeric part must be an AsymmetricUncertainty')
 
     def prepare_query_value(self, op, value):
         return self.to_mongo(value)
@@ -260,7 +259,7 @@ class HistogramField(UncertainQuantityField):
         if isinstance(value, Mapping):
             try:
                 bins = pint.Quantity(value.pop('bins'),
-                                    value.pop('binsunit', self.binsunit))
+                                     value.pop('binsunit', self.binsunit))
             except TypeError:
                 bins = None
             hist = QuantityField.to_python(self, value)
@@ -272,8 +271,8 @@ class HistogramField(UncertainQuantityField):
             value.hist = pint.Quantity(value.hist, self.units)
         if not isinstance(value.bin_edges, pint.Quantity):
             value.bin_edges = pint.Quantity(value.bin_edges, self.units)
-        if not isinstance(value.hist.m, AsymmetricError):
-            value.hist = pint.Quantity(AsymmetricError(value.hist.m, 0),
+        if not isinstance(value.hist.m, AsymmetricUncertainty):
+            value.hist = pint.Quantity(AsymmetricUncertainty(value.hist.m, 0),
                                        value.hist.u)
         if self.convert:
             value.hist.ito(self.units)

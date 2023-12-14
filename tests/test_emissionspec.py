@@ -2,7 +2,7 @@ import unittest
 from mongoengine import connect, disconnect, Document, ValidationError
 from bgexplorer.models.emissionspec import EmissionSource, EmissionSpec, Multiplier
 from bgexplorer.models.common import units, DimensionalityError
-from bgexplorer.models.asymmetric import AsymmetricError
+from bgexplorer.models.asymmetric import AsymmetricUncertainty
 
 class TestEmission(unittest.TestCase):
     @classmethod
