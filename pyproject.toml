@@ -24,6 +24,11 @@ dependencies = [
     "blinker",
     "mongoengine",
     "mendeleev",
+    "flask>=3.0",
+    "flask-login",
+    "flask-wtf",
+    "bootstrap-flask",
+    "argon2-cffi",
 ]
 
 [project.optional-dependencies]

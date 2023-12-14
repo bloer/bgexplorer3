@@ -4,7 +4,7 @@ import mongoengine
 from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
                          StringField, BooleanField, MapField, Document,
                          SortedListField, CASCADE, PULL, ReferenceField)
-from .verdoc import VersionedDocument, VersionedReferenceField
+from .verdoc import VersionedDocument, VersionedReferenceField, VersionedQuerySet
 from .component import Component, Placement, Assembly
 from .emissionspec import EmissionSpec, EmissionSource, Multiplier
 from .fields import QuantityField, UncertainQuantityField, HistogramField
@@ -12,7 +12,7 @@ from .hiteff import HitEfficiency
 from .isotope import concentration_to_rate
 from .common import units, addnone, multnone
 from . import settings
-from typing import List, Optional
+from typing import List, Optional, Union
 
 
 class SourceTerm(VersionedDocument):
@@ -178,6 +178,26 @@ class SourceTerm(VersionedDocument):
         return st
 
 
+def find_sourcterms(obj: Union[Component, EmissionSpec, EmissionSource],
+                    relativeto: Optional[Assembly] = None,
+                    active_version: Optional[str] = None,
+                    ) -> VersionedQuerySet:
+    """ Find all SourceTerms for the given object """
+    active_version = active_version or obj.active_version
+    query = SourceTerm.select_version(active_version)
+    if relativeto is not None:
+        query = query(assemblyRoot=relativeto)
+    if isinstance(obj. Component):
+        placements = Placement.objects(version_tags=obj.active_verison,
+                                       component=object)
+        query = query(assemblyPath__in=placements)
+    elif isinstance(obj, EmissionSpec):
+        query = query(spec=obj)
+    elif isinstance(obj, EmissionSource):
+        query = query(source__id=obj.id)
+    return query
+
+
 class CalculatedResults(Document):
     """ Cache normalized HitEff results """
     # TODO: should this be a versioned document? it's acting as a cache
@@ -191,8 +211,15 @@ class CalculatedResults(Document):
     meta = {'indexes': ['sources']}
 
     @classmethod
+    def for_object(cls, obj, relativeto: Optional[Assembly] = None,
+                   active_version: Optional[str] = None
+                   ) -> 'CalculatedResults':
+        return cls.from_sourceterms(find_sourcterms(obj, relativeto,
+                                                    active_version))
+
+    @classmethod
     def for_component(cls, component: Component,
-                      relativeto: Optional[Component] = None):
+                      relativeto: Optional[Assembly] = None):
         query = SourceTerm.select_version(component.active_version)
         if relativeto is None:
             query = query(assemblyRoot=component)

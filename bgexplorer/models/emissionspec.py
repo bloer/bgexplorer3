@@ -128,10 +128,6 @@ class EmissionSpec(DynamicVersionedDocument):
     name = StringField(required=True)
     description = StringField()
     comment = StringField()
-    reference = StringField(verbose_name="External reference")
-    reference_url = URLField(verbose_name="URL for external reference")
-    reference_details = StringField(verbose_name="Reference details",
-                                    help_text="e.g. Table II, entry 45")
     sources = EmbeddedDocumentListField(EmissionSource)
 
     meta = {'inheritable': True}

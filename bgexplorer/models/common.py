@@ -4,6 +4,7 @@ import operator
 from pint import Quantity
 from pint.errors import DimensionalityError
 from mongoengine.errors import ValidationError
+from mongoengine import EmbeddedDocument, StringField, URLField
 
 units = pint.UnitRegistry()
 pint.set_application_registry(units)
@@ -38,3 +39,14 @@ def addnone(a, b):
 
 def multnone(a, b):
     return opnone(a, b, operator.mul)
+
+
+class PublicationInfo(EmbeddedDocument):
+    reference = StringField(verbose_name="External reference")
+    reference_url = URLField(verbose_name="URL for external reference")
+    reference_details = StringField(verbose_name="Reference details",
+                                    help_text="e.g. Table II, entry 45")
+    org = StringField(verbose_name="Publishing Organization/Experiment")
+
+
+

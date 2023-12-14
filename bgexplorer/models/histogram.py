@@ -71,8 +71,8 @@ class Histogram(object):
         spec = self.hist
         a, b = self._bound(a, b)
         weights = np.zeros_like(spec)
-        first = bins.searchsorted(a, "right") - 1
-        last = bins.searchsorted(b, "left") - 1
+        first = np.searchsorted(bins, a, "right") - 1
+        last = np.searchsorted(bins, b, "left") - 1
         weights[first:last] = 1
         # take fractions of the first and last bins
         if first == last:
@@ -84,14 +84,20 @@ class Histogram(object):
         if binwidth:
             weights = weights * (bins[1:]-bins[:-1])
 
-        return self.hist.dot(weights)
+        result = self.hist.dot(weights)
+        # np.dot on a Quantity of AsymmetricError loses units
+        # so see if we need to find them again
+        if hasattr(self.hist, 'u') and not hasattr(result, 'u'):
+            result = result * (self.hist.u * getattr(self.bin_edges, 'u', 1))
+        return result
 
     def average(self, a=None, b=None, binwidths=True):
         """Calculate the average from a to b. See `integrate` for description
         of the arguments
         """
         a, b = self._bound(a, b)
-        return self.integrate(a, b, binwidths) / (b-a)
+        result = self.integrate(a, b, binwidths) / (b-a)
+        return result
 
     def __repr__(self):
         return f"Histogram<{len(self.hist)} bins>"

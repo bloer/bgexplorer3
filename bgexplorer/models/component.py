@@ -13,7 +13,7 @@ from .common import units
 class PurchaseInfo(EmbeddedDocument):
     vendor = StringField(verbose_name='Vendor/producer')
     partnum = StringField(verbose_name="Vendor part number or drawing")
-    material_batch = StringField(verbose_name="material batch number")
+    material_batch = StringField(verbose_name="Material batch number")
     batch = StringField(verbose_name='Fabrication batch number')
     purchased = DateField(verbose_name="Purchase date")
     received = DateField(verbose_name="Date received")
@@ -40,7 +40,7 @@ def _noslash(value):
 class Component(VersionedDocument):
     name = StringField(required=True, validation=_noslash)
     description = StringField()
-    notes = StringField()
+    notes = StringField(input_type='textarea')
 
     mass = QuantityField(units='kg', default=0 * units.kg)
     volume = QuantityField(units='m**3', default=0 * units.m**3)
@@ -55,7 +55,7 @@ class Component(VersionedDocument):
         verbose_name="HitEfficiency Location",
         help_text="Key to match against locations in HitEfficieny database"
     )
-
+    # TODO: need to add some assay quality info
     purchaseinfo = EmbeddedDocumentField(PurchaseInfo)
     extra_metadata = DictField()
     attachments = AttachmentsField()
