@@ -557,7 +557,7 @@ class AsymmetricError:
         # test for pint Quantities
         if hasattr(other, 'dimensionality'):
             other = 1./other  # ensure it's a quantity
-            return other.__class__(self*other.m, other.u)
+            return other.__class__(self/other.m, other.u)
 
         if self.get_ignore_correlations():
             try:
@@ -635,25 +635,28 @@ class AsymmetricError:
 
     def integrate(self, weights=None):
         # sum out entries with weights, applying zeroed ULs for combining
-        weighted = self if weights is None else self*weights
         if np.isscalar(self.mode):
-            return weighted
+            raise ValueError("Cannot integrate scalar")
 
-        weighted = weighted.rezero()
-        result = AsymmetricError(np.sum(weighted.mode),
-                                 np.sqrt(np.sum(weighted.v0)),
-                                 np.sqrt(np.sum(weighted.v1)))
+        # correlations don't make sense here
+        with self.ignore_correlations():
+            weighted = self if weights is None else self*weights
+            zeroed = weighted.rezero()
+            result = AsymmetricError(np.sum(zeroed.mode),
+                                     np.sqrt(np.sum(zeroed.v0)),
+                                     np.sqrt(np.sum(zeroed.v1)))
 
-        # todo: check for all s1's to be equal? not sensible state otherwsie
-        if result.mode == 0:
-            if weights is None or np.isscalar(weights):
-                # self.mode is all zeros
-                result.s1 = np.max(weighted.s1)
-            elif np.sum(weights) > 0:
-                # take the error at the maximum weight as the integral
-                result.s1 = weighted.s1[np.argmax[weights]]
+            # todo: check for all s1's to be equal?
+            # not sensible state otherwsie
+            if result.mode == 0:
+                if weights is None or np.isscalar(weights):
+                    # self.mode is all zeros
+                    result.s1 = np.max(weighted.s1)
+                elif np.sum(weights) > 0:
+                    # take the error at the maximum weight as the integral
+                    result.s1 = weighted.s1[np.argmax(weights)]
 
-        return result
+            return result
 
     # Numpy array functions
     def sum(self):
@@ -819,6 +822,7 @@ class LinearExpression:
                 result.coefficients[key.difference({variable})] = val
         else:
             result = copy(self)
+            coefficient = other
         if coefficient is not None:
             for key in result.coefficients.keys():
                 result.coefficients[key] /= coefficient

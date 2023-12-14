@@ -128,7 +128,13 @@ class TestAsymmetric(unittest.TestCase):
         self.assertAlmostEqual(x.mode, self.a.mode * q.m)
         self.assertAlmostEqual(x.s0, self.a.s0 * q.m)
 
-    def test4_correlation(self):
+    def test4_div(self):
+        x = self.a / self.scalar
+        self.assertIsInstance(x, AsymmetricError)
+        self.assertAlmostEqual(x.mode, self.a.mode / self.scalar)
+        self.assertAlmostEqual(x.s0, self.a.s0 / self.scalar)
+
+    def test5_correlation(self):
         x = self.a + (3 * self.a)
         y = 4 * self.a
         self.assertEqual(x.expression, y.expression)
