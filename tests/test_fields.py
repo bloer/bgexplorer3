@@ -15,12 +15,6 @@ class TestDoc(Document):
     uval = UncertainQuantityField()
     hval = HistogramField()
 
-    # this ensures values are converted on assignment
-    def __setattr__(self, name, value):
-        field = self._fields.get(name)
-        if field:
-            value = field.to_python(value)
-        return super().__setattr__(name, value)
 
 class TestFields(unittest.TestCase):
     @classmethod

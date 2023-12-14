@@ -103,6 +103,10 @@ class UnitField(BaseField):
     def prepare_query_value(self, op, value):
         return self.to_mongo(value)
 
+    # make sure values are converted when assigned, not just in constructor
+    def __set__(self, instance, value):
+        return super().__set__(instance, self.to_python(value))
+
 
 # regexes to test asymmetric quantities
 _refloat = r'([0-9.]+(?:[eE][+-]?\d+)?)'
@@ -228,6 +232,10 @@ class QuantityField(BaseField):
 
     def prepare_query_value(self, op, value):
         return self.to_mongo(value)
+
+    # make sure values are converted when assigned, not just in constructor
+    def __set__(self, instance, value):
+        return super().__set__(instance, self.to_python(value))
 
 
 class UncertainQuantityField(QuantityField):
