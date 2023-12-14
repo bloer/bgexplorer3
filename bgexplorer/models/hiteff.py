@@ -10,6 +10,7 @@ from .verdoc import DynamicVersionedDocument
 from .fields import (QuantityField, UncertainQuantityField, HistogramField,
                      UnitField)
 from .common import units as unitreg
+from . import settings
 from typing import Union, Optional
 from enum import Enum
 import logging
@@ -133,12 +134,41 @@ class HitEfficiency(DynamicVersionedDocument):
 
     def clean(self):
         super().clean()
+        # evaluate all ROIs
+        dbconfig = settings.get_settings(self.active_version).hiteffdbconfig
+        for roi in dbconfig.rois:
+            roi.evaluate(self, store=True)
+        # make sure units match the desired output
+        for key, val in self.values.items():
+            if val is None or key not in dbconfig.display_values:
+                continue
+            display_unit = dbconfig.display_values[key]
+            if not display_unit._check(self.get_result_unit(val)):
+                msg = f"Value {key} {val} has incorrect units"
+                raise ValidationError(msg)
+        for key, val in self.spectra.items():
+            if val is None or key not in dbconfig.display_spectra:
+                continue
+            display_unit = dbconfig.display_spectra[key]
+            if not display_unit._check(self.get_result_unit(val)):
+                msg = f"Value {key} {val} has incorrect units"
+                raise ValidationError(msg)
+
         self.values_keys = list(self.values)
         self.spectra_keys = list(self.spectra)
 
     @property
     def key(self):
         getattr(self, '_id', (self.source, self.location, self.distribution))
+
+    def get_result_unit(self, val):
+        """ Determine the output unit for a value from values or spectra
+        based on our norm value
+        """
+        try:
+            return (1 * val.u * self.norm.units).to_reduced_units().u
+        except AttributeError:
+            return None
 
     def get_livetime(self, emissionrate=None):
         if self.livetime is not None:

@@ -1,10 +1,10 @@
 from mongoengine import (Document, DateTimeField, StringField, BooleanField,
                          EmbeddedDocument, EmbeddedDocumentListField,
                          FloatField, EnumField, signals, MapField,
-                         EmbeddedDocumentField, ListField)
-from .fields import UnitField
+                         EmbeddedDocumentField, ListField, BinaryField, URLField)
+from .fields import UnitField, QuantityField
 from warnings import warn
-from enum import Enum
+from enum import Enum, Flag
 import datetime
 
 __all__ = ['RatioType', 'get_settings', 'get_application_settings']
@@ -71,9 +71,40 @@ class HitEffConfig(EmbeddedDocument):
         return self.display_name or self.key
 
 
+class ROIType(Enum):
+    average = "average"
+    integrate = "integrate"
+
+
+class SpectrumROI(EmbeddedDocument):
+    """ Integrate or average a spectrum over an ROI """
+    label = StringField()
+    spectrum = StringField(required=True)
+    start = QuantityField(required=True)
+    stop = QuantityField(required=True)
+    mode = EnumField(ROIType, default=ROIType.average)
+    binwidths = BooleanField(default=True)
+
+    @property
+    def key(self):
+        return self.label or \
+            f"{self.spectrum}, {self.mode.name} {self.start} to {self.stop}"
+
+    def evaluate(self, hiteff, store: bool = True):
+        """ Evaluate the given ROI """
+        result = None
+        if (hist := hiteff.spectra.get(self.spectrum)) is not None:
+            func = getattr(hist, self.mode.name)
+            result = func(self.start, self.stop, self.binwidths)
+        if store:
+            hiteff.values[self.key] = result
+        return result
+
+
 class HitEffDbConfig(EmbeddedDocument):
     """ Configure the HitEfficiency database """
     query_distribution = BooleanField(default=True)
+    rois = EmbeddedDocumentListField(SpectrumROI)
     display_values = MapField(EmbeddedDocumentField(HitEffConfig),
                               default=dict)
     display_spectra = MapField(EmbeddedDocumentField(HitEffConfig),
@@ -83,19 +114,13 @@ class HitEffDbConfig(EmbeddedDocument):
     def update_from(self, hiteff):
         """Update display settings from a HitEfficiency """
         for k, v in hiteff.values.items():
-            try:
-                unit = (1 * v.u * hiteff.norm.units).to_reduced_units().u
-            except AttributeError:
-                unit = None
+            unit = hiteff.get_result_unit(v)
             self.display_values.setdefault(
                 k,
                 HitEffConfig(key=k, display_unit=unit)
                 )
         for k, v in hiteff.spectra.items():
-            try:
-                unit = (1 * v.hist.u * hiteff.norm.units).to_reduced_units().u
-            except AttributeError:
-                unit = None
+            unit = hiteff.get_result_unit(v)
             self.display_spectra.setdefault(
                 k,
                 HitEffConfig(key=k, display_unit=unit)
@@ -113,10 +138,15 @@ class VersionSettings(Document):
                                            default=HitEffDbConfig)
 
 
+
+
 class ApplicationSettings(Document):
     """ Holds configurable options for the application, such as user
     permissions and custom branding """
-    pass
+    org_name = StringField()
+    org_logo = BinaryField()
+    org_url = URLField()
+    allow_anon_view = BooleanField(default=False)
 
 
 def post_save(sender, document, **kwargs):
