@@ -185,6 +185,7 @@ class VersionSettings(Document):
                                   f"units of {ustr}")
                         raise ValidationError(errmsg,
                                               field_name=f"display_{type_}")
+        # TODO: need to also check rois display_units based on spectra
 
     @classmethod
     def post_save(cls, sender, document, **kwargs):

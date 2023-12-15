@@ -13,6 +13,7 @@ from .isotope import concentration_to_rate
 from .common import units, addnone, multnone
 from . import settings
 from typing import List, Optional, Union
+from itertools import chain
 
 
 class SourceTerm(VersionedDocument):
@@ -201,7 +202,7 @@ def find_sourcterms(obj: Union[Component, EmissionSpec, EmissionSource],
 class CalculatedResults(Document):
     """ Cache normalized HitEff results """
     # TODO: should this be a versioned document? it's acting as a cache
-    # of sorts
+    # TODO: how to make sure there are no values/rois collisions?
     values = MapField(UncertainQuantityField(allownone=True),
                       required=False, default=dict)
     spectra = MapField(HistogramField(allownone=True),
@@ -265,7 +266,8 @@ class CalculatedResults(Document):
         if not hiteff.norm.check(erate):
             raise units.DimensionalityError("incompatible emissionrate units")
         return cls(values={key: multnone(val,  erate) for key, val in
-                           hiteff.values.items() if val is not None},
+                           chain(hiteff.values.items(), hiteff.rois.items())
+                           if val is not None},
                    spectra={key: multnone(val, erate) for key, val in
                             hiteff.spectra.items() if val is not None},
                    ).ito_reduced_units()
