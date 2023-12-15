@@ -8,7 +8,7 @@ from mongoengine import EmbeddedDocument, StringField, URLField
 
 units = pint.UnitRegistry()
 pint.set_application_registry(units)
-
+units.default_format = '~C'
 units.load_definitions([
     "dru = 1./(kg * keV * day) = dru = DRU",
     "kky = kg * keV * year = kky = kg_keV_yr",

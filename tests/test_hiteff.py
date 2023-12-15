@@ -60,8 +60,8 @@ class TestHitEFficiency(unittest.TestCase):
             ))
         h.save()
         for index, roi in enumerate(config.hiteffdbconfig.rois):
-            self.assertIn(roi.key, h.values)
-            result = h.values[roi.key]
+            self.assertIn(roi.key, h.rois)
+            result = h.rois[roi.key]
             if index == 0:  # average over 0 bins
                 self.assertTrue(result.check('dru/mBq'))
                 self.assertEqual(result.mode, 0)
@@ -77,5 +77,16 @@ class TestHitEFficiency(unittest.TestCase):
                 self.assertAlmostEqual(result.mode, 33)
                 self.assertAlmostEqual(result.v0, 33)
                 self.assertAlmostEqual(result.v1, 33)
+
+        # test that things get updated when we change the config
+        config.hiteffdbconfig.rois.pop()
+        config.hiteffdbconfig.rois[1].stop = 7*units.keV
+        config.save()
+        h.reload()
+        self.assertEqual(len(h.rois), 2)
+        result = h.rois[config.hiteffdbconfig.rois[1].key]
+        self.assertAlmostEqual(result.mode, 12/7)
+        self.assertAlmostEqual(result.s0, np.sqrt(12)/7)
+        self.assertAlmostEqual(result.s1, np.sqrt(12)/7)
 
 

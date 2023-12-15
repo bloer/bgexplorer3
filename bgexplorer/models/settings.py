@@ -1,10 +1,13 @@
 from mongoengine import (Document, DateTimeField, StringField, BooleanField,
-                         EmbeddedDocument, EmbeddedDocumentListField,
-                         FloatField, EnumField, signals, MapField,
-                         EmbeddedDocumentField, ListField, BinaryField, URLField)
+                         EmbeddedDocument, EmbeddedDocumentListField, signals,
+                         FloatField, EnumField, MapField, URLField,
+                         EmbeddedDocumentField, ListField, BinaryField,
+                         ValidationError)
 from .fields import UnitField, QuantityField
+from . import hiteff
+from .common import units
 from warnings import warn
-from enum import Enum, Flag
+from enum import Enum
 import datetime
 
 __all__ = ['RatioType', 'get_settings', 'get_application_settings']
@@ -59,16 +62,13 @@ def _default_auto_sources():
 
 class HitEffConfig(EmbeddedDocument):
     """ Configure settings for displaying and querying HitEfficiencies """
-    key = StringField(required=True)
     display_name = StringField(required=False, default=None)
     display_unit = UnitField(required=False, default=None)
     description = StringField(default=None)
     link_spectrum = StringField(required=False, default=None)
     hide = BooleanField(required=False, default=False)
 
-    @property
-    def title(self):
-        return self.display_name or self.key
+    meta = {'allow_inheritance': True}
 
 
 class ROIType(Enum):
@@ -76,28 +76,51 @@ class ROIType(Enum):
     integrate = "integrate"
 
 
-class SpectrumROI(EmbeddedDocument):
+class SpectrumROI(HitEffConfig):
     """ Integrate or average a spectrum over an ROI """
-    label = StringField()
-    spectrum = StringField(required=True)
     start = QuantityField(required=True)
     stop = QuantityField(required=True)
     mode = EnumField(ROIType, default=ROIType.average)
     binwidths = BooleanField(default=True)
 
+    def __init__(self, spectrum=None, *args, **kwargs):
+        if spectrum is not None:
+            kwargs.setdefault('link_spectrum', spectrum)
+        super().__init__(*args, **kwargs)
+
+    @property
+    def spectrum(self):
+        return self.link_spectrum
+
+    @spectrum.setter
+    def spectrum(self, val):
+        self.link_spectrum = val
+
+    @property
+    def label(self):
+        return (f"{self.spectrum}, {self.mode.name} "
+                f"{self.start} to {self.stop}")
+
+    @property
+    def title(self):
+        return self.display_name or self.label
+
     @property
     def key(self):
-        return self.label or \
-            f"{self.spectrum}, {self.mode.name} {self.start} to {self.stop}"
+        return self.title
 
     def evaluate(self, hiteff, store: bool = True):
         """ Evaluate the given ROI """
         result = None
-        if (hist := hiteff.spectra.get(self.spectrum)) is not None:
+        if (hist := hiteff.spectra.get(self.link_spectrum)) is not None:
             func = getattr(hist, self.mode.name)
             result = func(self.start, self.stop, self.binwidths)
+        if self.display_unit is not None and result is not None:
+            if not self.display_units._check(result):
+                raise ValidationError(f"{self.key} hiteff {hiteff.id} units "
+                                      f"don't match {self.display_units}")
         if store:
-            hiteff.values[self.key] = result
+            hiteff.rois[self.key] = result
         return result
 
 
@@ -113,18 +136,16 @@ class HitEffDbConfig(EmbeddedDocument):
 
     def update_from(self, hiteff):
         """Update display settings from a HitEfficiency """
-        for k, v in hiteff.values.items():
-            unit = hiteff.get_result_unit(v)
-            self.display_values.setdefault(
-                k,
-                HitEffConfig(key=k, display_unit=unit)
-                )
-        for k, v in hiteff.spectra.items():
-            unit = hiteff.get_result_unit(v)
-            self.display_spectra.setdefault(
-                k,
-                HitEffConfig(key=k, display_unit=unit)
-                )
+        for type_ in ('values', 'spectra'):
+            for k, v in getattr(hiteff, type_).items():
+                register = getattr(self, f'display_{type_}')
+                cf = register.setdefault(k, HitEffConfig())
+                if cf.display_unit is None:
+                    unit = hiteff.get_result_unit(v)
+                    cf.display_unit = unit
+
+    # TODO: need a post-save signal to make sure the rois in all hiteffs
+    # are up-to-date
 
 
 class VersionSettings(Document):
@@ -137,7 +158,43 @@ class VersionSettings(Document):
     hiteffdbconfig = EmbeddedDocumentField(HitEffDbConfig,
                                            default=HitEffDbConfig)
 
+    def clean(self):
+        # make sure we haven't set a display_unit that conflicts with
+        # an already-existing hiteff
+        for type_ in ('values', 'spectra'):
+            register = getattr(self.hiteffdbconfig, f'display_{type_}')
+            for k, v in register.items():
+                if v.display_unit is None:
+                    continue
+                # get a list of all unique combinations of unit and norm type
+                # for HitEfficiencies in the db
+                unitlist = hiteff.HitEfficiency\
+                    .select_version(self.version_tag)\
+                    .aggregate([{'$group': {'_id': [f'{type_}.{k}.units',
+                                                    'norm']}}])
+                for entry in unitlist:
+                    ustr, normstr = entry['_id']
+                    val = 1 * units(ustr)
+                    testhe = hiteff.HitEfficiency(norm=normstr)
+                    if not testhe.check_result_unit(val, v.display_unit):
+                        errmsg = (f"display_{type_}: {k} the unit "
+                                  f"{v.display_unit} conflicts with at least "
+                                  f"one HitEfficiency document, which has "
+                                  f"units of {ustr}")
+                        raise ValidationError(errmsg,
+                                              field_name=f"display_{type_}")
 
+    @classmethod
+    def post_save(cls, sender, document, **kwargs):
+        # update the ROIs for all HitEfficiencies
+        for he in hiteff.HitEfficiency.select_version(document.version_tag):
+            rois = {roi.key: roi.evaluate(he, store=False)
+                    for roi in document.hiteffdbconfig.rois}
+            # use update rather than save or we'll get stuck in a loop
+            he.update(set__rois=rois)
+
+
+signals.post_save.connect(VersionSettings.post_save, sender=VersionSettings)
 
 
 class ApplicationSettings(Document):

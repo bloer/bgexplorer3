@@ -1,20 +1,13 @@
-from mongoengine import Document, DynamicDocument, EmbeddedDocument
 from mongoengine.fields import (StringField, MapField, UUIDField, ListField,
                                 SortedListField, IntField, DynamicField,
-                                EnumField, BooleanField, DateTimeField,
-                                FloatField, DictField, EmbeddedDocumentField)
+                                EnumField, FloatField, DictField)
 from mongoengine.errors import ValidationError
-from mongoengine.context_managers import switch_collection
-import bson
 from .verdoc import DynamicVersionedDocument
-from .fields import (QuantityField, UncertainQuantityField, HistogramField,
-                     UnitField)
+from .fields import QuantityField, UncertainQuantityField, HistogramField
 from .common import units as unitreg
 from . import settings
-from typing import Union, Optional
 from enum import Enum
 import logging
-import datetime
 log = logging.getLogger(__name__)
 
 
@@ -98,6 +91,8 @@ class HitEfficiency(DynamicVersionedDocument):
                       required=False, default=dict)
     spectra = MapField(HistogramField(allownone=True),
                        required=False, default=dict)
+    rois = MapField(UncertainQuantityField(allownone=True),
+                    required=False, default=dict)
 
     # optional but suggested metadata
     nprimaries = IntField(required=False)
@@ -132,28 +127,31 @@ class HitEfficiency(DynamicVersionedDocument):
                 val.hist.m.id = '.'.join([str(self.id), 's', key])
         # use a post-init signal
 
-    def clean(self):
-        super().clean()
+    def check_dbconfig(self, dbconfig):
+        """ Make sure we are compatible with the HitEffDBconfig
+        Raise ValidationError if not
+        """
+        # make sure units match the desired output
+        for type_ in ('values', 'spectra'):
+            register = getattr(self, type_)
+            for key, val in register.items():
+                display_register = getattr(dbconfig, f'display_{type_}')
+                if val is None or key not in display_register:
+                    continue
+                display_unit = display_register[key].display_unit
+                if not display_unit._check(self.get_result_unit(val)):
+                    msg = f"{type_} {key} {val} has incorrect units"
+                    raise ValidationError(msg)
+
         # evaluate all ROIs
-        dbconfig = settings.get_settings(self.active_version).hiteffdbconfig
+        self.rois = dict()
         for roi in dbconfig.rois:
             roi.evaluate(self, store=True)
-        # make sure units match the desired output
-        for key, val in self.values.items():
-            if val is None or key not in dbconfig.display_values:
-                continue
-            display_unit = dbconfig.display_values[key]
-            if not display_unit._check(self.get_result_unit(val)):
-                msg = f"Value {key} {val} has incorrect units"
-                raise ValidationError(msg)
-        for key, val in self.spectra.items():
-            if val is None or key not in dbconfig.display_spectra:
-                continue
-            display_unit = dbconfig.display_spectra[key]
-            if not display_unit._check(self.get_result_unit(val)):
-                msg = f"Value {key} {val} has incorrect units"
-                raise ValidationError(msg)
 
+    def clean(self):
+        super().clean()
+        dbconfig = settings.get_settings(self.active_version).hiteffdbconfig
+        self.check_dbconfig(dbconfig)
         self.values_keys = list(self.values)
         self.spectra_keys = list(self.spectra)
 
@@ -169,6 +167,16 @@ class HitEfficiency(DynamicVersionedDocument):
             return (1 * val.u * self.norm.units).to_reduced_units().u
         except AttributeError:
             return None
+
+    def check_result_unit(self, val, unit):
+        """ Test whether the units we expect for output are compatible with
+        `unit`, e.g. a user-selected display unit
+        """
+        if unit is None:
+            return True
+        if result_unit := self.get_result_unit(val):
+            return result_unit._check(unit)
+        return True
 
     def get_livetime(self, emissionrate=None):
         if self.livetime is not None:
