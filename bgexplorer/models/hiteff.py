@@ -29,11 +29,11 @@ class NormMultiplier(Enum):
             unitstr = '1/s/cm**2'
         elif self is NormMultiplier.flux_per_sr:
             unitstr = '1/s/cm**2/sr'
-        return unitreg(unitstr)
+        return unitreg(unitstr).u
 
     def check(self, emissionrate):
         """ check if emissionrate has the right units """
-        return self.units.check(emissionrate)
+        return self.units.is_compatible_with(emissionrate)
 
 
 class HitEfficiency(DynamicVersionedDocument):
@@ -139,7 +139,7 @@ class HitEfficiency(DynamicVersionedDocument):
                 if val is None or key not in display_register:
                     continue
                 display_unit = display_register[key].display_unit
-                if not display_unit._check(self.get_result_unit(val)):
+                if not display_unit.is_compatible_with(self.get_result_unit(val)):
                     msg = f"{type_} {key} {val} has incorrect units"
                     raise ValidationError(msg)
 
@@ -174,8 +174,10 @@ class HitEfficiency(DynamicVersionedDocument):
         """
         if unit is None:
             return True
+        if isinstance(unit, str):
+            unit = unitreg(unit).u
         if result_unit := self.get_result_unit(val):
-            return result_unit._check(unit)
+            return result_unit.is_compatible_with(unit)
         return True
 
     def get_livetime(self, emissionrate=None):

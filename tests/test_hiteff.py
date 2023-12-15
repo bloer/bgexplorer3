@@ -1,10 +1,11 @@
 import unittest
-from mongoengine import connect, disconnect
+from mongoengine import connect, disconnect, ValidationError
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.settings import VersionSettings, SpectrumROI, get_settings
+from bgexplorer.models import sourceterm  # need this to get signals registered
 import numpy as np
 
 
@@ -42,6 +43,20 @@ class TestHitEFficiency(unittest.TestCase):
         self.assertEqual(h.values['v1'].id, '.'.join([str(h.id), 'v', 'v1']))
         self.assertEqual(h.values['v2'].id, '.'.join([str(h.id), 'v', 'v2']))
         self.assertEqual(h.spectra['v1'].hist.id, '.'.join([str(h.id), 's', 'v1']))
+
+    def test_unit_settings(self):
+        """ test that unit settings are updated on save and that conflicting
+        units cause an error
+        """
+        h = HitEfficiency(source='h', location='h', values=dict(v1='10 +- 1 dru/mBq'))
+        h.save()
+        cfg = get_settings(h.active_version)
+        display_values = cfg.hiteffdbconfig.display_values
+        self.assertEqual(len(display_values), 1)
+        self.assertIn('v1', display_values)
+        self.assertTrue(display_values['v1'].display_unit.is_compatible_with('dru'))
+        with self.assertRaises(ValidationError):
+            HitEfficiency(source='h2', location='h2', values=dict(v1='3 Hz')).save()
 
     def test_rois(self):
         config = get_settings(HitEfficiency.get_default_tag())

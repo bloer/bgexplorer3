@@ -399,8 +399,10 @@ def update_hiteff(sender, document, **kwargs):
         st.save()
 
     # update default units
-    settings.get_settings(hiteff.active_version).hiteffdbconfig\
-        .update_from(hiteff)
+    vsettings = settings.get_settings(hiteff.active_version)
+    vsettings.hiteffdbconfig.update_from(hiteff)
+    # call update rather than save to bypass cleaning and post-save signals
+    vsettings.update(set__hiteffdbconfig=vsettings.hiteffdbconfig)
 
 
 mongoengine.signals.post_save.connect(update_component, sender=Component)

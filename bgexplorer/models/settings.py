@@ -9,6 +9,8 @@ from .common import units
 from warnings import warn
 from enum import Enum
 import datetime
+import logging
+log = logging.getLogger(__name__)
 
 __all__ = ['RatioType', 'get_settings', 'get_application_settings']
 
@@ -17,8 +19,8 @@ def get_settings(version_tag: str) -> 'VersionSettings':
     try:
         return VersionSettings.objects.get(version_tag=version_tag)
     except VersionSettings.DoesNotExist:
-        warn(f"No VersionSettings found for requested version {version_tag}"
-             ", creating version with defaults")
+        log.warning("No VersionSettings found for requested version "
+                    f"'{version_tag}', creating version with defaults")
         return VersionSettings(version_tag=version_tag).save()
 
 
@@ -116,7 +118,7 @@ class SpectrumROI(HitEffConfig):
             func = getattr(hist, self.mode.name)
             result = func(self.start, self.stop, self.binwidths)
         if self.display_unit is not None and result is not None:
-            if not self.display_units._check(result):
+            if not self.display_units.is_compatible_with(result):
                 raise ValidationError(f"{self.key} hiteff {hiteff.id} units "
                                       f"don't match {self.display_units}")
         if store:
