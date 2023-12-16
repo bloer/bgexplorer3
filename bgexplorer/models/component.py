@@ -41,7 +41,7 @@ class Component(VersionedDocument):
     name = StringField(required=True, validation=_noslash)
     description = StringField()
     notes = StringField(input_type='textarea')
-
+    material = StringField()
     mass = QuantityField(units='kg', default=0 * units.kg)
     volume = QuantityField(units='m**3', default=0 * units.m**3)
     inner_surface_area = QuantityField(units='m**2', default=0 * units.cm**2)

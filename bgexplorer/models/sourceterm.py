@@ -38,6 +38,7 @@ class SourceTerm(VersionedDocument):
     # emissionrate = UncertainQuantityField(required=True)
     componentName = StringField()
     assemblyPathStr = StringField()
+    material = StringField()
 
     meta = {'indexes': ['assemblyPath', 'source.id', 'hiteffs']}
 
@@ -85,6 +86,7 @@ class SourceTerm(VersionedDocument):
         self.componentName = self.component.name
         self.assemblyPathStr = '/'.join([self.assemblyRoot.name] +
                                         [p.name for p in self.assemblyPath])
+        self.material = self.component.material
         # clear cached properties1
         try:
             del self.emissionrate
@@ -97,6 +99,7 @@ class SourceTerm(VersionedDocument):
         hits = HitEfficiency.select_version(self.active_version)(
             source=self.source.name,
             location=self.location or self.componentName,
+            material__in=(None, self.material),
             )
         if settings.get_settings(self.active_version).hiteffdbconfig\
                 .query_distribution:
@@ -141,6 +144,7 @@ class SourceTerm(VersionedDocument):
                            set__rate_multiplier=self.rate_multiplier,
                            set__componentName=self.component.name,
                            set__assemblyPathStr=self.assemblyPathStr,
+                           set__material=self.material,
                            )
         if not self.hiteffs_auto:
             update_dict['set__hiteffs_auto'] = self.hiteffs_auto

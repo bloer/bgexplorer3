@@ -7,6 +7,7 @@ from .fields import QuantityField, UncertainQuantityField, HistogramField
 from .common import units as unitreg
 from . import settings
 from enum import Enum
+from itertools import chain
 import logging
 log = logging.getLogger(__name__)
 
@@ -99,6 +100,7 @@ class HitEfficiency(DynamicVersionedDocument):
     primary_particle = StringField(required=False)
     primary_spectrum = DynamicField(required=False)
     primary_yield = FloatField(required=False, default=1)
+    material = StringField(default=None)
     biasweight = FloatField(required=False, default=1)
     livetime = QuantityField(units='s', required=False)
     version = DynamicField(required=False)
@@ -119,7 +121,7 @@ class HitEfficiency(DynamicVersionedDocument):
     def __init__(self, *args, **kwargs):
         """ Set an ID on all values and spectra to track correlations """
         super().__init__(*args, **kwargs)
-        for key, val in self.values.items():
+        for key, val in chain(self.values.items(), self.rois.items()):
             if val is not None:
                 val.m.id = '.'.join([str(self.id), 'v', key])
         for key, val in self.spectra.items():

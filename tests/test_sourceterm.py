@@ -275,6 +275,28 @@ class TestSourceTerm(unittest.TestCase):
         st = SourceTerm.objects(assemblyRoot=c1, source__name='Th232').first()
         self.assertEqual(len(st.hiteffs), 0)
 
+    def test4_neutron(self):
+        """ test that we properly find multiple hits for neutrons """
+        h1 = HitEfficiency(source='U238', location='c1', values=dict(v1='10 +- 1 dru/mBq')).save()
+        h2 = HitEfficiency(source='U238', location='c1', primary_particle='neutron', primary_yield=1.e-2,
+                           values=dict(v1='(2 +- 0.1)e-2 dru/mBq')).save()
+        h3 = HitEfficiency(source='U238', location='c1', primary_particle='neutron', primary_yield=1.e-1, material='steel',
+                           values=dict(v1='(2 +- 0.1)e-1 dru/mBq')).save()
+        c1 = Component(name='c1', mass='3 kg', location='c1', material='steel',
+                       sources=[EmissionSource(name='U238', rate='5 mBq/kg')]).save()
+        c2 = Component(name='c2', mass='8 kg', location='c1',
+                       sources=[EmissionSource(name='U238', rate='5 microBq/kg')]).save()
+        r1 = CalculatedResults.for_component(c1)
+        r2 = CalculatedResults.for_component(c2)
+
+        self.assertEqual(len(r1.sources), 1)
+        self.assertEqual(len(r1.sources[0].hiteffs), 3)
+        self.assertAlmostEqual(r1.values['v1'].to('dru').mode, 15*(10 + 2e-2 + 2e-1))
+        self.assertEqual(len(r2.sources), 1)
+        self.assertEqual(len(r2.sources[0].hiteffs), 2)
+        self.assertAlmostEqual(r2.values['v1'].to('dru').mode, 0.04*(10 + 2e-2))
+
+
 
 
 
