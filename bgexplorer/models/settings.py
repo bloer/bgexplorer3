@@ -5,9 +5,11 @@ from mongoengine import (Document, DateTimeField, StringField, BooleanField,
                          ValidationError)
 from .fields import UnitField, QuantityField
 from . import hiteff
+from . import verdoc
 from .common import units
 from warnings import warn
 from enum import Enum
+from typing import Optional
 import datetime
 import logging
 log = logging.getLogger(__name__)
@@ -15,7 +17,9 @@ log = logging.getLogger(__name__)
 __all__ = ['RatioType', 'get_settings', 'get_application_settings']
 
 
-def get_settings(version_tag: str) -> 'VersionSettings':
+def get_settings(version_tag: Optional[str] = None) -> 'VersionSettings':
+    if version_tag is None:
+        version_tag = verdoc.VersionedDocument.get_default_tag()
     try:
         return VersionSettings.objects.get(version_tag=version_tag)
     except VersionSettings.DoesNotExist:
@@ -26,7 +30,11 @@ def get_settings(version_tag: str) -> 'VersionSettings':
 
 def get_application_settings() -> 'ApplicationSettings':
     # there should only ever be one
-    return ApplicationSettings.objects.get()
+    try:
+        return ApplicationSettings.objects.get()
+    except ApplicationSettings.DoesNotExist:
+        log.warning("No ApplicationSettings found, creating default")
+        return ApplicationSettings().save()
 
 
 class RatioType(Enum):
@@ -206,7 +214,7 @@ class ApplicationSettings(Document):
     org_name = StringField()
     org_logo = BinaryField()
     org_url = URLField()
-    allow_anon_view = BooleanField(default=False)
+    allow_anon_view = BooleanField(default=True)
 
 
 def post_save(sender, document, **kwargs):

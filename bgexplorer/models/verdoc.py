@@ -190,7 +190,7 @@ class VersionedDocument(Document):
     """
 
     __slots__ = ['_active_version']
-    _DEFAULT_TAG = ''
+    _DEFAULT_TAG = 'main'
 
     id = ObjectIdField(primary_key=True, default=ObjectId)
     original_id = ObjectIdField()
