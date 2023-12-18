@@ -129,7 +129,7 @@ class AsymmetricUncertainty:
     It's important to stress that this PDF definition is NOT compatible with
     the defined behavior for adding these objects!
     """
-    __slots__ = ('mode', 's0', 's1', '_v0', '_v1', '_modesq', 'id',
+    __slots__ = ('_mode', '_s0', '_s1', '_v0', '_v1', '_modesq', 'id',
                  '_expression')
     _minmeanz = 1
 
@@ -148,22 +148,63 @@ class AsymmetricUncertainty:
         if `forceposdef` is True and the mode is less than `_minmeanz`
         times the lower sigma, lower sigma will be adjusted.
         """
+        if value is None and expression is None:
+            raise ValueError("Either value or expression must be provided")
         self.mode = value
         self.s0 = sigma
-        self.s1 = sigmaup if sigmaup is not None else self.s0
-        if not np.isscalar(self.mode):
-            self.mode = np.asarray(self.mode)
-            self.s0 = np.asarray(self.s0)
-            self.s1 = np.asarray(self.s1)
+        self.s1 = sigmaup if sigmaup is not None else sigma
         self._v0 = None
         self._v1 = None
         self._modesq = None
         self.id = id
         self._expression = expression
+        if self._mode is not None:
+            if not np.isscalar(self.mode):
+                self.mode = np.asarray(self.mode)
+                self.s0 = np.asarray(self.s0)
+                self.s1 = np.asarray(self.s1)
+            if (forceposdef and np.isscalar(self.mode) and
+                    self.mode < self.s0*self._minmeanz):
+                self.s0 = self.mode / self._minmeanz
 
-        if (forceposdef and np.isscalar(self.mode) and
-                self.mode < self.s0*self._minmeanz):
-            self.s0 = self.mode / self._minmeanz
+    def _evaluate(self):
+        """ evaluate our expression and copy the results """
+        result = self._expression.evaluate(lazy=False)
+        self.mode = result.mode
+        self.s0 = result.s0
+        self.s1 = result.s1
+
+    @property
+    def mode(self):
+        if self._mode is None:
+            self._evaluate()
+        return self._mode
+
+    @mode.setter
+    def mode(self, value):
+        self._mode = value
+
+    @property
+    def s0(self):
+        if self._s0 is None:
+            self._evaluate()
+        return self._s0
+
+    @s0.setter
+    def s0(self, value):
+        self._s0 = value
+
+    @property
+    def s1(self):
+        if self._s1 is None:
+            self._evaluate()
+        return self._s1
+
+    @s1.setter
+    def s1(self, value):
+        self._s1 = value
+
+
 
     # todo: is it more efficient to store variance rather than std?
     @property
@@ -656,7 +697,10 @@ class LinearExpression:
         """ Get list of all variables """
         return set().union(*self.coefficients.keys())
 
-    def evaluate(self) -> 'AsymmetricUncertainty':
+    def evaluate(self, lazy: bool = True) -> 'AsymmetricUncertainty':
+        if lazy and not AsymmetricUncertainty.get_ignore_correlations():
+            return AsymmetricUncertainty(None, None, expression=self)
+
         disjoint = (len(self.variables) ==
                     sum(len(key) for key in self.coefficients.keys()))
         if disjoint:
@@ -678,7 +722,7 @@ class LinearExpression:
                    for key, coeff in self.coefficients.items())
         v0, v1 = (0, 0)
         for variable in self.variables:
-            val = self.partialderivative(variable).evaluate()
+            val = self.partialderivative(variable).evaluate(lazy=lazy)
             v0 += (val.modesq + val.v0 / 2) * (
                 (val.mode >= 0) * variable.v0 + (val.mode < 0) * variable.v1)
             v1 += (val.modesq + val.v1 / 2) * (

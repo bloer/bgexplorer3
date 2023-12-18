@@ -152,3 +152,14 @@ class TestAsymmetric(unittest.TestCase):
         self.assertGreater(x.s0, z.s0)
         self.assertGreater(x.s1, z.s1)
 
+    def test6_lazy(self):
+        """ test that intermediate objects are not evaluated """
+        i1 = self.a * self.lim1
+        i2 = self.b * self.lim2
+        result = i1 + i2
+        # reading the mode property triggers evaluate on result, but not i1,i2
+        self.assertEqual(result.mode, 0)
+        self.assertIsNotNone(result.s0)
+        self.assertIsNone(i1._mode)
+        self.assertIsNone(i2._mode)
+
