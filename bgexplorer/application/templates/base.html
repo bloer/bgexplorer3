@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        {% block head %}
+        <!-- Required meta tags -->
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+        <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+        {% block styles %}
+            <!-- Bootstrap CSS -->
+            {{ bootstrap.load_css() }}
+            <link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
+            {% block pagestyle %}
+            {% endblock pagestyle %}
+        {% endblock styles%}
+
+        <title>{% block title %}Background Explorer{% endblock %}</title>
+        {% endblock head %}
+    </head>
+    <body>{% block body %}
+        {% block navbar %}
+        <nav class="navbar navbar-expand">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="https://github.com/bloer/bgexplorer">
+                <img src="{{ url_for('static', filename="bgexplorer_brand.png") }}"
+                     alt="Background Explorer">
+            </a>
+            {% block pagenav %}
+            {% endblock %}
+            <a class="navbar-brand" href="https://pnnl.gov">
+                <img src="{{ url_for('static', filename='logopnnl.png') }}" alt="PNNL">
+            </a>
+        </div>
+        </nav>
+        {% endblock navbar %}
+
+        <!-- Your page content -->
+        {% block content %}
+        <div id="content" class="container">
+            <div id="pageheader" class="row">{% block pageheader %}{% endblock %}</div>
+            <div id="pagecontent">
+                {% block pagecontent %}{% endblock %}
+            </div>
+        </div>
+        <footer id="pagefooter">
+            Background Explorer version {{ bgexplorer_version() }} |
+            <a href="https://github.com/bloer/bgexplorer/blob/master/LICENSE">License</a>
+        </footer>
+        </div>
+        {% endblock content %}
+
+        {% block scripts %}
+            <!-- Optional JavaScript -->
+            {{ bootstrap.load_js() }}
+        {% endblock %}
+    {% endblock body%}
+    </body>
+</html>

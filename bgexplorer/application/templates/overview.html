@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block pageheader %}<h1>Version {{ g.active_version }}</h1>{% endblock %}
+{% block pagecontent %}
+Last modified {{ pretty_date(settings.modified) }}
+{% endblock pagecontent %}

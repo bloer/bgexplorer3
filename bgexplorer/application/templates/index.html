@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block pageheader %}<h1>Background Explorer</h1>{% endblock %}
+{% block pagecontent %} This is a placeholder
+<div class="row">
+    {% if branches %}
+    <div class="col-6">
+        <h2>Branches</h2>
+        <ul class="versionlist">{% for version in branches if version.editable %}
+            <li class="version">
+                <a href="{{ url_for('.overview', active_version=version.version_tag) }}">
+                    {{ version.version_tag }}
+                </a> (modified {{ pretty_date(version.modified) }})
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    {% if tags %}
+    <div class="col-6">
+        <h2>Branches</h2>
+        <ul class="versionlist">{% for version in tags if version.editable %}
+            <li class="version">
+                <a href="{{ url_for('.overview', active_version=version.version_tag) }}">
+                    {{ version.version_tag }}
+                </a>   (modified {{ pretty_date(version.modified) }})
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}
+
