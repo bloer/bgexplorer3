@@ -48,5 +48,6 @@ class PublicationInfo(EmbeddedDocument):
                                     help_text="e.g. Table II, entry 45")
     org = StringField(verbose_name="Publishing Organization/Experiment")
 
-
+    # TODO: add a clean that pre-pends https and checks
+    # for DOIs or ArXiv identifiers in reference
 

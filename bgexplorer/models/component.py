@@ -2,7 +2,8 @@ from mongoengine import (EmbeddedDocument, StringField, DateField,
                          DateTimeField, DynamicEmbeddedDocument, BooleanField,
                          EmbeddedDocumentField, DictField, ValidationError,
                          EmbeddedDocumentListField, ListField, FloatField,
-                         CASCADE, PULL, signals)
+                         URLField,
+                         CASCADE, PULL, signals, IntField)
 
 from .verdoc import VersionedDocument, VersionedReferenceField
 from .fields import QuantityField, AttachmentsField
@@ -13,6 +14,7 @@ from .common import units
 class PurchaseInfo(EmbeddedDocument):
     vendor = StringField(verbose_name='Vendor/producer')
     partnum = StringField(verbose_name="Vendor part number or drawing")
+    link = URLField("Link to product website")
     material_batch = StringField(verbose_name="Material batch number")
     batch = StringField(verbose_name='Fabrication batch number')
     purchased = DateField(verbose_name="Purchase date")
@@ -55,6 +57,7 @@ class Component(VersionedDocument):
         verbose_name="HitEfficiency Location",
         help_text="Key to match against locations in HitEfficieny database"
     )
+    hierarchy_level = IntField(default=1, help_text="how many levels of nested components are below us?")
     # TODO: need to add some assay quality info
     purchaseinfo = EmbeddedDocumentField(PurchaseInfo)
     extra_metadata = DictField()
@@ -118,7 +121,10 @@ class Assembly(Component):
             for attr in ('mass', 'volume', 'inner_surface_area',
                          'outer_surface_area'):
                 setattr(self, attr, self.sumoverchildren(attr))
+            self.hierarchy_level = max(placement.component.hierarchy_level
+                                       for placement in self.children) + 1
         else:
+            self.hierarchy_level = 1
             self.mass = 0*units.kg
             self.volume = 0*units.m**3
             self.inner_surface_area = 0*units.cm**2

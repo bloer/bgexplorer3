@@ -71,6 +71,13 @@ class TestComponent(unittest.TestCase):
         for p in Placement.objects:
             self.assertEqual(p.component.id, c1.id)
 
+    def tesT_json(self):
+        c1 = Component(name="c1", mass="10 kg")
+        json = c1.to_json()
+        c2 = Component.from_json(json)
+        self.assertEqual(c1.id, c2.id)
+        self.assertEqual(c1.mass, c2.mass)
+
         a1.children = []
         a1.save()
         self.assertEqual(Placement.objects.count(), 1)

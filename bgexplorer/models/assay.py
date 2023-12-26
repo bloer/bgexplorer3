@@ -1,6 +1,6 @@
 from mongoengine import (EmbeddedDocument, StringField, EmbeddedDocumentField,
                          EmbeddedDocumentListField, DateField, IntField,
-                         DictField)
+                         DictField, URLField)
 from .emissionspec import EmissionSpec
 from .fields import UncertainQuantityField, AttachmentsField
 from .common import PublicationInfo
@@ -10,8 +10,10 @@ class SampleInfo(EmbeddedDocument):
     id = StringField(verbose_name="Sample ID")
     name = StringField(verbose_name="Sample name")
     description = StringField(verbose_name="Sample Description")
+    material = StringField()
     vendor = StringField(verbose_name='Vendor/producer')
     partnum = StringField(verbose_name="Vendor part number/identifier")
+    link = URLField(verbose_name="Link to product website")
     batch = StringField(verbose_name='Batch number/ID')
     purchased = DateField(verbose_name="Purchase date")
     received = DateField(verbose_name="Date received")

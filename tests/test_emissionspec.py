@@ -104,3 +104,12 @@ class TestEmission(unittest.TestCase):
         # test that emissionrate has an id assigned
         source = EmissionSource(name="U238", rate="10 +- 0.2 Bq/kg")
         self.assertEqual(source.rate.id, source.id)
+
+    def test_json(self):
+        source = EmissionSource(name='U238', rate='10 +- 0.2 Bq/kg')
+        spec = EmissionSpec(name='', sources=[source])
+        json = spec.to_json()
+        spec2 = EmissionSpec.from_json(json)
+        self.assertEqual(spec.id, spec2.id)
+        self.assertEqual(spec.sources[0].id, spec2.sources[0].id)
+        self.assertEqual(spec.sources[0].rate, spec2.sources[0].rate)

@@ -1,6 +1,6 @@
 from mongoengine import (EmbeddedDocument, EmbeddedDocumentListField)
 from mongoengine.fields import BaseField, StringField, BinaryField
-import pint
+# import pint
 import logging
 from typing import Union, Optional
 import numpy as np
@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from .asymmetric import AsymmetricUncertainty
 from .histogram import Histogram
 from .common import units as unitreg
+from .common import pint
 
 log = logging.getLogger(__name__)
 
@@ -142,6 +143,7 @@ class QuantityField(BaseField):
             self.convert = False
         self.forceasym = forceasym
 
+
     def _fromstr(self, value):
         value = value.strip()
         val = limit = quantile = unit = sigma = sigmaup = exponent = None
@@ -198,7 +200,6 @@ class QuantityField(BaseField):
 
         if not isinstance(value, pint.Quantity):
             value = pint.Quantity(value, units)
-
         if self.forceasym and not isinstance(value.m, AsymmetricUncertainty):
             value = pint.Quantity(AsymmetricUncertainty(value.m, 0), value.u)
 

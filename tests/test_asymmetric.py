@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from numpy.testing import *
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
-from bgexplorer.models.common import units
+from bgexplorer.models.common import units, pint
 
 class TestAsymmetric(unittest.TestCase):
     @classmethod
@@ -162,4 +162,8 @@ class TestAsymmetric(unittest.TestCase):
         self.assertIsNotNone(result.s0)
         self.assertIsNone(i1._mode)
         self.assertIsNone(i2._mode)
+
+    def test_dimensionless_bug(self):
+        """ in some contexts quantities aren't constructed correctly? """
+        self.assertTrue(hasattr(pint.Quantity(AsymmetricUncertainty(10,1), 'mBq/kg'), 'dimensionality'))
 

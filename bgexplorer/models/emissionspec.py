@@ -44,6 +44,7 @@ class Multiplier(Enum):
             return cls.none
         raise ValidationError(f"Unhandled rate units {rate.u}")
 
+    @property
     def valid_units(self):
         """ Get a list of valid units for this multiplier """
         return {
@@ -61,13 +62,13 @@ class Multiplier(Enum):
         """
         if rate is None:
             return
-        for u in self.valid_units():
+        for u in self.valid_units:
             if units(u).check(rate):
                 return True
         # if we get here, none match
         raise ValidationError(f"Rate units {rate.u} invalid"
                               f" for multiplier {self}")
-
+    @property
     def default_distribution(self) -> str:
         return {Multiplier.mass: 'bulk',
                 Multiplier.volume: 'bulk',
@@ -80,7 +81,7 @@ class Multiplier(Enum):
     def determine_distribution(self, component):
         if component.distribution:
             return component.distribution
-        dist = self.default_distribution()
+        dist = self.default_distribution
         if component.treat_surface_as_bulk and dist.find('surface') != -1:
             dist = 'bulk'
         return dist
@@ -93,9 +94,19 @@ class Multiplier(Enum):
         return mult
 
 
+class SourceCategory(Enum):
+    target = 'target'
+    assay = 'assay'
+    cosmogenic = 'cosmogenic'
+    dust = 'dust'
+    radon = 'radon'
+
+
 class EmissionSource(EmbeddedDocument):
     id = ObjectIdField(default=ObjectId)
     name = StringField(required=True)
+    comment = StringField()
+    category = EnumField(SourceCategory)
     rate = UncertainQuantityField(allownone=True)
     multiplier = EnumField(Multiplier)
     particle = StringField()
@@ -130,7 +141,7 @@ class EmissionSpec(DynamicVersionedDocument):
     comment = StringField()
     sources = EmbeddedDocumentListField(EmissionSource)
 
-    meta = {'inheritable': True}
+    meta = {'allow_inheritance': True}
 
     def _addsource(self, newsource: settings.AddSource) -> None:
         """ Add or update sources from the VersionSettings/AddSource list """
