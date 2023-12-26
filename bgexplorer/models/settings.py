@@ -167,6 +167,10 @@ class VersionSettings(Document):
                                            default=_default_auto_sources)
     hiteffdbconfig = EmbeddedDocumentField(HitEffDbConfig,
                                            default=HitEffDbConfig)
+    meta = {
+        'indexes': ['modified'],
+        'ordering': ['-modified'],
+    }
 
     def clean(self):
         # make sure we haven't set a display_unit that conflicts with

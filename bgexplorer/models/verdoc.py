@@ -203,7 +203,8 @@ class VersionedDocument(Document):
     enteredby = StringField(verbose_name="Data entered by")
 
     meta = {'abstract': True, 'queryset_class': VersionedQuerySet,
-            'indexes': ['version_tags'],
+            'indexes': ['version_tags', 'modified'],
+            'ordering': ['-modified'],
             }
 
     def __init__(self, *args, version_tag: Optional[str] = None,
