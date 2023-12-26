@@ -72,12 +72,8 @@ class SourceTerm(VersionedDocument):
             if self.location:
                 break
         self.location = self.location or self.assemblyRoot.location
-        # override distribution based on component settings
-        self.distribution = self.source.multiplier.default_distribution()
-        if (self.component.treat_surface_as_bulk
-                and self.distribution.find('surface') != -1):
-            self.distribution = 'bulk'
-
+        self.distribtion = \
+            self.source.multiplier.determine_distribution(self.component)
         self.weight = reduce(operator.mul,
                              (p.weight for p in self.assemblyPath), 1)
         self.rate_multiplier = self.source.multiplier.getvalue(self.component)
@@ -183,18 +179,18 @@ class SourceTerm(VersionedDocument):
         return st
 
 
-def find_sourcterms(obj: Union[Component, EmissionSpec, EmissionSource],
-                    relativeto: Optional[Assembly] = None,
-                    active_version: Optional[str] = None,
-                    ) -> VersionedQuerySet:
+def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource],
+                     relativeto: Optional[Assembly] = None,
+                     active_version: Optional[str] = None,
+                     ) -> VersionedQuerySet:
     """ Find all SourceTerms for the given object """
     active_version = active_version or obj.active_version
     query = SourceTerm.select_version(active_version)
     if relativeto is not None:
         query = query(assemblyRoot=relativeto)
-    if isinstance(obj. Component):
-        placements = Placement.objects(version_tags=obj.active_verison,
-                                       component=object)
+    if isinstance(obj, Component):
+        placements = Placement.objects(version_tags=obj.active_version,
+                                       component=obj)
         query = query(assemblyPath__in=placements)
     elif isinstance(obj, EmissionSpec):
         query = query(spec=obj)
@@ -219,8 +215,8 @@ class CalculatedResults(Document):
     def for_object(cls, obj, relativeto: Optional[Assembly] = None,
                    active_version: Optional[str] = None
                    ) -> 'CalculatedResults':
-        return cls.from_sourceterms(find_sourcterms(obj, relativeto,
-                                                    active_version))
+        return cls.from_sourceterms(find_sourceterms(obj, relativeto,
+                                                     active_version))
 
     @classmethod
     def for_component(cls, component: Component,
