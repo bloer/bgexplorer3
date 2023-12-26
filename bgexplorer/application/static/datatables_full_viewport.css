@@ -1,0 +1,19 @@
+/* these two make the datatable fill the viewport and scroll horizontally and vertically */
+div.dataTables_scroll{
+    width: 100%;
+    height: calc(100vh - 205px);
+    margin: 0 auto;
+
+}
+div.dataTables_scrollBody{
+    height: calc(100% - 40px);
+    border-left-width: 0px !important;
+}
+
+/* make top a little more compact */
+div.dataTables_info {float: left}
+
+/* need these to fix data-table overrides that break color and borders */
+div.dataTables_wrapper { border-left-width: 0px; }
+table.dataTable thead tr > .dtfc-fixed-left {background-color: var(--bs-table-bg);}
+table.table-bordered.dataTable td:first-child { border-left-color: #ddd; }

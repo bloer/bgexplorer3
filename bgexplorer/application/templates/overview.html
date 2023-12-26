@@ -1,5 +1,14 @@
-{% extends "base.html" %}
-{% block pageheader %}<h1>Version {{ g.active_version }}</h1>{% endblock %}
+{% extends "versionbase.html" %}
+{% block pageheader %}
+<h1>Version {{ g.active_version }} </h1>
+<small>Last modified {{ pretty_date(settings.modified) }}</small>
+{% endblock %}
 {% block pagecontent %}
-Last modified {{ pretty_date(settings.modified) }}
+
+
+<ul>
+    <li><a href="{{ url_for('component.overview') }}">Components</a></li>
+    <li><a href="{{ url_for('emissionspec.overview') }}">Emission Specs</a></li>
+    <li><a href="{{ url_for('hitefficiency.overview') }}">Hit Efficiencies</a></li>
+</ul>
 {% endblock pagecontent %}

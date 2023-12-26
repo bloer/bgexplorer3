@@ -1,0 +1,34 @@
+{% macro styles() %}
+<link rel="stylesheet" href="{{ url_for('static', filename='datatables.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='datatables_full_viewport.css') }}">
+{% endmacro %}
+
+{% macro scripts(tableid='dtable') %}
+<script src="{{ url_for('static', filename='jquery.min.js') }}"></script>
+<script src="{{ url_for('static', filename='datatables.min.js') }}"></script>
+<script>
+    new DataTable("#{{ tableid }}",{
+        sDom: 'iftr',
+        paging: false,
+        scrollY: "100%",
+        scrollCollapse: true,
+        scrollX: true,
+        fixedColumns: true,
+        order: [],
+        });
+</script>
+{% endmacro %}
+
+{% macro render(headings) %}
+<table id="dtable" class="table table-hover table-bordered table-sm  nowrap" width="100%">
+    <thead class="table-light">
+        <tr>{% for col in headings %}
+            <th>{{ col }}</th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+    {{ caller() }}
+    </tbody>
+</table>
+{% endmacro %}

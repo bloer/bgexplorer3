@@ -25,11 +25,21 @@
                 <img src="{{ url_for('static', filename="bgexplorer_brand.png") }}"
                      alt="Background Explorer">
             </a>
-            {% block pagenav %}
-            {% endblock %}
-            <a class="navbar-brand" href="https://pnnl.gov">
+            <div class="collapse navbar-collapse">
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('index') }}">Index</a>
+                </li>
+                {% block pagenav %}
+                {% endblock %}
+            </ul>
+            </div>
+            {% block extranav %}
+            {% endblock extranav %}
+            <a class="navbar-brand me-0 ms-3" href="https://pnnl.gov">
                 <img src="{{ url_for('static', filename='logopnnl.png') }}" alt="PNNL">
             </a>
+
         </div>
         </nav>
         {% endblock navbar %}

@@ -5,7 +5,15 @@ import secrets
 import importlib
 from ..models.settings import (get_settings, get_application_settings,
                                VersionSettings)
+from ..models.component import Component
+from ..models.emissionspec import EmissionSpec
+from ..models.hiteff import HitEfficiency
 from .common import pretty_date
+from .blueprints import CollectionViews
+from . import examples
+
+from ..models.asymmetric import AsymmetricUncertainty
+import pint
 
 
 def create_app(config_file=None):
@@ -28,6 +36,13 @@ def create_app(config_file=None):
     get_application_settings()
     get_settings()
 
+    # blueprints
+    app.register_blueprint(CollectionViews(Component),
+                           url_prefix='/<active_version>/component')
+    app.register_blueprint(CollectionViews(EmissionSpec),
+                           url_prefix='/<active_version>/emission')
+    app.register_blueprint(CollectionViews(HitEfficiency),
+                           url_prefix='/<active_version>/hiteff')
     # app preprocessing
     @app.url_defaults
     def add_active_version(endpoint, values):
@@ -45,19 +60,31 @@ def create_app(config_file=None):
     def bgexplorer_version():
         return importlib.metadata.version('bgexplorer')
 
+    @app.context_processor
+    def inject_settings():
+        try:
+            return dict(settings=get_settings(flask.g.active_version))
+        except AttributeError:
+            return dict()
+
     app.add_template_global(pretty_date, 'pretty_date')
 
     # app endpoints
     @app.get('/')
     def index():
-        branches = VersionSettings.objects(editable=True).order_by('-modified')
-        tags = VersionSettings.objects(editable=False).order_by('-modified')
-        return flask.render_template("index.html", branches=branches, tags=tags)
+        branches = VersionSettings.objects(editable=True)
+        tags = VersionSettings.objects(editable=False)
+        return flask.render_template("index.html", branches=branches,
+                                     tags=tags)
+
+    @app.get('/favicon.ico')
+    def favicon():
+        return flask.send_static_file('favicon.ico')
 
     @app.get('/explore/<active_version>')
     def overview():
-        settings = get_settings(flask.g.active_version)
-        return flask.render_template('overview.html', settings=settings)
+        return flask.render_template('overview.html')
 
+    examples.qis.populate_example(clean=True)
 
     return app

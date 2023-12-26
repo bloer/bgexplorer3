@@ -1,0 +1,39 @@
+{% extends "versionbase.html" %}
+{% import "datatable.html" as datatable %}
+
+{% block pageheader %}<h1>Components</h1>{% endblock %}
+
+
+{% macro part(component) %}
+{{ component.purchaseinfo.vendor or '' }} {{ component.purchaseinfo.partnum or '' }}
+{% if component.purchaseinfo.batch or component.purchaseinfo.material_batch %}
+batch {{ component.purchaseinfo.batch or component.purchaseinfo.material_batch }}
+{% endif %}
+{% endmacro %}
+
+{% block pagecontent %}
+{% set headers = ['Name', 'Hierarchy', 'Description', 'Material',
+                  'Mass (kg)', 'Part', 'Modified'] %}
+{% call datatable.render(headers) %}
+    {% for component in data %}
+    <tr class="component{% if component.hierarchy_level is gt 1 %} assembly{% endif %}" data-id="{{ component.id }}" data-original_id="{{ component.original_id }}">
+        <td><a href="{{ url_for('.get_json', object=component) }}">{{ component.name }}</a> </td>
+        <td>{{ component.hierarchy_level }}</td>
+        <td>{{ component.description or '' }}</td>
+        <td>{{ component.material or '' }}</td>
+        <td data-order="{{ '%.6e' | format(component.mass.to('kg').m) }}">{{ component.mass.to('kg').m }}</td>
+        <td>{{ part(component) }} </td>
+        <td data-order="{{ component.modified.timestamp() }}">{{ pretty_date(component.modified) }}</td>
+    </tr>
+    {% endfor %}
+{% endcall %}
+{% endblock %}
+
+{% block pagestyle %}
+{{ datatable.styles() }}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{{ datatable.scripts() }}
+{% endblock %}

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block pagenav %}
+<li class="nav-item">
+    <a class="nav-link" href="{{ url_for('overview') }}">Overview</a>
+</li>
+<li class="nav-item">
+    <a class="nav-link" href="{{ url_for('component.overview') }}">Components</a>
+</li>
+<li class="nav-item">
+    <a class="nav-link" href="{{ url_for('emissionspec.overview') }}">Sources</a>
+</li>
+<li class="nav-item">
+    <a class="nav-link" href="{{ url_for('hitefficiency.overview') }}">Hit Efficiencies</a>
+</li>
+{% endblock %}
+
+{% block extranav %}
+<span class="nav-text">{%- if settings.editable -%} branch {%- else -%} tag {%- endif -%}: {{ g.active_version }}</span>
+{% endblock %}

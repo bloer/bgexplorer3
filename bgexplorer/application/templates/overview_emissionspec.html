@@ -1,0 +1,51 @@
+{% extends "versionbase.html" %}
+{% import "datatable.html" as datatable %}
+
+{% block pageheader %}<h1>Radiation sources</h1>{% endblock %}
+
+
+{% block pagecontent %}
+{% set headers = ['Name', 'Description', 'Reference', 'Material', 'Sample',
+                  'Measurement', 'Modified'] %}
+
+{% macro reference(spec) %}
+{{ spec.publication.org or '' }}
+{% if spec.publication.reference_url %}<a href="https://{{ spec.publication.reference_url }}">{% endif %}
+{{ spec.publication.reference or spec.publication.reference_url or '' }}
+{% if spec.publication.reference_url %}</a>{% endif %}
+{% if spec.publication.reference_details %}({{ spec.publication.reference_details }}){% endif %}
+{% endmacro %}
+
+{% macro sample(spec) %}
+{{ spec.sample.vendor or '' }} {{ spec.sample.partnum or '' }}
+{%- if spec.sample.batch %} (batch {{ spec.sample.batch }}) {% endif %}
+{% endmacro %}
+
+{% macro measurement(spec) %}
+{{ spec.measurement.institution or '' }} {{ spec.measurement.technique or '' }}
+{% endmacro %}
+
+
+{% call datatable.render(headers) %}
+    {% for spec in data %}
+    <tr class="spec{% if spec.sample is defined %} assay{% endif %}" data-id="{{ spec.id }}" data-original_id="{{ spec.original_id }}">
+        <td><a href="{{ url_for('.get_json', object=spec) }}">{{ spec.name }}</a> </td>
+        <td>{{ spec.description or '' }}</td>
+        <td>{{ reference(spec) }}</td>
+        <td>{{ spec.sample.material or '' }}</td>
+        <td>{{ sample(spec) }}</td>
+        <td>{{ measurement(spec) }}</td>
+        <td data-order="{{ spec.modified.timestamp() }}">{{ pretty_date(spec.modified) }}</td>
+    </tr>
+    {% endfor %}
+{% endcall %}
+{% endblock %}
+
+{% block pagestyle %}
+{{ datatable.styles() }}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{{ datatable.scripts() }}
+{% endblock %}
