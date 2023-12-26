@@ -14,6 +14,8 @@ from .common import units, addnone, multnone
 from . import settings
 from typing import List, Optional, Union
 from itertools import chain
+import logging
+log = logging.getLogger(__name__)
 
 
 class SourceTerm(VersionedDocument):
@@ -72,7 +74,7 @@ class SourceTerm(VersionedDocument):
             if self.location:
                 break
         self.location = self.location or self.assemblyRoot.location
-        self.distribtion = \
+        self.distribution = \
             self.source.multiplier.determine_distribution(self.component)
         self.weight = reduce(operator.mul,
                              (p.weight for p in self.assemblyPath), 1)
@@ -91,7 +93,8 @@ class SourceTerm(VersionedDocument):
         self.livetimes = [hit.get_livetime(self.emissionrate)
                           for hit in self.hiteffs]
 
-    def find_hiteffs(self, replace: bool = True) -> List[HitEfficiency]:
+    @property
+    def hiteffs_query(self) -> VersionedQuerySet:
         hits = HitEfficiency.select_version(self.active_version)(
             source=self.source.name,
             location=self.location or self.componentName,
@@ -100,7 +103,14 @@ class SourceTerm(VersionedDocument):
         if settings.get_settings(self.active_version).hiteffdbconfig\
                 .query_distribution:
             hits = hits(distribution=self.distribution)
-        hiteffs = list(hits.exclude('spectra'))
+        return hits
+
+    def find_hiteffs(self, replace: bool = True) -> List[HitEfficiency]:
+        query = self.hiteffs_query
+        hiteffs = list(self.hiteffs_query.exclude('spectra'))
+        log.debug("Searching for hitefficiencies with query %s, got %d hits",
+                  query._query, len(hiteffs))
+
         if hiteffs and replace:
             self.hiteffs = hiteffs
             self.hiteffs_auto = True
