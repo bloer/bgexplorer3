@@ -244,7 +244,6 @@ class AsymmetricUncertainty:
                 else LinearExpression(self))
 
     _threadlocal = threading.local()
-    _threadlocal.ignore_correlations = False
 
     @classmethod
     def set_ignore_correlations(cls, ignore: bool):
@@ -255,6 +254,10 @@ class AsymmetricUncertainty:
 
     @classmethod
     def get_ignore_correlations(cls):
+        try:
+            return cls._threadlocal.ignore_correlations
+        except AttributeError:
+            cls._threadlocal.ignore_correlations = False
         return cls._threadlocal.ignore_correlations
 
     @classmethod
