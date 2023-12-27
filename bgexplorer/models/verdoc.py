@@ -48,7 +48,8 @@ class VersionedQuerySet(QuerySet):
         """ alias for select_version """
         return self.select_version(tag)
 
-    def delete(self, *args, bypass_version_control: bool = False, **kwargs):
+    def delete(self, *args, bypass_version_control: bool = False,
+               bypass_reverse_delete: bool = False, **kwargs):
         """ Override base delete if active_version is set """
         if self.active_version is not None and not bypass_version_control:
             # instead of directly deleting, pull the currently active tag from
@@ -56,7 +57,8 @@ class VersionedQuerySet(QuerySet):
             # with empty version_tags
             qs = self.clone()
             count = qs.update(pull__version_tags=self.active_version,
-                              bypass_version_control=True)
+                              bypass_version_control=True,
+                              bypass_reverse_delete=bypass_reverse_delete)
             # empty version tags objects are deleted by the update call
             return count
         # TODO: should this cause an error? how to prevent accidental

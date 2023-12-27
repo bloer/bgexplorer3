@@ -7,7 +7,6 @@ from .fields import UnitField, QuantityField
 from . import hiteff
 from . import verdoc
 from .common import units
-from warnings import warn
 from enum import Enum
 from typing import Optional
 import datetime
@@ -17,15 +16,23 @@ log = logging.getLogger(__name__)
 __all__ = ['RatioType', 'get_settings', 'get_application_settings']
 
 
-def get_settings(version_tag: Optional[str] = None) -> 'VersionSettings':
+def get_settings(version_tag: Optional[str] = None, create: bool = True,
+                 ) -> 'VersionSettings':
+    """ Get the settings for a given version (Defaults to default_tag).
+    If it doesn't exist and create is true, create a default one
+    if it doesn't exist and create is false, raise a KeyError
+    """
     if version_tag is None:
         version_tag = verdoc.VersionedDocument.get_default_tag()
     try:
         return VersionSettings.objects.get(version_tag=version_tag)
-    except VersionSettings.DoesNotExist:
+    except VersionSettings.DoesNotExist as e:
         log.warning("No VersionSettings found for requested version "
-                    f"'{version_tag}', creating version with defaults")
-        return VersionSettings(version_tag=version_tag).save()
+                    f"'{version_tag}',")
+        if create:
+            log.warning("creating version with defaults")
+            return VersionSettings(version_tag=version_tag).save()
+        raise KeyError(version_tag) from e
 
 
 def get_application_settings() -> 'ApplicationSettings':
@@ -161,6 +168,7 @@ class HitEffDbConfig(EmbeddedDocument):
 class VersionSettings(Document):
     """ This class contains user-configurable settings """
     version_tag = StringField(unique=True, required=True)
+    description = StringField()
     modified = DateTimeField(default=datetime.datetime.now)
     editable = BooleanField(required=True, default=True)
     addsources = EmbeddedDocumentListField(AddSource,
@@ -171,6 +179,19 @@ class VersionSettings(Document):
         'indexes': ['modified'],
         'ordering': ['-modified'],
     }
+
+    def clone(self, newtag: str) -> 'VersionSettings':
+        """ Copy ourselves to a new tag, overwriting any existing settings
+        for that tag """
+        VersionSettings.objects(id=self.id).aggregate([
+            {'$unset': '_id'},
+            {'$set': {'version_tag': newtag,
+                      'modified': datetime.datetime.now()}},
+            {'$merge': {'into': VersionSettings.objects._collection.name,
+                        'on': 'version_tag',
+                        'whenMatched': 'replace'}},
+            ])
+        return VersionSettings.objects.get(version_tag=newtag)
 
     def clean(self):
         # make sure we haven't set a display_unit that conflicts with
