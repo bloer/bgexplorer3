@@ -38,11 +38,11 @@ def create_app(config_file=None):
 
     # blueprints
     app.register_blueprint(CollectionViews(Component),
-                           url_prefix='/<active_version>/component')
+                           url_prefix='/<path:active_version>/component')
     app.register_blueprint(CollectionViews(EmissionSpec),
-                           url_prefix='/<active_version>/emission')
+                           url_prefix='/<path:active_version>/emission')
     app.register_blueprint(CollectionViews(HitEfficiency),
-                           url_prefix='/<active_version>/hiteff')
+                           url_prefix='/<path:active_version>/hiteff')
     # app preprocessing
     @app.url_defaults
     def add_active_version(endpoint, values):
@@ -81,7 +81,7 @@ def create_app(config_file=None):
     def favicon():
         return flask.send_static_file('favicon.ico')
 
-    @app.get('/explore/<active_version>')
+    @app.get('/explore/<path:active_version>')
     def overview():
         return flask.render_template('overview.html')
 
