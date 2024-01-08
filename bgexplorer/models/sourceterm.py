@@ -1,6 +1,5 @@
 from functools import cached_property, reduce
 import operator
-import mongoengine
 from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
                          StringField, BooleanField, MapField, Document,
                          SortedListField, CASCADE, PULL, ReferenceField,
@@ -35,7 +34,8 @@ class SourceTerm(VersionedDocument):
     hiteffs = ListField(VersionedReferenceField(HitEfficiency,
                                                 reverse_delete_rule=PULL))
     hiteffs_auto = BooleanField(default=True)
-    livetimes = ListField(QuantityField(units='day', allownone=True, convert=True))
+    livetimes = ListField(QuantityField(units='day', allownone=True,
+                                        convert=True))
     # partially denormalized info
     # emissionrate = UncertainQuantityField(required=True)
     componentName = StringField()
@@ -109,7 +109,6 @@ class SourceTerm(VersionedDocument):
         return hits
 
     def find_hiteffs(self, replace: bool = True) -> List[HitEfficiency]:
-        query = self.hiteffs_query
         hiteffs = list(self.hiteffs_query.exclude('spectra'))
 
         if hiteffs and replace:
@@ -218,7 +217,7 @@ class CalculatedResults(Document):
     # TODO: should this be a versioned document? it's acting as a cache
     # TODO: how to make sure there are no scalars/rois collisions?
     scalars = MapField(UncertainQuantityField(allownone=True),
-                      required=False, default=dict)
+                       required=False, default=dict)
     spectra = MapField(HistogramField(allownone=True),
                        required=False, default=dict)
     sources = SortedListField(ReferenceField(SourceTerm,
@@ -266,7 +265,7 @@ class CalculatedResults(Document):
         result = CalculatedResults(sources=self.sources + other.sources)
         for key in set(self.scalars).union(other.scalars):
             result.scalars[key] = addnone(self.scalars.get(key),
-                                         other.scalars.get(key))
+                                          other.scalars.get(key))
         for key in set(self.spectra).union(other.spectra):
             result.spectra[key] = addnone(self.spectra.get(key),
                                           other.spectra.get(key))
@@ -279,8 +278,8 @@ class CalculatedResults(Document):
         if not hiteff.norm.check(erate):
             raise units.DimensionalityError("incompatible emissionrate units")
         return cls(scalars={key: multnone(val,  erate) for key, val in
-                           chain(hiteff.scalars.items(), hiteff.rois.items())
-                           if val is not None},
+                            chain(hiteff.scalars.items(), hiteff.rois.items())
+                            if val is not None},
                    spectra={key: multnone(val, erate) for key, val in
                             hiteff.spectra.items() if val is not None},
                    ).ito_reduced_units()
@@ -332,109 +331,3 @@ class CalculatedResults(Document):
         if save:
             result.save()
         return result
-
-
-def update_component(sender, document, **kwargs):
-    component = document
-    # first, generate the list of all source terms for this component
-    sourceterms = []
-    for spec in list(component.specs) + [component]:
-        for source in spec.sources:
-            spec = spec if spec is not component else None
-            sourceterms.append(SourceTerm.from_component_source(component,
-                                                                source, spec)
-                               )
-    # remove any that didn't match
-    SourceTerm.objects(
-        version_tags=component.active_version,
-        assemblyRoot=component,
-        id__nin=[st.id for st in sourceterms],
-        ).delete()
-    # TODO: need to remove all calculated results that reference
-
-    # do we calculate the result now, or do it on demand?
-    # update all assemblies containing us
-    for parent in component.find_parents():
-        update_assembly(sender=None, document=parent, component=component)
-    return sourceterms
-
-
-def update_assembly(sender, document, component=None, placement=None,
-                    **kwargs):
-    assembly = document
-    sourceterms = []
-    for child in assembly.children:
-        if (component and child.component.id != component.id or
-                placement and child.id != placement.id):
-            continue
-        childterms = SourceTerm.select_version(assembly.active_version)(
-            assemblyRoot=child.component,
-            )
-        for st in childterms:
-            sourceterms.append(SourceTerm.from_placement(st, assembly, child))
-    # remove any that didn't match
-    query = SourceTerm.objects(version_tags=assembly.active_version,
-                               assemblyRoot=assembly)
-    if component:
-        query = query(assemblyPath__0__component=component)
-    query = query(id__nin=[st.id for st in sourceterms])
-    query.delete()
-
-    for parent in assembly.find_parents():
-        update_assembly(sender=None, document=parent, component=assembly)
-
-
-def update_placement(sender, document, **kwargs):
-    # this doesn't work!!
-    placement = document
-    return update_assembly(sender=None, document=placement.parent,
-                           placement=placement)
-
-
-def update_emissionspec(sender, document, **kwargs):
-    spec = document
-    # find all components that own a reference to us and call update_component
-    for component in Component.objects(version_tags=spec.active_version,
-                                       specs=spec):
-        update_component(sender=None, document=component)
-
-
-def update_hiteff(sender, document, **kwargs):
-    hiteff = document
-    # reverse the usual hiteff query to find all SourceTerms that would match
-    matches = SourceTerm.select_version(hiteff.active_version)(
-        hiteffs_auto=True,
-        source__name=hiteff.source,
-        location=hiteff.location,
-        )
-    if settings.get_settings(hiteff.active_version).hiteffdbconfig\
-            .query_distribution:
-        matches = matches(distribution=hiteff.distribution)
-    for st in matches(hiteffs__ne=hiteff):
-        st.hiteffs.append(hiteff)
-        # do save instead of push to force recalculation of livetimes
-        # this is so stupidly inefficient, there's got to be a better way
-        st.save()
-    # remove ourselves from any sourceterm that no longer matches
-    toremove = SourceTerm.select_version(hiteff.active_version)(
-        hiteffs_auto=True,
-        hiteffs=hiteff,
-        original_id__nin=matches.scalar('original_id'),
-        )
-    for st in toremove:
-        st.hiteffs = [h for h in st.hiteffs
-                      if h.original_id != hiteff.original_id]
-        st.save()
-
-    # update default units
-    vsettings = settings.get_settings(hiteff.active_version)
-    vsettings.hiteffdbconfig.update_from(hiteff)
-    # call update rather than save to bypass cleaning and post-save signals
-    vsettings.update(set__hiteffdbconfig=vsettings.hiteffdbconfig)
-
-
-mongoengine.signals.post_save.connect(update_component, sender=Component)
-mongoengine.signals.post_save.connect(update_assembly, sender=Assembly)
-mongoengine.signals.post_save.connect(update_emissionspec,
-                                      sender=EmissionSpec)
-mongoengine.signals.post_save.connect(update_hiteff, sender=HitEfficiency)
