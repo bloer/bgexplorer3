@@ -5,18 +5,21 @@
 
 
 {% block pagecontent %}
-{% set headers = ['Name', 'Description', 'Reference', 'Material', 'Sample',
-                  'Measurement', 'Modified'] %}
+{% set sourcenames = all_source_names() %}
+{% set headers = ['Name', 'Sample'] + sourcenames + ['Measurement', 'Reference', 'Modified'] %}
 
 {% macro reference(spec) %}
+<td {% if spec.publication.reference %}title="{{ spec.publication.reference }}"{% endif %}>
 {{ spec.publication.org or '' }}
-{% if spec.publication.reference_url %}<a href="https://{{ spec.publication.reference_url }}">{% endif %}
-{{ spec.publication.reference or spec.publication.reference_url or '' }}
-{% if spec.publication.reference_url %}</a>{% endif %}
-{% if spec.publication.reference_details %}({{ spec.publication.reference_details }}){% endif %}
+{% if spec.publication.url %}<a href="{{ spec.publication.url }}" target="_blank">{% endif %}
+{{ spec.publication.shortlabel or spec.publication.url or '' }}
+{% if spec.publication.url %}</a>{% endif %}
+{% if spec.publication.details %}({{ spec.publication.details }}){% endif %}
+</td>
 {% endmacro %}
 
 {% macro sample(spec) %}
+{{ spec.sample.material or '' }}
 {{ spec.sample.vendor or '' }} {{ spec.sample.partnum or '' }}
 {%- if spec.sample.batch %} (batch {{ spec.sample.batch }}) {% endif %}
 {% endmacro %}
@@ -25,16 +28,25 @@
 {{ spec.measurement.institution or '' }} {{ spec.measurement.technique or '' }}
 {% endmacro %}
 
+{% macro sourcerate(spec, sourcename) %}
+{% set source = spec.sourcemap.get(sourcename) %}
+{% if source %}<td data-order="{{ source.rate | sourcesort }}"
+                   class="emissionrate {% if source.generated_from %}autosource{% endif %}">
+   {% if source.rate._fromstr %} {{ source.rate._fromstr }} {% else %} {{ "{:.2g~C}".format(source.rate) }} {% endif %}
+{% else %}<td>{% endif %}</td>
+{% endmacro %}
+
 
 {% call datatable.render(headers) %}
     {% for spec in data %}
     <tr class="spec{% if spec.sample is defined %} assay{% endif %}" data-id="{{ spec.id }}" data-original_id="{{ spec.original_id }}">
-        <td><a href="{{ url_for('.get_json', object=spec) }}">{{ spec.name }}</a> </td>
-        <td>{{ spec.description or '' }}</td>
-        <td>{{ reference(spec) }}</td>
-        <td>{{ spec.sample.material or '' }}</td>
+        <td><a href="{{ url_for('.get_json', object=spec) }}">{{ spec.name }}</a> {{ spec.description or '' }} </td>
         <td>{{ sample(spec) }}</td>
+        {% for sourcename in sourcenames %}
+        {{ sourcerate(spec, sourcename) }}
+        {% endfor %}
         <td>{{ measurement(spec) }}</td>
+        {{ reference(spec) }}
         <td data-order="{{ spec.modified.timestamp() }}">{{ pretty_date(spec.modified) }}</td>
     </tr>
     {% endfor %}

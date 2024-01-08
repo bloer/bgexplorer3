@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block pagenav %}
 <li class="nav-item">
-    <a class="nav-link" href="{{ url_for('overview') }}">Overview</a>
+    <a class="nav-link text-primary" href="{{ url_for('overview') }}">{{ g.active_version }}</a>
 </li>
 <li class="nav-item">
     <a class="nav-link" href="{{ url_for('component.overview') }}">Components</a>
@@ -14,6 +14,8 @@
 </li>
 {% endblock %}
 
+{#
 {% block extranav %}
 <span class="nav-text">{%- if settings.editable -%} branch {%- else -%} tag {%- endif -%}: {{ g.active_version }}</span>
 {% endblock %}
+#}

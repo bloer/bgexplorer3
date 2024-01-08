@@ -21,7 +21,7 @@ batch {{ component.purchaseinfo.batch or component.purchaseinfo.material_batch }
         <td>{{ component.hierarchy_level }}</td>
         <td>{{ component.description or '' }}</td>
         <td>{{ component.material or '' }}</td>
-        <td data-order="{{ '%.6e' | format(component.mass.to('kg').m) }}">{{ component.mass.to('kg').m }}</td>
+        <td data-order="{{ '%.6e' | format(component.mass.to('kg').m) }}">{{ "{:.3g}".format(component.mass.to('kg').m) }}</td>
         <td>{{ part(component) }} </td>
         <td data-order="{{ component.modified.timestamp() }}">{{ pretty_date(component.modified) }}</td>
     </tr>

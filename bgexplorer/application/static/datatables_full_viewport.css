@@ -17,3 +17,9 @@ div.dataTables_info {float: left}
 div.dataTables_wrapper { border-left-width: 0px; }
 table.dataTable thead tr > .dtfc-fixed-left {background-color: var(--bs-table-bg);}
 table.table-bordered.dataTable td:first-child { border-left-color: #ddd; }
+
+table.dataTable td{
+    max-width:400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

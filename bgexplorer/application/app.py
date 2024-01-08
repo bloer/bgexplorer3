@@ -60,6 +60,22 @@ def create_app(config_file=None):
     def bgexplorer_version():
         return importlib.metadata.version('bgexplorer')
 
+    @app.template_global()
+    def all_source_names():
+        return (EmissionSpec.select_version(flask.g.active_version)
+                .distinct('sources.name'))
+
+    @app.template_filter('sourcesort')
+    def source_sort_val(rate):
+        try:
+            rate = rate.to('Bq/kg')
+        except pint.errors.DimensionalityError:
+            pass
+        rate = rate.m
+        if rate.isupperlimit():
+            return rate.ppf(0.9)
+        return rate.mode
+
     @app.context_processor
     def inject_settings():
         try:
@@ -85,6 +101,6 @@ def create_app(config_file=None):
     def overview():
         return flask.render_template('overview.html')
 
-    examples.qis.populate_example(clean=True)
+    # examples.qis.populate_example(clean=True)
 
     return app

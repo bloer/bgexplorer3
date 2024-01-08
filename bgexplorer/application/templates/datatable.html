@@ -19,8 +19,8 @@
 </script>
 {% endmacro %}
 
-{% macro render(headings) %}
-<table id="dtable" class="table table-hover table-bordered table-sm  nowrap" width="100%">
+{% macro render(headings, tableid="dtable") %}
+<table id="{{ tableid }}" class="table table-hover table-bordered table-sm  nowrap" width="100%">
     <thead class="table-light">
         <tr>{% for col in headings %}
             <th>{{ col }}</th>
