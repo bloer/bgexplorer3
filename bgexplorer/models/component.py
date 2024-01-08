@@ -3,7 +3,7 @@ from mongoengine import (EmbeddedDocument, StringField, DateField,
                          EmbeddedDocumentField, DictField, ValidationError,
                          EmbeddedDocumentListField, ListField, FloatField,
                          URLField, ObjectIdField,
-                         CASCADE, PULL, signals, IntField)
+                         PULL, IntField)
 from bson import ObjectId
 
 from .verdoc import VersionedDocument, VersionedReferenceField
@@ -69,7 +69,7 @@ class Component(VersionedDocument):
     history = EmbeddedDocumentListField(HistoryEntry)
 
     specs = ListField(VersionedReferenceField(EmissionSpec,
-                                reverse_delete_rule=PULL))
+                      reverse_delete_rule=PULL))
     sources = EmbeddedDocumentListField(EmissionSource)
 
     meta = {'allow_inheritance': True}
@@ -109,7 +109,6 @@ class Placement(EmbeddedDocument):
     @property
     def name(self):
         return self.label or self.component.name
-
 
 
 class Assembly(Component):
