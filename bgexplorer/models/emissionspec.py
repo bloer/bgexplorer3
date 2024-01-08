@@ -1,17 +1,17 @@
 from mongoengine import (StringField, EnumField, ValidationError,
-                         ObjectIdField,
-                         URLField, EmbeddedDocument, EmbeddedDocumentListField,
+                         ObjectIdField, EmbeddedDocument,
+                         EmbeddedDocumentListField,
                          )
 from bson import ObjectId
 from enum import Enum
 from typing import Optional, Union
-from .common import units, Quantity
+from .common import units
 from .isotope import (concentration_to_rate, rate_to_concentration,
                       get_isotope, compare_source_names)
 from .fields import UncertainQuantityField
-from .verdoc import DynamicVersionedDocument
+from .verdoc import VersionedDocument
 from . import settings
-from warnings import warn
+from collections.abc import Mapping
 
 
 class Multiplier(Enum):
@@ -20,6 +20,7 @@ class Multiplier(Enum):
     surface = 'surface_area'
     inner_surface = 'inner_surface_area'
     outer_surface = 'outer_surface_area'
+    length = 'length'
     none = 'none'
 
     @classmethod
@@ -36,12 +37,13 @@ class Multiplier(Enum):
         elif units('Bq/m**3').check(rate):
             return cls.volume
         elif units('Bq/m**2').check(rate):
-            # warn(f"Automatically choosing total surface area for rate {rate}")
             return cls.surface
         elif units('Bq').check(rate):
             return cls.none
         elif units('1/cm**2/s/sr').check(rate):
             return cls.none
+        elif units('Bq/m').check(rate):
+            return cls.length
         raise ValidationError(f"Unhandled rate units {rate.u}")
 
     @property
@@ -53,6 +55,7 @@ class Multiplier(Enum):
                 Multiplier.surface: ['Bq/m**2'],
                 Multiplier.inner_surface: ['Bq/m**2'],
                 Multiplier.outer_surface: ['Bq/m**2'],
+                Multiplier.length: ['Bq/m'],
                 Multiplier.none: ['Bq', '1/cm**2/s', '1/cm**2/s/sr'],
                 }[self]
 
@@ -68,6 +71,7 @@ class Multiplier(Enum):
         # if we get here, none match
         raise ValidationError(f"Rate units {rate.u} invalid"
                               f" for multiplier {self}")
+
     @property
     def default_distribution(self) -> str:
         return {Multiplier.mass: 'bulk',
@@ -75,7 +79,8 @@ class Multiplier(Enum):
                 Multiplier.surface: 'surface',
                 Multiplier.inner_surface: 'inner_surface',
                 Multiplier.outer_surface: 'outer_surface',
-                Multiplier.none: None,
+                Multiplier.length: 'bulk',
+                Multiplier.none: 'bulk',
                 None: None}[self]
 
     def determine_distribution(self, component):
@@ -97,7 +102,7 @@ class Multiplier(Enum):
 class SourceCategory(Enum):
     target = 'target'
     assay = 'assay'
-    cosmogenic = 'cosmogenic'
+    activation = 'activation'
     dust = 'dust'
     radon = 'radon'
 
@@ -135,13 +140,26 @@ class EmissionSource(EmbeddedDocument):
                        "an isotope")
 
 
-class EmissionSpec(DynamicVersionedDocument):
+class EmissionSpec(VersionedDocument):
     name = StringField(required=True)
     description = StringField()
     comment = StringField()
+    category = EnumField(SourceCategory)
     sources = EmbeddedDocumentListField(EmissionSource)
 
-    meta = {'allow_inheritance': True}
+    meta = {'allow_inheritance': True,
+            'indexes': ['sources.name'],
+            }
+
+    # __slots__ = ['sourcemap']
+
+    def __init__(self, *args, **kwargs):
+        """ shortcut to provide sources as {name: rate} mapping """
+        if isinstance(sources := kwargs.get('sources'), Mapping):
+            kwargs['sources'] = [EmissionSource(name=k, rate=v)
+                                 for k, v in sources.items()]
+        super().__init__(*args, **kwargs)
+        self.sourcemap = {s.name: s for s in self.sources}
 
     def _addsource(self, newsource: settings.AddSource) -> None:
         """ Add or update sources from the VersionSettings/AddSource list """
@@ -167,16 +185,17 @@ class EmissionSpec(DynamicVersionedDocument):
         matchout.multiplier = matchin.multiplier
         rate = matchin.rate * newsource.ratio
         rate_is_concentration = units('ppb').check(matchin.rate)
+        # TODO: need to also handle 'Bq', not just 'Bq/kg'
         if (rate_is_concentration and
                 newsource.ratiotype is settings.RatioType.rate):
             rate = concentration_to_rate(matchin.name, matchin.rate)
-            rate = rate_to_concentration(matchout.name, rate *
-                                         newsource.ratio)
+            rate = rate_to_concentration(matchout.name,
+                                         rate * newsource.ratio)
         elif (not rate_is_concentration and
               newsource.ratiotype is settings.RatioType.abundance):
             rate = rate_to_concentration(matchin.name, matchin.rate)
             rate = concentration_to_rate(matchout.name, rate * newsource.ratio)
-        matchout.rate = rate
+        matchout.rate = rate.to(matchin.rate.u)
 
         if doinsert:
             self.sources.append(matchout)
@@ -191,8 +210,14 @@ class EmissionSpec(DynamicVersionedDocument):
             if not source.generated_from:
                 continue
             if len([s for s in self.sources
-                        if s.id == source.generated_from]) == 0:
+                    if s.id == source.generated_from]) == 0:
                 self.sources.remove(source)
         # add new sources
         for source in config.addsources:
             self._addsource(source)
+
+        # update category
+        for source in self.sources:
+            source.category = source.category or self.category
+        self.sourcemap = {s.name: s for s in self.sources}
+

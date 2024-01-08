@@ -5,6 +5,7 @@ from mongoengine.errors import ValidationError
 from .verdoc import DynamicVersionedDocument
 from .fields import QuantityField, UncertainQuantityField, HistogramField
 from .common import units as unitreg
+from .histogram import Histogram
 from . import settings
 from enum import Enum
 from itertools import chain
@@ -55,7 +56,7 @@ class HitEfficiency(DynamicVersionedDocument):
                               'flux' (primaries/s/cm**2)
                               'flux_per_sr' (primaries/s/cm**2/sr) or
                               'none' (HitEff is absolutely normalized)
-       values (dict): Single-value hit efficiencies (as asym. uncertainties
+       scalars (dict): Single-value hit efficiencies (as asym. uncertainties
                       with units), such as integral counts over some ROI
        spectra (dict): histograms of hit efficiencies
 
@@ -88,7 +89,7 @@ class HitEfficiency(DynamicVersionedDocument):
     distribution = StringField(required=False, default='bulk')
     norm = EnumField(NormMultiplier, required=False,
                      default=NormMultiplier.rate)
-    values = MapField(UncertainQuantityField(allownone=True),
+    scalars = MapField(UncertainQuantityField(allownone=True),
                       required=False, default=dict)
     spectra = MapField(HistogramField(allownone=True),
                        required=False, default=dict)
@@ -110,37 +111,39 @@ class HitEfficiency(DynamicVersionedDocument):
     metadata = DictField()
 
     # for internal use
-    values_keys = ListField(StringField())
+    scalars_keys = ListField(StringField())
     spectra_keys = ListField(StringField())
 
-    meta = {
-        'indexes': ['location', 'distribution', 'source', 'version', 'date',
-                    'values_keys', 'spectra_keys']
-    }
+    #meta = {
+    #    'indexes': ['location', 'distribution', 'source', 'version', 'date',
+    #                'scalars_keys', 'spectra_keys']
+    #}
 
-    def __init__(self, *args, **kwargs):
-        """ Set an ID on all values and spectra to track correlations """
-        super().__init__(*args, **kwargs)
-        for key, val in chain(self.values.items(), self.rois.items()):
-            if val is not None:
-                val.m.id = '.'.join([str(self.id), 'v', key])
-        for key, val in self.spectra.items():
-            if val is not None:
-                val.hist.m.id = '.'.join([str(self.id), 's', key])
-        # use a post-init signal
+    #def __init__(self, *args, **kwargs):
+    #    """ Set an ID on all scalars and spectra to track correlations """
+    #    super().__init__(*args, **kwargs)
+    #    for key, val in chain(self.scalars.items(), self.rois.items()):
+    #        if val is not None:
+    #            val.m.id = '.'.join([str(self.id), 'v', key])
+    #    for key, val in self.spectra.items():
+    #        if val is not None:
+    #            val.hist.m.id = '.'.join([str(self.id), 's', key])
+    #    # use a post-init signal
 
     def check_dbconfig(self, dbconfig):
         """ Make sure we are compatible with the HitEffDBconfig
         Raise ValidationError if not
         """
         # make sure units match the desired output
-        for type_ in ('values', 'spectra'):
+        for type_ in ('scalars', 'spectra'):
             register = getattr(self, type_)
             for key, val in register.items():
                 display_register = getattr(dbconfig, f'display_{type_}')
                 if val is None or key not in display_register:
                     continue
                 display_unit = display_register[key].display_unit
+                if display_unit is None:
+                    continue
                 if not display_unit.is_compatible_with(self.get_result_unit(val)):
                     msg = f"{type_} {key} {val} has incorrect units"
                     raise ValidationError(msg)
@@ -154,7 +157,7 @@ class HitEfficiency(DynamicVersionedDocument):
         super().clean()
         dbconfig = settings.get_settings(self.active_version).hiteffdbconfig
         self.check_dbconfig(dbconfig)
-        self.values_keys = list(self.values)
+        self.scalars_keys = list(self.scalars)
         self.spectra_keys = list(self.spectra)
 
     @property
@@ -162,9 +165,11 @@ class HitEfficiency(DynamicVersionedDocument):
         getattr(self, '_id', (self.source, self.location, self.distribution))
 
     def get_result_unit(self, val):
-        """ Determine the output unit for a value from values or spectra
+        """ Determine the output unit for a value from scalars or spectra
         based on our norm value
         """
+        if isinstance(val, Histogram):
+            val = val.hist
         try:
             return (1 * val.u * self.norm.units).to_reduced_units().u
         except AttributeError:

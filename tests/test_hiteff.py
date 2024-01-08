@@ -31,8 +31,8 @@ class TestHitEFficiency(unittest.TestCase):
         pass
 
     def test_ids(self):
-        """ ensure that values and spectra are assigned an ID """
-        h = HitEfficiency(source="h", location="h", values=dict(
+        """ ensure that scalars and spectra are assigned an ID """
+        h = HitEfficiency(source="h", location="h", scalars=dict(
                     v1="10 +- 1 dru/mBq",
                     v2="<3 dru/mBq"),
                 spectra = dict(
@@ -40,23 +40,23 @@ class TestHitEFficiency(unittest.TestCase):
                 ))
         h.save()
         h = HitEfficiency.objects.get()
-        self.assertEqual(h.values['v1'].id, '.'.join([str(h.id), 'v', 'v1']))
-        self.assertEqual(h.values['v2'].id, '.'.join([str(h.id), 'v', 'v2']))
+        self.assertEqual(h.scalars['v1'].id, '.'.join([str(h.id), 'v', 'v1']))
+        self.assertEqual(h.scalars['v2'].id, '.'.join([str(h.id), 'v', 'v2']))
         self.assertEqual(h.spectra['v1'].hist.id, '.'.join([str(h.id), 's', 'v1']))
 
     def test_unit_settings(self):
         """ test that unit settings are updated on save and that conflicting
         units cause an error
         """
-        h = HitEfficiency(source='h', location='h', values=dict(v1='10 +- 1 dru/mBq'))
+        h = HitEfficiency(source='h', location='h', scalars=dict(v1='10 +- 1 dru/mBq'))
         h.save()
         cfg = get_settings(h.active_version)
-        display_values = cfg.hiteffdbconfig.display_values
-        self.assertEqual(len(display_values), 1)
-        self.assertIn('v1', display_values)
-        self.assertTrue(display_values['v1'].display_unit.is_compatible_with('dru'))
+        display_scalars = cfg.hiteffdbconfig.display_scalars
+        self.assertEqual(len(display_scalars), 1)
+        self.assertIn('v1', display_scalars)
+        self.assertTrue(display_scalars['v1'].display_unit.is_compatible_with('dru'))
         with self.assertRaises(ValidationError):
-            HitEfficiency(source='h2', location='h2', values=dict(v1='3 Hz')).save()
+            HitEfficiency(source='h2', location='h2', scalars=dict(v1='3 Hz')).save()
 
     def test_rois(self):
         config = get_settings(HitEfficiency.get_default_tag())
@@ -67,7 +67,7 @@ class TestHitEFficiency(unittest.TestCase):
         ]
         config.save()
 
-        h = HitEfficiency(source="h", location="h", values=dict(
+        h = HitEfficiency(source="h", location="h", scalars=dict(
             v1="10 +- 1 dru/mBq",
             v2="<3 dru/mBq"), spectra = dict(
             v1=Histogram(AsymmetricUncertainty.fromcounts(np.array([0,0,0,0,3,4,5,6,7,8]))*units('dru/mBq'),

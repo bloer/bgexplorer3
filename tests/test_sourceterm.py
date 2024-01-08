@@ -40,7 +40,7 @@ class TestSourceTerm(unittest.TestCase):
                                               EmissionSource(name="K40", rate="<25 mBq/kg")]).save()
         c1 = Component(name="c1", mass="2 kg",
                        sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
-                       reference_specs=[e1]).save()
+                       specs=[e1]).save()
         self.assertEqual(SourceTerm.objects.count(), 3)
         emissionrates = dict(Th232=AsymmetricUncertainty(20, 2)*units('mBq/kg'),
                              K40=AsymmetricUncertainty.fromlimit(50)*units('mBq/kg'),
@@ -79,11 +79,11 @@ class TestSourceTerm(unittest.TestCase):
                                               EmissionSource(name="K40", rate="<25 mBq/kg")]).save()
         c1 = Component(name="c1", mass="2 kg", location="c1 location",
                        sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
-                       reference_specs=[e1]).save()
+                       specs=[e1]).save()
         c2 = Component(name="c2", mass="2 kg",
-                       reference_specs=[e1]).save()
+                       specs=[e1]).save()
         c3 = Component(name="c3", mass="2 kg",
-                       reference_specs=[e1]).save()
+                       specs=[e1]).save()
         a1 = Assembly(name="a1", components=[c1, c2, c3], location="a1 location").save()
 
         self.assertEqual(SourceTerm.objects.count(), 14)
@@ -107,23 +107,23 @@ class TestSourceTerm(unittest.TestCase):
     def test3_hiteffs(self):
         """ Test that queries find HitEfficiencies """
         h1 = HitEfficiency(source="Th232", location="c1 location",
-                           values=dict(v1=AsymmetricUncertainty(0.1, 0.02)*units('dru/mBq'))).save()
+                           scalars=dict(v1=AsymmetricUncertainty(0.1, 0.02)*units('dru/mBq'))).save()
         h2 = HitEfficiency(source="Th232", location="a1 location",
-                           values=dict(v1=AsymmetricUncertainty(0.5, 0.05)*units('dru/mBq'))).save()
+                           scalars=dict(v1=AsymmetricUncertainty(0.5, 0.05)*units('dru/mBq'))).save()
         h3 = HitEfficiency(source="Co60", location="c2 placement location",
-                           values=dict(v1=AsymmetricUncertainty(0.3, 0.02)*units('dru/mBq'))).save()
+                           scalars=dict(v1=AsymmetricUncertainty(0.3, 0.02)*units('dru/mBq'))).save()
         h4 = HitEfficiency(source="custom", location='',
-                           values=dict(v1=AsymmetricUncertainty(0.01, 0.002)*units('dru/mBq'))).save()
+                           scalars=dict(v1=AsymmetricUncertainty(0.01, 0.002)*units('dru/mBq'))).save()
         e1 = EmissionSpec(name="e1", sources=[EmissionSource(name="Th232", rate="10 +- 1 mBq/kg"),
                                               EmissionSource(name="K40", rate="<25 mBq/kg")]).save()
         c1 = Component(name="c1", mass="2 kg", location="c1 location",
                        sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
-                       reference_specs=[e1]).save()
+                       specs=[e1]).save()
         c2 = Component(name="c2", mass="2 kg",
                        sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
-                       reference_specs=[e1]).save()
+                       specs=[e1]).save()
         c3 = Component(name="c3", mass="5 kg",
-                       reference_specs=[e1]).save()
+                       specs=[e1]).save()
         a1 = Assembly(name="a1", components=[c1, c2, c3], location="a1 location")
         a1.children[1].location = "c2 placement location"
         a1.children[1].weight = 2
@@ -197,9 +197,9 @@ class TestSourceTerm(unittest.TestCase):
 
         # now add a new hiteff that would match our custom one
         h5 = HitEfficiency(source="K40", location="c2 placement location",
-                           values=dict(v1=AsymmetricUncertainty(0.02, 0.002)*units('dru/mBq'))).save()
+                           scalars=dict(v1=AsymmetricUncertainty(0.02, 0.002)*units('dru/mBq'))).save()
         h6 = HitEfficiency(source="K40", location="a1 location",
-                           values=dict(v1=AsymmetricUncertainty(0.03, 0.002)*units('dru/mBq'))).save()
+                           scalars=dict(v1=AsymmetricUncertainty(0.03, 0.002)*units('dru/mBq'))).save()
         for st in SourceTerm.objects(source__name="K40"):
             if st.assemblyPathStr == "a1/c1":
                 self.assertEqual(len(st.hiteffs), 0)
@@ -222,7 +222,7 @@ class TestSourceTerm(unittest.TestCase):
         # check the results of individual calculations
         for st in SourceTerm.objects(hiteffs__size=1):
             cr = CalculatedResults.from_sourceterm(st).save()
-            val = cr.values['v1'].to('dru')
+            val = cr.scalars['v1'].to('dru')
             if st.assemblyPathStr == 'c1' and st.source.name == 'Th232':
                 self.assertAlmostEqual(val.mode, 2)
                 self.assertAlmostEqual(val.s0, 0.44899888641287294)
@@ -264,7 +264,7 @@ class TestSourceTerm(unittest.TestCase):
         20 +- 0.2 mBq/kg * (2 * 2kg * 0.3 +-0.02 dru/Bq)
         """
         cr = CalculatedResults.for_component(a1).save()
-        val = cr.values['v1'].to('dru')
+        val = cr.scalars['v1'].to('dru')
         self.assertAlmostEqual(val.mode, 101)
         self.assertAlmostEqual(val.s0, 10.903300234332724)
         self.assertAlmostEqual(val.s1, 13.212474184422296)
@@ -277,11 +277,11 @@ class TestSourceTerm(unittest.TestCase):
 
     def test4_neutron(self):
         """ test that we properly find multiple hits for neutrons """
-        h1 = HitEfficiency(source='U238', location='c1', values=dict(v1='10 +- 1 dru/mBq')).save()
+        h1 = HitEfficiency(source='U238', location='c1', scalars=dict(v1='10 +- 1 dru/mBq')).save()
         h2 = HitEfficiency(source='U238', location='c1', primary_particle='neutron', primary_yield=1.e-2,
-                           values=dict(v1='(2 +- 0.1)e-2 dru/mBq')).save()
+                           scalars=dict(v1='(2 +- 0.1)e-2 dru/mBq')).save()
         h3 = HitEfficiency(source='U238', location='c1', primary_particle='neutron', primary_yield=1.e-1, material='steel',
-                           values=dict(v1='(2 +- 0.1)e-1 dru/mBq')).save()
+                           scalars=dict(v1='(2 +- 0.1)e-1 dru/mBq')).save()
         c1 = Component(name='c1', mass='3 kg', location='c1', material='steel',
                        sources=[EmissionSource(name='U238', rate='5 mBq/kg')]).save()
         c2 = Component(name='c2', mass='8 kg', location='c1',
@@ -291,10 +291,10 @@ class TestSourceTerm(unittest.TestCase):
 
         self.assertEqual(len(r1.sources), 1)
         self.assertEqual(len(r1.sources[0].hiteffs), 3)
-        self.assertAlmostEqual(r1.values['v1'].to('dru').mode, 15*(10 + 2e-2 + 2e-1))
+        self.assertAlmostEqual(r1.scalars['v1'].to('dru').mode, 15*(10 + 2e-2 + 2e-1))
         self.assertEqual(len(r2.sources), 1)
         self.assertEqual(len(r2.sources[0].hiteffs), 2)
-        self.assertAlmostEqual(r2.values['v1'].to('dru').mode, 0.04*(10 + 2e-2))
+        self.assertAlmostEqual(r2.scalars['v1'].to('dru').mode, 0.04*(10 + 2e-2))
 
 
 

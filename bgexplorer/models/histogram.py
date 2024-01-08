@@ -15,6 +15,10 @@ class Histogram(object):
         if bin_edges is None:
             self.bin_edges = np.arange(len(self.hist)+1)
 
+    @property
+    def binwidths(self):
+        return self.bin_edges[1:] - self.bin_edges[:-1]
+
     def find_bin(self, x):
         """Find the index of the bin where x is.
         Args:
@@ -82,7 +86,7 @@ class Histogram(object):
             weights[last] = (b-bins[last]) / (bins[last+1]-bins[last])
 
         if binwidth:
-            weights = weights * (bins[1:]-bins[:-1])
+            weights = weights * self.binwidths
 
         result = self.hist.dot(weights)
         # np.dot on a Quantity of AsymmetricUncertainty loses units

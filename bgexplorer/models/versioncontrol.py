@@ -1,5 +1,5 @@
 """ functions for creating, saving, merging, and deleting versions """
-from .component import Component
+from .component import Component, Placement
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, CalculatedResults
@@ -10,7 +10,7 @@ import logging
 log = logging.getLogger(__name__)
 
 
-_versioned_classes = [Component, EmissionSpec, HitEfficiency, SourceTerm]
+_versioned_classes = [Component, Placement, EmissionSpec, HitEfficiency, SourceTerm]
 
 
 def version_exists(version_tag: str) -> bool:

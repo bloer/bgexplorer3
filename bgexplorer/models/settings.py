@@ -133,9 +133,9 @@ class SpectrumROI(HitEffConfig):
             func = getattr(hist, self.mode.name)
             result = func(self.start, self.stop, self.binwidths)
         if self.display_unit is not None and result is not None:
-            if not self.display_units.is_compatible_with(result):
+            if not self.display_unit.is_compatible_with(result):
                 raise ValidationError(f"{self.key} hiteff {hiteff.id} units "
-                                      f"don't match {self.display_units}")
+                                      f"don't match {self.display_unit}")
         if store:
             hiteff.rois[self.key] = result
         return result
@@ -145,7 +145,7 @@ class HitEffDbConfig(EmbeddedDocument):
     """ Configure the HitEfficiency database """
     query_distribution = BooleanField(default=True)
     rois = EmbeddedDocumentListField(SpectrumROI)
-    display_values = MapField(EmbeddedDocumentField(HitEffConfig),
+    display_scalars = MapField(EmbeddedDocumentField(HitEffConfig),
                               default=dict)
     display_spectra = MapField(EmbeddedDocumentField(HitEffConfig),
                                default=dict)
@@ -153,7 +153,7 @@ class HitEffDbConfig(EmbeddedDocument):
 
     def update_from(self, hiteff):
         """Update display settings from a HitEfficiency """
-        for type_ in ('values', 'spectra'):
+        for type_ in ('scalars', 'spectra'):
             for k, v in getattr(hiteff, type_).items():
                 register = getattr(self, f'display_{type_}')
                 cf = register.setdefault(k, HitEffConfig())
@@ -196,7 +196,7 @@ class VersionSettings(Document):
     def clean(self):
         # make sure we haven't set a display_unit that conflicts with
         # an already-existing hiteff
-        for type_ in ('values', 'spectra'):
+        for type_ in ('scalars', 'spectra'):
             register = getattr(self.hiteffdbconfig, f'display_{type_}')
             for k, v in register.items():
                 if v.display_unit is None:
@@ -205,8 +205,8 @@ class VersionSettings(Document):
                 # for HitEfficiencies in the db
                 unitlist = hiteff.HitEfficiency\
                     .select_version(self.version_tag)\
-                    .aggregate([{'$group': {'_id': [f'{type_}.{k}.units',
-                                                    'norm']}}])
+                    .aggregate([{'$group': {'_id': [f'${type_}.{k}.units',
+                                                    '$norm']}}])
                 for entry in unitlist:
                     ustr, normstr = entry['_id']
                     val = 1 * units(ustr)

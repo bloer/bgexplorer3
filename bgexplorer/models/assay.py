@@ -1,8 +1,8 @@
 from mongoengine import (EmbeddedDocument, StringField, EmbeddedDocumentField,
                          EmbeddedDocumentListField, DateField, IntField,
-                         DictField, URLField)
-from .emissionspec import EmissionSpec
-from .fields import UncertainQuantityField, AttachmentsField
+                         DictField, URLField, MapField)
+from .emissionspec import EmissionSpec, SourceCategory
+from .fields import UncertainQuantityField, AttachmentsField, QuantityField
 from .common import PublicationInfo
 
 
@@ -11,6 +11,7 @@ class SampleInfo(EmbeddedDocument):
     name = StringField(verbose_name="Sample name")
     description = StringField(verbose_name="Sample Description")
     material = StringField()
+    mass = QuantityField(units='kg')
     vendor = StringField(verbose_name='Vendor/producer')
     partnum = StringField(verbose_name="Vendor part number/identifier")
     link = URLField(verbose_name="Link to product website")
@@ -33,9 +34,8 @@ class MeasurementRequest(EmbeddedDocument):
 
 class MeasurementResult(EmbeddedDocument):
     replicate = IntField(default=1)
-    isotope = StringField(required=True)
-    value = UncertainQuantityField(required=True)
-
+    mass = QuantityField(units='kg')
+    isotopes = MapField(UncertainQuantityField())
 
 class MeasurementInfo(EmbeddedDocument):
     id = StringField(verbose_name="Measurement ID")
@@ -44,6 +44,7 @@ class MeasurementInfo(EmbeddedDocument):
     instrument = StringField(verbose_name='Instrument used')
     date_received = DateField(verbose_name="Date sample received")
     date_measured = DateField(verbose_name='Measurement date')
+    count_time = QuantityField(units='hour')
     operator = StringField(help_text='Name of person who made measurement')
     operatorcontact = StringField(verbose_name='Operator contact info')
     notes = StringField(verbose_name='Additional Notes')
@@ -55,9 +56,13 @@ class Assay(EmissionSpec):
     sample = EmbeddedDocumentField(SampleInfo,
                                    verbose_name="Sample Information")
     request = EmbeddedDocumentField(MeasurementRequest)
-    measurement = EmbeddedDocumentField(MeasurementResult,
+    measurement = EmbeddedDocumentField(MeasurementInfo,
                                         verbose_name="Measurement details")
     publication = EmbeddedDocumentField(PublicationInfo)
     radiopurityid = StringField(verbose_name="radiopurity.org database id")
     extra_metadata = DictField()
     attachments = AttachmentsField()
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault('category', SourceCategory.assay)
+        super().__init__(*args, **kwargs)

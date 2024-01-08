@@ -8,7 +8,7 @@ from mongoengine import EmbeddedDocument, StringField, URLField
 
 units = pint.UnitRegistry()
 pint.set_application_registry(units)
-units.default_format = '~C'
+units.default_format = '.2g~C'
 units.load_definitions([
     "dru = 1./(kg * keV * day) = dru = DRU",
     "kky = kg * keV * year = kky = kg_keV_yr",
@@ -42,10 +42,11 @@ def multnone(a, b):
 
 
 class PublicationInfo(EmbeddedDocument):
-    reference = StringField(verbose_name="External reference")
-    reference_url = URLField(verbose_name="URL for external reference")
-    reference_details = StringField(verbose_name="Reference details",
-                                    help_text="e.g. Table II, entry 45")
+    shortlabel = StringField(verbose_name="Short label for reference")
+    reference = StringField(verbose_name="Citation")
+    url = URLField(verbose_name="URL for external reference")
+    details = StringField(verbose_name="Reference details",
+                          help_text="e.g. Table II, entry 45")
     org = StringField(verbose_name="Publishing Organization/Experiment")
 
     # TODO: add a clean that pre-pends https and checks

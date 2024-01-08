@@ -28,7 +28,7 @@ class HistoryEntry(DynamicEmbeddedDocument):
     description = StringField(required=True)
     date = DateTimeField(required=True)
     location = StringField()
-    duration = QuantityField(units='s')
+    duration = QuantityField(units='h')
     comment = StringField()
     person = StringField()
     enteredby = StringField()
@@ -48,6 +48,9 @@ class Component(VersionedDocument):
     volume = QuantityField(units='m**3', default=0 * units.m**3)
     inner_surface_area = QuantityField(units='m**2', default=0 * units.cm**2)
     outer_surface_area = QuantityField(units='m**2', default=0 * units.cm**2)
+    length = QuantityField(units='m', default=0 * units.m)
+    width = QuantityField(units='m', default=0 * units.m)
+    height = QuantityField(units='m', default=0 * units.m)
     treat_surface_as_bulk = BooleanField(default=False)
     distribution = StringField(
         help_text="Override default distribution from rate units"
@@ -64,7 +67,7 @@ class Component(VersionedDocument):
     attachments = AttachmentsField()
     history = EmbeddedDocumentListField(HistoryEntry)
 
-    reference_specs = ListField(VersionedReferenceField(EmissionSpec,
+    specs = ListField(VersionedReferenceField(EmissionSpec,
                                 reverse_delete_rule=PULL))
     sources = EmbeddedDocumentListField(EmissionSource)
 
@@ -113,9 +116,17 @@ class Assembly(Component):
                    for p in self.children)
 
     def clean(self):
+        # TODO: the calc for hierarchy_level below won't work if user adds
+        # new placements to an already-placed child
+        # could run the appropriate query on-demand, but then we couldn't
+        # query against it. Maybe add to the sourceterm calc?
         super().clean()
         for placement in self.children:
             placement.parent = self
+            if self.active_version not in placement.version_tags:
+                placement.version_tags.append(self.active_version)
+            # TODO: these will all also have default version tag...
+            placement.active_version = self.active_version
             placement.save()
         if self.children:
             for attr in ('mass', 'volume', 'inner_surface_area',

@@ -35,7 +35,7 @@ class SourceTerm(VersionedDocument):
     hiteffs = ListField(VersionedReferenceField(HitEfficiency,
                                                 reverse_delete_rule=PULL))
     hiteffs_auto = BooleanField(default=True)
-    livetimes = ListField(QuantityField(units='day', allownone=True))
+    livetimes = ListField(QuantityField(units='day', allownone=True, convert=True))
     # partially denormalized info
     # emissionrate = UncertainQuantityField(required=True)
     componentName = StringField()
@@ -108,8 +108,6 @@ class SourceTerm(VersionedDocument):
     def find_hiteffs(self, replace: bool = True) -> List[HitEfficiency]:
         query = self.hiteffs_query
         hiteffs = list(self.hiteffs_query.exclude('spectra'))
-        log.debug("Searching for hitefficiencies with query %s, got %d hits",
-                  query._query, len(hiteffs))
 
         if hiteffs and replace:
             self.hiteffs = hiteffs
@@ -136,7 +134,9 @@ class SourceTerm(VersionedDocument):
                                    source__id=self.source.id,
                                    spec=self.spec)
         if self.assemblyPath:
-            query = query(assemblyPath__0=self.assemblyPath[0])
+            # query = query(assemblyPath__0=self.assemblyPath[0])
+            query = query(__raw__={'assemblyPath': {'$eq':
+                          [p.original_id for p in self.assemblyPath]}})
         update_dict = dict(set_on_insert__id=self.id,
                            set_on_insert__original_id=self.original_id,
                            set_on_insert__version_tags=[self.active_version],
@@ -199,9 +199,12 @@ def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource],
     if relativeto is not None:
         query = query(assemblyRoot=relativeto)
     if isinstance(obj, Component):
-        placements = Placement.objects(version_tags=obj.active_version,
-                                       component=obj)
-        query = query(assemblyPath__in=placements)
+        if relativeto is not None and relativeto is not obj:
+            placements = Placement.objects(version_tags=obj.active_version,
+                                           component=obj)
+            query = query(assemblyPath__in=placements)
+        else:
+            query = query(assemblyRoot=obj)
     elif isinstance(obj, EmissionSpec):
         query = query(spec=obj)
     elif isinstance(obj, EmissionSource):
@@ -212,8 +215,8 @@ def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource],
 class CalculatedResults(Document):
     """ Cache normalized HitEff results """
     # TODO: should this be a versioned document? it's acting as a cache
-    # TODO: how to make sure there are no values/rois collisions?
-    values = MapField(UncertainQuantityField(allownone=True),
+    # TODO: how to make sure there are no scalars/rois collisions?
+    scalars = MapField(UncertainQuantityField(allownone=True),
                       required=False, default=dict)
     spectra = MapField(HistogramField(allownone=True),
                        required=False, default=dict)
@@ -223,16 +226,20 @@ class CalculatedResults(Document):
 
     @classmethod
     def for_object(cls, obj, relativeto: Optional[Assembly] = None,
-                   active_version: Optional[str] = None
+                   active_version: Optional[str] = None,
+                   save: bool = False, save_intermediate: bool = False,
                    ) -> 'CalculatedResults':
         return cls.from_sourceterms(find_sourceterms(obj, relativeto,
-                                                     active_version))
+                                                     active_version),
+                                    save=save,
+                                    save_intermediate=save_intermediate)
 
     @classmethod
     def for_component(cls, component: Component,
-                      relativeto: Optional[Assembly] = None):
+                      relativeto: Optional[Assembly] = None,
+                      save: bool = False, save_intermediate: bool = False):
         query = SourceTerm.select_version(component.active_version)
-        if relativeto is None:
+        if relativeto is None or relativeto is component:
             query = query(assemblyRoot=component)
         else:
             placements = Placement.objects(
@@ -240,10 +247,11 @@ class CalculatedResults(Document):
                 component=component)
             query = query(assemblyRoot=relativeto,
                           assemblyPath__in=placements)
-        return cls.from_sourceterms(query)
+        return cls.from_sourceterms(query, save=save,
+                                    save_intermediate=save_intermediate)
 
     def ito_reduced_units(self):
-        for v in self.values.values():
+        for v in self.scalars.values():
             try:
                 v.ito_reduced_units()
             except AttributeError:
@@ -256,14 +264,16 @@ class CalculatedResults(Document):
         return self
 
     def __add__(self, other):
-        if not isinstance(other, CalculatedResults):
+        if other is None:
+            return self
+        elif not isinstance(other, CalculatedResults):
             raise TypeError('CalculatedResults can only add with others')
         # TODO: some checks to makes sure we're not duplicating sources
         # TODO: check active_version
         result = CalculatedResults(sources=self.sources + other.sources)
-        for key in set(self.values).union(other.values):
-            result.values[key] = addnone(self.values.get(key),
-                                         other.values.get(key))
+        for key in set(self.scalars).union(other.scalars):
+            result.scalars[key] = addnone(self.scalars.get(key),
+                                         other.scalars.get(key))
         for key in set(self.spectra).union(other.spectra):
             result.spectra[key] = addnone(self.spectra.get(key),
                                           other.spectra.get(key))
@@ -275,8 +285,8 @@ class CalculatedResults(Document):
         erate = sourceterm.emissionrate
         if not hiteff.norm.check(erate):
             raise units.DimensionalityError("incompatible emissionrate units")
-        return cls(values={key: multnone(val,  erate) for key, val in
-                           chain(hiteff.values.items(), hiteff.rois.items())
+        return cls(scalars={key: multnone(val,  erate) for key, val in
+                           chain(hiteff.scalars.items(), hiteff.rois.items())
                            if val is not None},
                    spectra={key: multnone(val, erate) for key, val in
                             hiteff.spectra.items() if val is not None},
@@ -289,10 +299,13 @@ class CalculatedResults(Document):
         return cls.objects(__raw__={'sources': {'$eq': ids}}).first()
 
     @classmethod
-    def from_sourceterm(cls, sourceterm: SourceTerm, allowcache: bool = True
+    def from_sourceterm(cls, sourceterm: SourceTerm, allowcache: bool = True,
+                        save: bool = False,
                         ) -> 'CalculatedResults':
         """ Calculalte all results for a single SourceTerm """
-        if allowcache and (result := cls.from_db([sourceterm]) is not None):
+        if not sourceterm.hiteffs:
+            return None
+        if allowcache and (result := cls.from_db([sourceterm])) is not None:
             return result
         result = sum((cls._from_hiteff(sourceterm, h)
                       for h in sourceterm.hiteffs),
@@ -301,21 +314,30 @@ class CalculatedResults(Document):
             result.ito_reduced_units()
         except AttributeError:
             pass
+        if save:
+            result.save()
         return result
 
     @classmethod
     def from_sourceterms(cls, sourceterms: List[SourceTerm],
-                         allowcache: bool = True) -> 'CalculatedResults':
-        if allowcache and (result := cls.from_db(sourceterms) is not None):
+                         allowcache: bool = True, save: bool = False,
+                         save_intermediate: bool = False,
+                         ) -> 'CalculatedResults':
+        if allowcache and (result := cls.from_db(sourceterms)) is not None:
             return result
         # even if subs are cached, re-calculate to pick up correlations
-        result = sum((cls.from_sourceterm(st, allowcache=False)
-                      for st in sourceterms),
+        result = sum((cls.from_sourceterm(st, allowcache=False,
+                                          save=save_intermediate)
+                      for st in sourceterms if st.hiteffs),
                      cls())
+        if not result.sources:
+            return None
         try:
             result.ito_reduced_units()
         except AttributeError:
             pass
+        if save:
+            result.save()
         return result
 
 
@@ -323,7 +345,7 @@ def update_component(sender, document, **kwargs):
     component = document
     # first, generate the list of all source terms for this component
     sourceterms = []
-    for spec in list(component.reference_specs) + [component]:
+    for spec in list(component.specs) + [component]:
         for source in spec.sources:
             spec = spec if spec is not component else None
             sourceterms.append(SourceTerm.from_component_source(component,
@@ -362,7 +384,8 @@ def update_assembly(sender, document, component=None, placement=None,
                                assemblyRoot=assembly)
     if component:
         query = query(assemblyPath__0__component=component)
-    query(id__nin=[st.id for st in sourceterms]).delete()
+    query = query(id__nin=[st.id for st in sourceterms])
+    query.delete()
 
     for parent in assembly.find_parents():
         update_assembly(sender=None, document=parent, component=assembly)
@@ -379,7 +402,7 @@ def update_emissionspec(sender, document, **kwargs):
     spec = document
     # find all components that own a reference to us and call update_component
     for component in Component.objects(version_tags=spec.active_version,
-                                       reference_specs=spec):
+                                       specs=spec):
         update_component(sender=None, document=component)
 
 
