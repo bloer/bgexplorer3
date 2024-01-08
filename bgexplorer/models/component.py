@@ -114,6 +114,9 @@ class Placement(EmbeddedDocument):
 
 class Assembly(Component):
     children = EmbeddedDocumentListField(Placement)
+    meta = {
+        'indexes': ['children.component'],
+    }
     # TODO: can't use a reverse delete rule here, so need a signal
     # handler for whenever a child gets deleted
 
