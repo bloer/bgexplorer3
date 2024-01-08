@@ -37,3 +37,6 @@ dev = ["mongomock", "flake8"]
 [project.urls]
 "Homepage" = "https://github.com/bloer/bgexplorer3"
 "Bug Tracker" = "https://github.com/bloer/bgexplorer3/issues"
+
+[tool.setuptools.packge-data]
+"bgexplorer.application.examples.qis_hiteffs" = ["*.json", "*.gz"]
