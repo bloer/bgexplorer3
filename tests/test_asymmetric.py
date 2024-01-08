@@ -167,3 +167,22 @@ class TestAsymmetric(unittest.TestCase):
         """ in some contexts quantities aren't constructed correctly? """
         self.assertTrue(hasattr(pint.Quantity(AsymmetricUncertainty(10,1), 'mBq/kg'), 'dimensionality'))
 
+    def test_ufunc_bug(self):
+        """ test that numpy operations return AsymmetricUncertainties """
+        x = np.ones_like(self.arr)
+        ops = [np.add, np.subtract, np.multiply, np.true_divide]
+        for op in ops:
+            with AsymmetricUncertainty.ignore_correlations():
+                y = op(self.arr, x)
+            self.assertIsInstance(y, AsymmetricUncertainty)
+            self.assertIsInstance(y.mode, np.ndarray)
+            self.assertIsInstance(y.s0[0], float)
+
+            y = op(self.arr, x)
+            self.assertIsInstance(y, AsymmetricUncertainty)
+            self.assertIsInstance(y.mode, np.ndarray)
+            self.assertIsInstance(y.s0[0], float)
+
+
+
+

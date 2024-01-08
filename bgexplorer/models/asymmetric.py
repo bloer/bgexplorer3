@@ -415,7 +415,7 @@ class AsymmetricUncertainty:
         s = tuple(format_spec.format(x)
                   for x in self.serialize(compressarrays=False))
         if len(s) == 2:
-            return f"{s[0]}+/-{s[1]}"
+            return f"{s[0]} ± {s[1]}"
         elif len(s) == 3:
             return f"{s[0]}+{s[2]}-{s[1]}"
 
@@ -538,7 +538,7 @@ class AsymmetricUncertainty:
         # test for pint Quantities
         if hasattr(other, 'dimensionality'):
             other = 1./other  # ensure it's a quantity
-            return other.__class__(self/other.m, other.u)
+            return other.__class__(self * other.m, other.u)
 
         if self.get_ignore_correlations():
             try:
@@ -648,7 +648,14 @@ class AsymmetricUncertainty:
     def size(self):
         return np.size(self.mode)
 
-    def __array__ufunc__(self, ufunc, method, *inputs, **kwargs):
+    @classmethod
+    def from_obj_array(cls, arr):
+        """ create an AsymmetricUncertainty(<array>) from an array of AUs """
+        return cls(np.fromiter((x.mode for x in arr), float),
+                   np.fromiter((x.s0 for x in arr), float),
+                   np.fromiter((x.s1 for x in arr), float))
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         if method != '__call__':
             return NotImplemented
         handled = {np.add: self.__add__,
@@ -667,13 +674,17 @@ class AsymmetricUncertainty:
         elif func is np.dot:
             weights = args[1] if args[0] is self else args[0]
             return self.integrate(weights)
+        elif func in (np.zeros_like, np.ones_like):
+            return func(self.mode)
 
-        # pass off handlnig to mode (handles things like zeros_like)
-        args = (a if a is not self else self.mode for a in args)
-        try:
-            result = func(*args, **kwargs)
-        except Exception:
-            return NotImplemented
+        # try to call independently on mode, s0, s1 and rebuild
+        with self.ignore_correlations():
+            args = (a if a is not self else np.asarray(self) for a in args)
+            try:
+                result = func(*args, **kwargs)
+                result = AsymmetricUncertainty.from_obj_array(result)
+            except Exception:
+                return NotImplemented
         return result
 
 
@@ -690,7 +701,7 @@ class LinearExpression:
         # AsymmetricUncertainty variables
         # as keys and scalar coefficients as values
         self.coefficients = defaultdict(self._defaultcoefficient)
-        if offset:
+        if offset is not None:
             self.coefficients[frozenset()] = offset
         if variables:
             self.coefficients[frozenset(variables)] = coefficient
