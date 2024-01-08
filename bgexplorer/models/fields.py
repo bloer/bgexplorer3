@@ -115,7 +115,7 @@ _sym_test = re.compile(fr'\(? *{_refloat} *(?:(?:±|\+ */? *-)'
                        fr' *{_refloat})? *\)? *([eE][+-]?\d+)? *(.*)?')
 _asym_test = re.compile(fr'\(? *{_refloat} *\+ *{_refloat} *'
                         fr'- *{_refloat} *\)? *([eE][+-]?\d+)? *(.*)?')
-
+# TODO: handle uncertainties given in parentheses
 
 class QuantityField(BaseField):
     """ A field representing a pint.Quantity.
@@ -201,7 +201,10 @@ class QuantityField(BaseField):
         if not isinstance(value, pint.Quantity):
             value = pint.Quantity(value, units)
         if self.forceasym and not isinstance(value.m, AsymmetricUncertainty):
+            _fromstr = getattr(value, '_fromstr', None)
             value = pint.Quantity(AsymmetricUncertainty(value.m, 0), value.u)
+            if _fromstr:
+                value._fromstr = _fromstr
 
         if self.convert:
             value.ito(self.units)
