@@ -2,8 +2,9 @@ from mongoengine import (EmbeddedDocument, StringField, DateField,
                          DateTimeField, DynamicEmbeddedDocument, BooleanField,
                          EmbeddedDocumentField, DictField, ValidationError,
                          EmbeddedDocumentListField, ListField, FloatField,
-                         URLField,
+                         URLField, ObjectIdField,
                          CASCADE, PULL, signals, IntField)
+from bson import ObjectId
 
 from .verdoc import VersionedDocument, VersionedReferenceField
 from .fields import QuantityField, AttachmentsField
@@ -85,10 +86,10 @@ class Component(VersionedDocument):
     def find_parents(self):
         """ Locate all Assemblies with a Placement pointing to this component
         """
-        qs = Placement.objects()
+        qs = Assembly.objects()
         if self.active_version:
             qs = qs.select_version(self.active_version)
-        return qs(component=self).distinct('parent')
+        return qs(children__component=self)
 
     # TODO: add additional EmissionSources just like emissionspec
 
@@ -98,8 +99,21 @@ def _ispositive(value):
         raise ValidationError("Value must be strictly greater than zero")
 
 
+class Placement(EmbeddedDocument):
+    id = ObjectIdField(required=True, default=ObjectId)
+    component = VersionedReferenceField(Component, required=True)
+    weight = FloatField(default=1, validation=_ispositive)
+    label = StringField(required=False, validation=_noslash)
+    location = StringField()
+
+    @property
+    def name(self):
+        return self.label or self.component.name
+
+
+
 class Assembly(Component):
-    children = ListField(VersionedReferenceField('Placement'))
+    children = EmbeddedDocumentListField(Placement)
     # TODO: can't use a reverse delete rule here, so need a signal
     # handler for whenever a child gets deleted
 
@@ -107,8 +121,7 @@ class Assembly(Component):
         if components is not None:
             if 'children' in kwargs:
                 raise ValueError("'children' and 'components' both provided")
-            kwargs['children'] = [Placement(parent=self, component=c)
-                                  for c in components]
+            kwargs['children'] = [Placement(component=c) for c in components]
         super().__init__(*args, **kwargs)
 
     def sumoverchildren(self, attr):
@@ -121,13 +134,6 @@ class Assembly(Component):
         # could run the appropriate query on-demand, but then we couldn't
         # query against it. Maybe add to the sourceterm calc?
         super().clean()
-        for placement in self.children:
-            placement.parent = self
-            if self.active_version not in placement.version_tags:
-                placement.version_tags.append(self.active_version)
-            # TODO: these will all also have default version tag...
-            placement.active_version = self.active_version
-            placement.save()
         if self.children:
             for attr in ('mass', 'volume', 'inner_surface_area',
                          'outer_surface_area'):
@@ -140,31 +146,3 @@ class Assembly(Component):
             self.volume = 0*units.m**3
             self.inner_surface_area = 0*units.cm**2
             self.outer_surface_area = 0*units.cm**2
-
-
-def post_save_assembly(sender, document, **kwargs):
-    assembly = document
-    Placement.select_version(assembly.active_version)(
-        parent=assembly,
-        original_id__nin=[p.original_id for p in assembly.children]
-    ).delete()
-
-
-signals.post_save.connect(post_save_assembly, sender=Assembly)
-
-
-class Placement(VersionedDocument):
-    parent = VersionedReferenceField('Assembly', required=True,
-                                     reverse_delete_rule=CASCADE)
-    component = VersionedReferenceField(Component, required=True,
-                                        reverse_delete_rule=CASCADE)
-    weight = FloatField(default=1, validation=_ispositive)
-    label = StringField(required=False, validation=_noslash)
-    location = StringField()
-
-    @property
-    def name(self):
-        return self.label or self.component.name
-
-
-Placement.register_delete_rule(Assembly, 'children', PULL)

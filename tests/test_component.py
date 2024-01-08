@@ -21,7 +21,6 @@ class TestComponent(unittest.TestCase):
     def setUp(self):
         Component.drop_collection()
         Assembly.drop_collection()
-        Placement.drop_collection()
 
     def tearDown(self):
         pass
@@ -41,11 +40,8 @@ class TestComponent(unittest.TestCase):
 
         self.assertEqual(Component.objects.count(), 3)
         self.assertEqual(Component.objects.no_sub_classes().count(), 2)
-        self.assertEqual(Placement.objects.count(), 2)
         self.assertEqual(Assembly.objects.count(), 1)
 
-        for p in Placement.objects:
-            self.assertEqual(p.parent.id, a1.id)
         self.assertEqual(a1.mass, 40*units.kg)
         self.assertEqual(a1.inner_surface_area, 20*units.cm**2)
         self.assertEqual(a1.outer_surface_area, 28*units.cm**2)
@@ -65,21 +61,15 @@ class TestComponent(unittest.TestCase):
         self.assertEqual(Component.objects.count(), 3)
         self.assertEqual(Component.objects.no_sub_classes().count(), 1)
         self.assertEqual(Assembly.objects.count(), 2)
-        self.assertEqual(Placement.objects.count(), 2)
         self.assertEqual(len(a1.children), 1)
         self.assertEqual(len(a2.children), 1)
-        for p in Placement.objects:
+        for p in a1.children:
             self.assertEqual(p.component.id, c1.id)
 
-    def tesT_json(self):
+    def test_json(self):
         c1 = Component(name="c1", mass="10 kg")
         json = c1.to_json()
         c2 = Component.from_json(json)
         self.assertEqual(c1.id, c2.id)
         self.assertEqual(c1.mass, c2.mass)
-
-        a1.children = []
-        a1.save()
-        self.assertEqual(Placement.objects.count(), 1)
-        self.assertEqual(Placement.objects(parent=a1).count(), 0)
 

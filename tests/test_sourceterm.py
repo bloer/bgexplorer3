@@ -26,7 +26,6 @@ class TestSourceTerm(unittest.TestCase):
     def setUp(self):
         Component.drop_collection()
         Assembly.drop_collection()
-        Placement.drop_collection()
         EmissionSpec.drop_collection()
         SourceTerm.drop_collection()
         CalculatedResults.drop_collection()

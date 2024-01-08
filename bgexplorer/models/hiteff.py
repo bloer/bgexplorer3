@@ -114,21 +114,21 @@ class HitEfficiency(DynamicVersionedDocument):
     scalars_keys = ListField(StringField())
     spectra_keys = ListField(StringField())
 
-    #meta = {
-    #    'indexes': ['location', 'distribution', 'source', 'version', 'date',
-    #                'scalars_keys', 'spectra_keys']
-    #}
+    meta = {
+        'indexes': ['location', 'distribution', 'source', 'version', 'date',
+                    'scalars_keys', 'spectra_keys']
+    }
 
-    #def __init__(self, *args, **kwargs):
-    #    """ Set an ID on all scalars and spectra to track correlations """
-    #    super().__init__(*args, **kwargs)
-    #    for key, val in chain(self.scalars.items(), self.rois.items()):
-    #        if val is not None:
-    #            val.m.id = '.'.join([str(self.id), 'v', key])
-    #    for key, val in self.spectra.items():
-    #        if val is not None:
-    #            val.hist.m.id = '.'.join([str(self.id), 's', key])
-    #    # use a post-init signal
+    def __init__(self, *args, **kwargs):
+        """ Set an ID on all scalars and spectra to track correlations """
+        super().__init__(*args, **kwargs)
+        for key, val in chain(self.scalars.items(), self.rois.items()):
+            if val is not None:
+                val.m.id = '.'.join([str(self.id), 'v', key])
+        for key, val in self.spectra.items():
+            if val is not None:
+                val.hist.m.id = '.'.join([str(self.id), 's', key])
+        # use a post-init signal?
 
     def check_dbconfig(self, dbconfig):
         """ Make sure we are compatible with the HitEffDBconfig

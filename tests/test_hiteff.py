@@ -32,7 +32,8 @@ class TestHitEFficiency(unittest.TestCase):
 
     def test_ids(self):
         """ ensure that scalars and spectra are assigned an ID """
-        h = HitEfficiency(source="h", location="h", scalars=dict(
+        h = HitEfficiency(source="h", location="h",
+                scalars=dict(
                     v1="10 +- 1 dru/mBq",
                     v2="<3 dru/mBq"),
                 spectra = dict(
