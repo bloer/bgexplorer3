@@ -184,8 +184,8 @@ class EmissionSpec(VersionedDocument):
 
         matchout.multiplier = matchin.multiplier
         rate = matchin.rate * newsource.ratio
-        rate_is_concentration = units('ppb').check(matchin.rate)
-        # TODO: need to also handle 'Bq', not just 'Bq/kg'
+        rate_is_concentration = (units('ppb').check(matchin.rate) or
+                                 units('g').check(matchin.rate))
         if (rate_is_concentration and
                 newsource.ratiotype is settings.RatioType.rate):
             rate = concentration_to_rate(matchin.name, matchin.rate)

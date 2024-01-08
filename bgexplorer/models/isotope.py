@@ -68,7 +68,7 @@ def concentration_to_rate(source: IsotopeType,
         concentration = concentration * isotope.abundance/100.
     A = isotope.mass * units('g/mol')
     # return will throw invalid unit error if `conc` is not dimensionless
-    return (concentration * units.N_A / A / halflife * _ln2).to('Bq/kg')
+    return (concentration * units.N_A / A / halflife * _ln2)
 
 
 def rate_to_concentration(source: IsotopeType, rate: units.Quantity,
@@ -83,7 +83,7 @@ def rate_to_concentration(source: IsotopeType, rate: units.Quantity,
     if halflife is None:
         raise ValueError(f"'{source}' is not a valid radioactive isotope")
     A = isotope.mass * units('g/mol')
-    concentration = (rate / units.N_A * A * halflife / _ln2).to('ppb')
+    concentration = (rate / units.N_A * A * halflife / _ln2)
     if applyabundance is None and compare_source_names(source, 'K40'):
         applyabundance = True
     if applyabundance:
