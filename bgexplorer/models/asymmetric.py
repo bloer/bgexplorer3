@@ -9,6 +9,9 @@ from functools import reduce
 import threading
 from contextlib import contextmanager
 from typing import Union, Optional, Tuple
+from uncertainties import ufloat
+from difflib import SequenceMatcher
+import re
 import logging
 try:
     import pint
@@ -18,6 +21,7 @@ except ImportError:
 NumOrArray = Union[int, float, np.ndarray]
 log = logging.getLogger(__name__)
 
+refloat = re.compile(r'\d+\.?\d*')
 
 class AsymmetricUncertaintyDistribution(rv_continuous):
     """ Scipy rv_continuous defined by AsymmetricUncertainty data """
@@ -407,20 +411,57 @@ class AsymmetricUncertainty:
         return self.ppf(quantile)
 
     def __format__(self, format_spec):
-        if not np.isscalar(self.mode):
-            format_spec = ''
-        format_spec = ''.join(['{:', format_spec, '}'])
+        float_spec = format_spec.replace('S', '').replace('P', '').replace('L', '')
+        float_spec = float_spec or '.2g'
         if self.isupperlimit():
-            return ''.join(['<', format_spec.format(self.ppf(0.9))])
-        s = tuple(format_spec.format(x)
-                  for x in self.serialize(compressarrays=False))
+            str1 = ''.join(['<', self.ppf(0.9).__format__(float_spec)])
+            if 'L' in format_spec:
+                str1 = re.sub(r'e\+?(-?)0*(.*)$', r'\\times 10^{\1\2}', str1)
+            return str1
+
+        s = self.serialize(compressarrays=False)
         if len(s) == 2:
-            return f"{s[0]} ± {s[1]}"
+            if not np.isscalar(s[0]):
+                return ' +/- '.join([str(v) for v in s])
+            return ufloat(*s).__format__(format_spec)
         elif len(s) == 3:
-            return f"{s[0]}+{s[2]}-{s[1]}"
+            if not np.isscalar(s[0]):
+                return ' '.join([str(s[0]), '+', str(s[1]), '-', str(s[2])])
+            str1 = ufloat(s[0], s[1]).__format__(format_spec)
+            str2 = ufloat(s[0], s[2]).__format__(format_spec)
+            if str1 == str2:
+                return str1
+            ss = [v.__format__(float_spec) for v in s]
+            if 'L' in format_spec:
+                return '{}^{{+{}}}_{{-{}}}'.format(*ss)
+            return '{} + {} - {}'.format(*ss)
+
+            m0, s0 = list(refloat.finditer(str1))[:2]
+            m1, s1 = list(refloat.finditer(str2))[:2]
+            m0str = str1[m0.start():m0.end()]
+            s0str = str1[s0.start():s0.end()]
+            m1str = str2[m1.start():m1.end()]
+            s1str = str2[s1.start():s1.end()]
+            if s0str == s1str:
+                return str1
+            if m0str != m1str:
+                if 'L' in format_spec:
+                    return f'^{{+{str2}}}_{{-{str1}}}'
+                return ' , -'.join([str2, str1])
+            replacement = f'+{s1str},-{s0str}'
+            if 'L' in format_spec:
+                replacement = f'^{{{s1str}}}_{{{s0str}}}'
+            return ''.join([str1[:s0.start()], replacement, str1[s0.end():]])
+
+
+            latex = 'L' in format_spec
+            s = [v.__format__(float_spec) for v in s]
+            if latex:
+                return f"{s[0]}^{{+{s[2]}}}_{{-{s[1]}}}"
+            return f"{s[0]} + {s[2]} - {s[1]}"
 
     def __str__(self):
-        return "{}".format(self)
+        return self.__format__('')
 
     def __repr__(self):
         return f"AsymmetricUncertainty{self.serialize(compressarrays=False)}"

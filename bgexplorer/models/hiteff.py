@@ -101,6 +101,8 @@ class HitEfficiency(DynamicVersionedDocument):
     primary_particle = StringField(required=False)
     primary_spectrum = DynamicField(required=False)
     primary_yield = FloatField(required=False, default=1)
+    primary_area = QuantityField(required=False, units='cm**2')
+    primary_volume = QuantityField(required=False, units='cm**3')
     material = StringField(default=None)
     biasweight = FloatField(required=False, default=1)
     livetime = QuantityField(units='s', required=False)
@@ -202,7 +204,7 @@ class HitEfficiency(DynamicVersionedDocument):
 
         try:
             return (self.nprimaries * self.biasweight /
-                    (emissionrate * self.primary_yield))
+                    (emissionrate * self.primary_yield)).to('second')
         except (AttributeError, TypeError):
             # nprimaries not provided
             pass

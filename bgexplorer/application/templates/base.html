@@ -1,68 +1,85 @@
 <!doctype html>
 <html lang="en">
-    <head>
-        {% block head %}
-        <!-- Required meta tags -->
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-        <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
-        {% block styles %}
-            <!-- Bootstrap CSS -->
-            {{ bootstrap.load_css() }}
-            <link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
-            {% block pagestyle %}
-            {% endblock pagestyle %}
-        {% endblock styles%}
+<head>
+    {% block head -%}
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    {% block styles -%}
+    <!-- Bootstrap CSS -->
+    {{ bootstrap.load_css() }}
+    <!-- bgexplorer css -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
+    {%- filter indent(width=4) -%}
+    {%- block pagestyle -%}
+    {%- endblock pagestyle -%}
+    {%- endfilter -%}
+    {%- endblock styles %}
 
-        <title>{% block title %}Background Explorer{% endblock %}</title>
-        {% endblock head %}
-    </head>
-    <body>{% block body %}
-        {% block navbar %}
-        <nav class="navbar navbar-expand">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="https://github.com/bloer/bgexplorer">
-                <img src="{{ url_for('static', filename="bgexplorer_brand.png") }}"
-                     alt="Background Explorer">
-            </a>
-            <div class="collapse navbar-collapse">
-            <ul class="navbar-nav">
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('index') }}">Index</a>
-                </li>
-                {% block pagenav %}
-                {% endblock %}
-            </ul>
-            </div>
-            {% block extranav %}
-            {% endblock extranav %}
-            <a class="navbar-brand me-0 ms-3" href="https://pnnl.gov">
-                <img src="{{ url_for('static', filename='logopnnl.png') }}" alt="PNNL">
-            </a>
-
+    <title>{% block title %}Background Explorer{% endblock %}</title>
+    {%- endblock head %}
+</head>
+<body>{% block body -%}
+{%- block navbar %}
+<nav class="navbar navbar-expand">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="https://github.com/bloer/bgexplorer">
+            <img src="{{ url_for('static', filename="bgexplorer_brand.png") }}" alt="Background Explorer">
+        </a>
+        <div class="collapse navbar-collapse">
+        <ul class="navbar-nav">
+            <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('index') }}">Index</a>
+            </li>
+            {%- filter indent(width=12) -%}
+            {% block pagenav %}
+            {% endblock -%}
+            {%- endfilter %}
+        </ul>
         </div>
-        </nav>
-        {% endblock navbar %}
+        {%- filter indent(width=8) -%}
+        {% block extranav %}
+        {% endblock extranav %}
+        {%- endfilter %}
+        <a class="navbar-brand me-0 ms-3" href="https://pnnl.gov">
+            <img src="{{ url_for('static', filename='logopnnl.png') }}" alt="PNNL">
+        </a>
+    </div>
+</nav>
+{% endblock navbar %}
 
-        <!-- Your page content -->
-        {% block content %}
-        <div id="content" class="container">
-            <div id="pageheader" class="row">{% block pageheader %}{% endblock %}</div>
-            <div id="pagecontent">
-                {% block pagecontent %}{% endblock %}
-            </div>
-        </div>
-        <footer id="pagefooter">
-            Background Explorer version {{ bgexplorer_version() }} |
-            <a href="https://github.com/bloer/bgexplorer/blob/master/LICENSE">License</a>
-        </footer>
-        </div>
-        {% endblock content %}
+{% block content %}
+<div id="content" class="container">
+<div id="pageheader" class="row">
+    {%- filter indent(width=4) -%}
+    {% block pageheader %}
+    {% endblock -%}
+    {%- endfilter %}
+</div>
 
-        {% block scripts %}
-            <!-- Optional JavaScript -->
-            {{ bootstrap.load_js() }}
-        {% endblock %}
-    {% endblock body%}
-    </body>
+<div id="pagecontent">
+<!-- main page content -->
+{% block pagecontent %}
+{% endblock %}
+<!-- end main page content -->
+</div>
+
+</div> <!-- close "content -->
+
+<footer id="pagefooter">
+    Background Explorer version {{ bgexplorer_version() }} |
+    <a href="https://github.com/bloer/bgexplorer/blob/master/LICENSE">License</a>
+</footer>
+{% endblock content %}
+
+{% block scripts %}
+        <!-- bootstrap required JS -->
+        {{ bootstrap.load_js() }}
+<!-- page-specific JavaScript -->
+{% block pagescripts %}
+{% endblock pagescripts %}
+{% endblock scripts %}
+{% endblock body%}
+</body>
 </html>

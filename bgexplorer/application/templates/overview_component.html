@@ -1,8 +1,18 @@
+{%- import "datatable.html" as datatable -%}
+{%- set embedded = request.args.embedded | default(false) -%}
+{%- if not embedded -%}
 {% extends "versionbase.html" %}
-{% import "datatable.html" as datatable %}
+
+{% block pagestyle %}
+{{ datatable.styles() }}
+{% endblock %}
+
+{% block pagescripts %}
+{{ datatable.scripts() }}
+{% endblock %}
 
 {% block pageheader %}<h1>Components</h1>{% endblock %}
-
+{%- endif -%}
 
 {% macro part(component) %}
 {{ component.purchaseinfo.vendor or '' }} {{ component.purchaseinfo.partnum or '' }}
@@ -17,7 +27,7 @@ batch {{ component.purchaseinfo.batch or component.purchaseinfo.material_batch }
 {% call datatable.render(headers) %}
     {% for component in data %}
     <tr class="component{% if component.hierarchy_level is gt 1 %} assembly{% endif %}" data-id="{{ component.id }}" data-original_id="{{ component.original_id }}">
-        <td><a href="{{ url_for('.get_json', object=component) }}">{{ component.name }}</a> </td>
+        <td><a href="{{ url_for('.view', object=component) }}">{{ component.name }}</a> </td>
         <td>{{ component.hierarchy_level }}</td>
         <td>{{ component.description or '' }}</td>
         <td>{{ component.material or '' }}</td>
@@ -29,11 +39,3 @@ batch {{ component.purchaseinfo.batch or component.purchaseinfo.material_batch }
 {% endcall %}
 {% endblock %}
 
-{% block pagestyle %}
-{{ datatable.styles() }}
-{% endblock %}
-
-{% block scripts %}
-{{ super() }}
-{{ datatable.scripts() }}
-{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "versionbase.html" %}
+{% import "datatable.html" as datatable %}
+
+{% block pageheader %}<h1>Hit Efficiencies</h1>{% endblock %}
+
+{% block pagecontent %}
+{% set headers = ['Source', 'Location', 'Nprimaries', 'Primary',
+                  'Multiplier'] + settings.hiteffdbconfig.extra_columns %}
+{% call datatable.render(headers) %}
+    {% for hiteff in data %}
+    <tr class="hiteff" data-id="{{ hiteff.id }}" data-original_id="{{ hiteff.original_id }}">
+        <td><a href="{{ url_for('.get_json', object=hiteff) }}">{{ hiteff.source }}</a> </td>
+        <td>{{ hiteff.location }} {{ hiteff.distribution or '' }}</td>
+        <td>{{ hiteff.nprimaries or 'N/A' }}{% if hiteff.biasweight and hiteff.biasweight != 1 %} biasweight={{ "{:.2g}".format(hiteff.biasweight) }}{% endif %}</td>
+        <td>{{ hiteff.primary_particle or '' }} {{ hiteff.primary_spectrum or '' }}</td>
+        <td>{{ hiteff.norm.name }}</td>
+        {% for col in settings.hiteffdbconfig.extra_columns %}
+        <td>{{ hiteff[col] | default('') }}</td>
+        {% endfor %}
+    </tr>
+    {% endfor %}
+{% endcall %}
+{% endblock %}
+
+{% block pagestyle %}
+{{ datatable.styles() }}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{{ datatable.scripts() }}
+{% endblock %}

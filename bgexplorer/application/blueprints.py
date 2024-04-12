@@ -2,6 +2,7 @@ import flask
 import mongoengine as me
 from bson import ObjectId
 from ..models.sourceterm import find_sourceterms
+from .forms import update_object
 
 
 def get_or_404(queryset, objid):
@@ -37,16 +38,10 @@ class CollectionViews(flask.Blueprint):
     def queryset(self):
         qs = self.doc_cls.select_version(flask.g.active_version)
         # exclude large attributes unless specifically requested
-        if 'attachment' not in flask.request.base_url:
-            try:
-                qs = qs.exclude('attachments')
-            except me.errors.LookUpError:
-                pass
-        if 'spectr' not in flask.request.base_url:
-            try:
-                qs = qs.exclude('spectra')
-            except me.errors.LookUpError:
-                pass
+        if self.has_attachments:
+            qs = qs.exclude('attachments__data')
+        if self.has_spectra and 'spectr' not in flask.request.base_url:
+            qs = qs.exclude('spectra')
         return qs
 
     def get_mtime(self, objid):
@@ -65,6 +60,8 @@ class CollectionViews(flask.Blueprint):
         def get_objid(endpoint, values):
             if obj := values.pop('object', None):
                 values['objid'] = str(obj.original_id)
+            # elif 'object' in flask.g and 'objid' not in values:
+            #     values['objid'] = str(flask.g.object.original_id)
             if ((relativeto := values.get('relativeto')) and
                     not isinstance(relativeto, str)):
                 values['relativeto'] = str(relativeto.original_id)
@@ -99,3 +96,28 @@ class CollectionViews(flask.Blueprint):
         @self.get('/<objid>')
         def view():
             return flask.render_template(f'view_{self.clsname}.html')
+
+        @self.route('/<objid>/edit', methods=['GET', 'POST'])
+        def edit():
+            req = flask.request
+            if req.form and req.method == 'POST':
+                update_object(flask.g.object, req.form)
+                return flask.Response(flask.g.object.to_json(),
+                                     mimetype='application/json')
+            return flask.render_template(f'edit_{self.clsname}.html',
+                                         form=flask.request.form)
+
+        if self.has_attachments:
+            @self.route('/<objid>/attachments', methods=['GET', 'POST'])
+            def attachments():
+                if flask.request.method == 'POST':
+                    pass
+                return flask.render_template('attachments.html')
+
+            @self.get('<objid>/attachments/<index>')
+            def get_attachment(index):
+                abort(404)
+                data = self.doc_cls.objects(id=flask.g.object.id).aggregate(
+                    [{'$project': {'$data': f'attachments.{index}'}}]
+                    )
+

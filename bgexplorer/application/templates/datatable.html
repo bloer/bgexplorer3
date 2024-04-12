@@ -1,13 +1,16 @@
-{% macro styles() %}
+{%- macro styles() -%}
+<!-- css for jquery datatables -->
 <link rel="stylesheet" href="{{ url_for('static', filename='datatables.min.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='datatables_full_viewport.css') }}">
-{% endmacro %}
+{%- endmacro -%}
 
-{% macro scripts(tableid='dtable') %}
+{% macro scripts(initialize=true, tableid='dtable') %}
+<!-- libraries for jquery datatables -->
 <script src="{{ url_for('static', filename='jquery.min.js') }}"></script>
 <script src="{{ url_for('static', filename='datatables.min.js') }}"></script>
+<!-- set good defaults for datatables -->
 <script>
-    new DataTable("#{{ tableid }}",{
+    $.extend( $.fn.dataTable.defaults, {
         sDom: 'iftr',
         paging: false,
         scrollY: "100%",
@@ -15,16 +18,21 @@
         scrollX: true,
         fixedColumns: true,
         order: [],
-        });
+    });
 </script>
+{%- if initialize %}
+<script>
+    new DataTable("#{{ tableid }}");
+</script>
+{% endif -%}
 {% endmacro %}
 
 {% macro render(headings, tableid="dtable") %}
-<table id="{{ tableid }}" class="table table-hover table-bordered table-sm  nowrap" width="100%">
+<table id="{{ tableid }}" class="table table-hover table-bordered table-sm  nowrap datatable" width="100%">
     <thead class="table-light">
         <tr>{% for col in headings %}
             <th>{{ col }}</th>
-            {% endfor %}
+            {%- endfor %}
         </tr>
     </thead>
     <tbody>

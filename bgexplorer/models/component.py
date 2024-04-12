@@ -13,26 +13,23 @@ from .common import units
 
 
 class PurchaseInfo(EmbeddedDocument):
-    vendor = StringField(verbose_name='Vendor/producer')
-    partnum = StringField(verbose_name="Vendor part number or drawing")
-    link = URLField("Link to product website")
-    material_batch = StringField(verbose_name="Material batch number")
-    batch = StringField(verbose_name='Fabrication batch number')
-    purchased = DateField(verbose_name="Purchase date")
-    received = DateField(verbose_name="Date received")
-    fabricated = DateField(verbose_name="Fabrication date")
-    owner = StringField(verbose_name='Sample owner')
-    ownercontact = StringField(verbose_name='Owner contact info')
-
+    vendor = StringField(label='Vendor or producer')
+    partnum = StringField(label="Vendor catalog number or drawing")
+    link = URLField(label="Link to product website")
+    batch = StringField(label='Batch number')
+    order = StringField(label="Order number")
+    purchaser = StringField(label="Purchaser name and contact info")
+    owner = StringField(label="Owner name and contact info")
+    purchased = DateField(label="Date purchased or fabricated")
+    received = DateField(label="Date Received")
 
 class HistoryEntry(DynamicEmbeddedDocument):
-    description = StringField(required=True)
     date = DateTimeField(required=True)
+    description = StringField(required=True)
     location = StringField()
     duration = QuantityField(units='h')
+    worker = StringField()
     comment = StringField()
-    person = StringField()
-    enteredby = StringField()
 
 
 def _noslash(value):
@@ -52,24 +49,32 @@ class Component(VersionedDocument):
     length = QuantityField(units='m', default=0 * units.m)
     width = QuantityField(units='m', default=0 * units.m)
     height = QuantityField(units='m', default=0 * units.m)
-    treat_surface_as_bulk = BooleanField(default=False)
+    location = StringField(
+        label="Hit Efficiency Location",
+        help_text="Key to match against locations in HitEfficieny database",
+        autocomplete="hitefflocations",
+    )
+    treat_surface_as_bulk = BooleanField(
+        default=False,
+        help_text="Allow surface contamination to use bulk Hit Efficiencies",
+    )
     distribution = StringField(
-        help_text="Override default distribution from rate units"
+        help_text="Override default distribution from rate units. This is useful e.g. to locate small components on the surface of some location.",
+        suggestions=['bulk', 'surface', 'inner_surface', 'outer_surface'],
     )
 
-    location = StringField(
-        verbose_name="HitEfficiency Location",
-        help_text="Key to match against locations in HitEfficieny database"
-    )
     hierarchy_level = IntField(default=1, help_text="how many levels of nested components are below us?")
     # TODO: need to add some assay quality info
+    material_purchaseinfo = EmbeddedDocumentField(PurchaseInfo)
     purchaseinfo = EmbeddedDocumentField(PurchaseInfo)
     extra_metadata = DictField()
     attachments = AttachmentsField()
     history = EmbeddedDocumentListField(HistoryEntry)
 
     specs = ListField(VersionedReferenceField(EmissionSpec,
-                      reverse_delete_rule=PULL))
+                      reverse_delete_rule=PULL,
+                      endpoint='emissionspec',
+                      ))
     sources = EmbeddedDocumentListField(EmissionSource)
 
     meta = {'allow_inheritance': True}
@@ -101,15 +106,29 @@ def _ispositive(value):
 
 class Placement(EmbeddedDocument):
     id = ObjectIdField(required=True, default=ObjectId)
-    component = VersionedReferenceField(Component, required=True)
+    component = VersionedReferenceField(Component, required=True, endpoint='component')
     weight = FloatField(default=1, validation=_ispositive)
     label = StringField(required=False, validation=_noslash)
-    location = StringField()
+    location = StringField(
+        label="Hit Efficiency Location",
+        help_text="Key to match against locations in HitEfficieny database",
+        autocomplete="hitefflocations",
+    )
 
     @property
     def name(self):
         return self.label or self.component.name
 
+def test_circular_assembly(component, assemblyPath=[]):
+    """ test for circular assembly chains """
+    if component in assemblyPath:
+        raise ValidationError("Circular assembly path detected")
+    assemblyPath = [component] + assemblyPath
+    try:
+        for placement in component.children:
+            test_circular_assembly(placement.component, assemblyPath)
+    except AttributeError:
+        pass
 
 class Assembly(Component):
     children = EmbeddedDocumentListField(Placement)
@@ -135,7 +154,12 @@ class Assembly(Component):
         # new placements to an already-placed child
         # could run the appropriate query on-demand, but then we couldn't
         # query against it. Maybe add to the sourceterm calc?
+
         super().clean()
+        # test for circular references
+        # TODO: this is pretty expensive...
+        test_circular_assembly(self)
+
         if self.children:
             for attr in ('mass', 'volume', 'inner_surface_area',
                          'outer_surface_area'):

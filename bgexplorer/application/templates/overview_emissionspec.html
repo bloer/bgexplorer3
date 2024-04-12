@@ -1,8 +1,18 @@
+{%- import "datatable.html" as datatable -%}
+{%- set embedded = request.args.embedded | default(false) -%}
+{%- if not embedded -%}
 {% extends "versionbase.html" %}
-{% import "datatable.html" as datatable %}
+
+{% block pagestyle %}
+{{ datatable.styles() }}
+{% endblock %}
+
+{% block pagescripts %}
+{{ datatable.scripts() }}
+{% endblock %}
 
 {% block pageheader %}<h1>Radiation sources</h1>{% endblock %}
-
+{%- endif -%}
 
 {% block pagecontent %}
 {% set sourcenames = all_source_names() %}
@@ -51,13 +61,4 @@
     </tr>
     {% endfor %}
 {% endcall %}
-{% endblock %}
-
-{% block pagestyle %}
-{{ datatable.styles() }}
-{% endblock %}
-
-{% block scripts %}
-{{ super() }}
-{{ datatable.scripts() }}
 {% endblock %}

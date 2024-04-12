@@ -147,6 +147,7 @@ def populate_example(version_tag='examples/qis', clean: bool = False,
         Component(name='HEMT', mass='0.017 kg', location='4K Stage', specs=[Assay.objects.get(name='HEMT')]),
         Component(name='cryo filters', mass='0.015 kg', location='Package Connector Outside', specs=[Assay.objects.get(name='K&L filter')]),
         Component(name='cryo attenuator', mass='0.005 kg', location='Mixing Chamber Stage', specs=[Assay.objects.get(name='attenuator')]),
+        Component(name='Environment', location='Environment', sources=[EmissionSource(name='Gammaflux', rate='7.02095 1/cm**2/s', multiplier='none')], distribution='flux'),
     ]
     for component in components:
         component.version_tags = [version_tag]
@@ -158,11 +159,20 @@ def populate_example(version_tag='examples/qis', clean: bool = False,
                 for child, weight in children]
 
     log.debug("Saving assemblies")
+    Assembly(name='50K Can', version_tag=version_tag, children=placements([
+        ('Upper 50K Can', 1), ('Lower 50K Can', 1)])).save()
+    Assembly(name='Vacuum Can', version_tag=version_tag, children=placements([
+        ('Upper Vacuum Can', 1), ('Lower Vacuum Can', 1)])).save()
+
     readout = Assembly(name='readout', version_tag=version_tag,
                        children=placements([
                            ('chip wirebonds', 10),
                            ('package fasteners', 10),
                            ('package', 1),
+                           ('experiment stage', 1),
+                           ('shield copper', 1),
+                           ('shield aluminum', 1),
+                           ('shield cryoperm', 1),
                            ('coax cable near package', 10),
                            ('MXC RF feedthroughs', 10),
                            ('MXC DC feedthroughs', 100),
@@ -175,20 +185,14 @@ def populate_example(version_tag='examples/qis', clean: bool = False,
     goldplating = Component.select_version(version_tag).get(name='gold plating')
     fridge = Assembly(name='fridge', version_tag=version_tag,
                       children=placements([
-                            ('experiment stage', 1),
-                            ('shield copper', 1),
-                            ('shield aluminum', 1),
-                            ('shield cryoperm', 1),
                             ('MC Stage', 1),
                             ('CP Stage', 1),
                             ('ST Stage', 1),
                             ('4K Stage', 1),
                             ('50K Stage', 1),
                             ('Vacuum Flange', 1),
-                            ('Upper Vacuum Can', 1),
-                            ('Lower Vacuum Can', 1),
-                            ('Upper 50K Can', 1),
-                            ('Lower 50K Can', 1),
+                            ('Vacuum Can', 1),
+                            ('50K Can', 1),
                             ('4K Can', 1),
                             ('Still Can', 1)]) + [
                             Placement(component=goldplating, location='Experiment stage'),
@@ -219,7 +223,8 @@ def populate_example(version_tag='examples/qis', clean: bool = False,
                             ]),
                        ).save()
     total = Assembly(name='total', version_tag=version_tag,
-                     components=[internals, shield]).save()
+                     components=[internals, shield]+list(Component.objects(name='Environment')),
+                     ).save()
     log.debug("Calculating results")
     result = CalculatedResults.for_component(total, save=True, save_intermediate=True)
 

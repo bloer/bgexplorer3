@@ -1,0 +1,91 @@
+{% extends "versionbase.html" %}
+{% from "forms.html" import formfield, formscripts, subdocform, dynamictable, modal %}
+{% import "datatable.html" as datatable %}
+
+{%- block pagestyle %}
+{{ datatable.styles() }}
+{%- endblock pagestyle -%}
+
+{% block pageheader %}
+<div class="col-5">
+    <h2>Editing component</h2>
+</div>
+<div class="col-7">
+    <div class="d-flex justify-content-end">
+        <button class="btn btn-success me-1" type="submit" form="mainform">Save</button>
+        <a class="btn btn-warning me-1" href="{{ url_for('.edit', object=g.object) }}">Reload</a>
+        <a class="btn btn-danger" href="{{ url_for('.view', object=g.object) }}">Cancel</a>
+    </div>
+</div>
+{% endblock pageheader %}
+
+{% block pagecontent %}
+{%- set isassembly = g.object.children is defined -%}
+<p>Branch: {{ g.object.active_version }}</p>
+<p>Current revision: {{g.object.revision }}</p>
+<p>Last modified: {{ pretty_date(g.object.modified) }}</p>
+<form method="POST" id="mainform">
+    <div class="row mb-3">
+        <fieldset class="col-sm-12 col-md-6">
+            <legend>Basic Info</legend>
+            {%- for fieldname in ['name', 'description', 'notes', 'material'] -%}
+            {{ formfield(g.object, fieldname) }}
+            {%- endfor -%}
+        </fieldset>
+        <fieldset class="col-sm-12 col-md-6">
+            {% if not isassembly %}
+            <legend>Physical Characteristics</legend>
+            <div class="row">
+            {%- for fieldname in ['mass', 'volume', 'inner_surface_area',
+                                  'outer_surface_area', 'length', 'width', 'height'] -%}
+            {{ formfield(g.object, fieldname, outerclass='col-sm-6') }}
+            {%- endfor -%}
+            </div>
+            {% else %}
+            <legend>Child components</legend>
+            {{ dynamictable(g.object, 'children') }}
+            {% endif %}
+        </fieldset>
+    </div>
+    <div class="row mb-3">
+        <fieldset class="col-sm-12 col-md-6">
+            <legend>Hit Efficiency matching</legend>
+            {%- for fieldname in ['location', 'treat_surface_as_bulk', 'distribution'] -%}
+            {{ formfield(g.object, fieldname) }}
+            {%- endfor -%}
+        </fieldset>
+        {%- if not isassembly %}
+        <fieldset class="col-sm-12 col-md-6"
+            <legend>Radiation specifications</legend>
+            {{ dynamictable(g.object, 'specs', plainref=true) }}
+        </fieldset>
+        {% endif -%}
+    </div>
+    <div class="row mb-3">
+        <fieldset class="col-sm-12 col-md-6">
+            <legend>Material Purchase Info</legend>
+            {{ subdocform(g.object, 'material_purchaseinfo') }}
+        </fieldset>
+        <fieldset class="col-sm-12 col-md-6">
+            <legend>Component Purchase/Fabrication Info</legend>
+            {{ subdocform(g.object, 'purchaseinfo') }}
+        </fieldset>
+    </div>
+    <fieldset class="row mb-3">
+        <legend>Component History</legend>
+        {{ dynamictable(g.object, 'history') }}
+    </fieldset>
+    <div class="d-flex justify-content-end">
+        <button class="btn btn-success me-1" type="submit" form="mainform">Save</button>
+        <a class="btn btn-warning me-1" href="{{ url_for('.edit', object=g.object) }}">Reload</a>
+        <a class="btn btn-danger" href="{{ url_for('.view', object=g.object) }}">Cancel</a>
+    </div>
+</form>
+{{ form.to_dict(flat=False) }}
+{{ modal() }}
+{% endblock pagecontent %}
+
+{% block pagescripts %}
+{{ formscripts() }}
+{{ datatable.scripts(initialize=false) }}
+{% endblock pagescripts %}

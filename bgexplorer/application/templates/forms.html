@@ -1,0 +1,260 @@
+{% macro formscripts() %}
+<!-- scripts for interactive forms -->
+<script>
+    function loadDatalist(dlist){
+        fetch(dlist.dataset.url)
+        .then(response => response.json())
+        .then(options => {
+            options.forEach(value => {
+                var option = document.createElement('option');
+                option.value = value;
+                dlist.appendChild(option);
+            });
+        });
+    }
+    document.querySelectorAll('datalist[data-url]').forEach(loadDatalist);
+
+    function addDynamicTableRow(caller){
+        const tbody = document.querySelector("#"+caller.dataset.tableid+" tbody");
+        const template = document.getElementById(caller.dataset.templateid);
+        const clone = template.content.cloneNode(true);
+        tbody.appendChild(clone);
+        // if clone contains a referenceSelector button, click it
+        setTimeout(function(){
+            var referenceSelector = tbody.lastElementChild.querySelector("button.referenceSelector");
+            if(referenceSelector)
+                referenceSelector.click();
+        }, 10);
+    }
+    function removeDynamicTableRow(caller){
+        event.preventDefault();
+        event.stopPropagation();
+        caller.parentNode.parentNode.remove();
+    }
+
+    function loadReferenceSelector(caller){
+        event.preventDefault();
+        event.stopPropagation();
+        var modal = new bootstrap.Modal(document.getElementById('selectReferenceModal'));
+        modal.show();
+        fetch(caller.dataset.url)
+        .then(response => response.text())
+        .then(text => {
+            var modalBody = document.getElementById("selectReferenceModalBody");
+            modalBody.innerHTML = text;
+            var table = modalBody.querySelector("table.datatable");
+            var dtable = new DataTable(table);
+            // column headers aren't being set right, so brute-force it
+            setTimeout(function(){
+                dtable.columns.adjust().draw();
+                modal.handleUpdate();
+                }, 50);
+            // update all the first-child links to set the value
+            var cell = caller.parentNode;
+            var input = cell.querySelector("input");
+            var links = table.querySelectorAll("tbody tr td:first-child a");
+            links.forEach(link => {
+                link.onclick = function(){
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var id = link.parentNode.parentNode.dataset.original_id;
+                    id = id || link.parentNode.parentNode.dataset.id;
+                    input.value = id;
+                    caller.remove();
+                    cell.appendChild(link.cloneNode(true));
+                    modal.hide();
+                };
+            });
+        });
+    }
+</script>
+{% endmacro %}
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{%- macro tag(type, open=true) -%}
+{%- if type == "textarea" or type == "select"-%}
+{{ type }}
+{%- else -%}
+{%- set type = "hidden" if type == "reference" else type -%}
+input{% if open %} type="{{ type }}"{% endif -%}
+{%- endif -%}
+{%- endmacro -%}
+
+
+{#~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{%- macro forminput(field, value, name, id=none, title=none) -%}
+{%- set type = input_type(field) -%}
+{%- set value = '' if value is none else value -%}
+{%- set inputclass = "form-control" -%}
+{%- if type == "checkbox" -%}
+{%- set inputclass = "form-check-input" -%}
+{%- elif field.autocomplete -%}
+{%- set inputclass = inputclass~" basicAutoComplete" -%}
+{%- endif -%}
+
+    <{{ tag(type, true) }} class="{{ inputclass }}" name="{{ name }}" value="{{ value.original_id or value.id or value }}"
+        {%- if id %} id="{{ id }}"{%- endif -%}
+        {%- if title %} title="{{ title }}"{%- endif -%}
+        {%- if field.required %} required{% endif -%}
+        {%- if field.suggestions or field.autocomplete %} autocomplete="off" list="{{ name }}_suggestions"{% endif -%}
+        {%- if type == "number" %} step="any"{%- endif -%}
+    >
+    {%- if type == "textarea" -%}
+        {{ value }}</textarea>
+    {%- elif type == "select" %}
+        {%- if value == '' or value is none %}
+        <option value="">--</option>
+        {% endif -%}
+        {%- for option in field.choices %}
+        <option value="{{ option }}" {% if value == option %}selected{% endif %}>{{ option }}</option>
+        {%- endfor %}
+        </select>
+    {%- elif type == "reference" -%}
+        {%- if value %}
+        {%- if field.endpoint is defined -%}<a href="{{ url_for(field.endpoint~'.view', object=value) }}">{%- endif -%}{{ value.name or value.id }}{%- if field.endpoint is defined -%}</a>{%- endif -%}
+        {%- else %}
+        <button class="btn btn-secondary referenceSelector" data-url="{{ url_for(field.endpoint~'.overview',embedded=1) }}" onClick="loadReferenceSelector(this);">choose</button>
+        {%- endif -%}
+    {%- endif -%}
+    {%- if field.suggestions or field.autocomplete %}
+    <datalist id="{{ name }}_suggestions" {%- if field.autocomplete %} data-url="{{ url_for(field.autocomplete) }}"{% endif %}>
+        {%- for option in field.suggestions %}
+        <option value="{{ option }}">{{ option }}</option>
+        {%- endfor %}
+    </datalist>
+    {%- endif -%}
+{%- endmacro -%}
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{% macro formfield(obj, fieldname, field=none, nameprefix='', outerclass="") -%}
+{%- set field = field or obj._fields[fieldname] -%}
+{%- set value = obj[fieldname] | default('') -%}
+{%- set name = nameprefix~fieldname -%}
+{%- set type = input_type(field) -%}
+{%- set labelclass = "form-label" -%}
+
+{%- if type == "checkbox" -%}
+{%- set outerclass = outerclass~" form-check" -%}
+{%- set labelclass = "form-check-label" -%}
+{%- endif -%}
+
+<div class="form-field {{ outerclass }} {%- if field.required %} required-field {%- endif %}">
+    {% if not field.hidden -%}
+        <label for="{{ name }}" class="{{ labelclass }}">{{ field.label | default(fieldname) | replace('_', ' ') | title }}</label>
+    {% endif -%}
+    {{ forminput(field, value, name, id=name) }}
+    {%- if field.help_text is defined and not field.hidden %}
+        <div class="form-text mb-3">{{ field.help_text }}</div>
+    {% endif %}
+</div>
+{% endmacro -%}
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{% macro subdocform(parentobj, fieldname, outerclass="") %}
+    {% set obj = parentobj[fieldname] %}
+    {% set subdoc = g.object._fields[fieldname].document_type %}
+    {% for subfieldname in subdoc._fields_ordered %}
+    {{ formfield(obj, subfieldname, field=subdoc._fields[subfieldname],
+                 nameprefix=fieldname~'.', outerclass=outerclass) }}
+    {% endfor %}
+{% endmacro %}
+
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{%- macro dynamictablerow(obj, fieldname, entry=none, template=false, plainref=false) -%}
+{%- set embeddedfield = obj._fields[fieldname].field -%}
+{%- set subdoc = embeddedfield.document_type -%}
+    <tr>
+        {%- if plainref -%}
+        <td>{{ forminput(embeddedfield, entry, fieldname) }}</td>
+        {%- else -%}
+        {%- for subfieldname in subdoc._fields_ordered -%}
+        {%- set field = subdoc._fields[subfieldname] -%}
+        {%- set type = input_type(field) -%}
+        {%- set value = '' if entry is none else entry[subfieldname] -%}
+        {%- set default = field.default | default('') -%}
+        {%- set default = default() if default is callable else default -%}
+        {%- set value = default if template and subfieldname != 'id' else value -%}
+        <td {%- if type == "hidden" %} style="display:none"{%- endif -%}>
+            {{ forminput(field, value, fieldname~'.'~subfieldname, title=field.help_text) }}
+        </td>
+        {%- endfor -%}
+        {%- endif -%}
+
+        <td style="text-align:right"><a href="#" onclick="removeDynamicTableRow(this);" class="btn btn-danger" style="font-weight:bold">x</a></td>
+    </tr>
+
+{%- endmacro -%}
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{%- macro dynamictable(obj, fieldname, plainref=false) -%}
+{# Render an EmbeddedDocumentList as a table with javascript handlers to
+    add and remove rows
+#}
+{%- set subdoc = obj._fields[fieldname].field.document_type -%}
+
+<table class="table embeddeddocumentlist" id="{{ fieldname }}">
+    <thead>
+        <tr>{%- if plainref -%}
+            <th>Name</th>
+            {% else -%}
+            {%- for subfieldname in subdoc._fields_ordered -%}
+            <th {%- if input_type(subdoc._fields[subfieldname]) == "hidden" %} style="display:none;"{%- endif %} title="{{ subdoc._fields[subfieldname].help_text | default('') }}">{{ subfieldname | title }}</th>
+            {% endfor -%}
+            {%- endif -%}
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {%- for listitem in obj[fieldname] -%}
+        {{ dynamictablerow(obj, fieldname, entry=listitem, plainref=plainref) }}
+        {%- endfor -%}
+    </tbody>
+</table>
+<template id="{{ fieldname }}_template">
+    {{ dynamictablerow(obj, fieldname, template=true, plainref=plainref) }}
+</template>
+<div class="d-flex justify-content-end">
+    <button class="btn btn-primary" type="button" data-tableid="{{ fieldname }}" data-templateid="{{ fieldname }}_template" onClick="addDynamicTableRow(this);">Add</button>
+</div>
+{%- endmacro -%}
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~ #}
+{# TODO:
+    - Macros to add a modal target to each edit form that takes references (probably all of them)
+    - reference fields create an a or button that opens the modal
+    - on show.bs.modal, fetch the associated table, then call DataTable once received
+    - override the first-child td a click to
+        - set the relatedTarget sibling input to the tr.dataset.original_id or id
+        - set the relatedTarget href and text to the clicked one
+        - close the modal and remove click handler from relatedTarget
+#}
+{%- macro modal() -%}
+<!-- Modal -->
+<div class="modal fade" id="selectReferenceModal" tabindex="-1" aria-labelledby="selectReferenceModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-fullscreen-xl-down modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h1 class="modal-title fs-5" id="selectReferenceModalLabel">Select reference</h1>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="selectReferenceModalBody">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+      </div>
+      <!--
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+      -->
+    </div>
+  </div>
+</div>
+{%- endmacro -%}

@@ -1,0 +1,167 @@
+{% extends "versionbase.html" %}
+
+{% block pagestyle %}
+<style>
+{% for depth in range(10) %}
+tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
+{% endfor %}
+</style>
+{% endblock %}
+
+
+
+{% block pageheader %}
+<div class="col-5">
+    <h2>Component: <span class="objecttitle text-primary">{{ g.object.name }}</span></h2>
+</div>
+<div class="col-7">
+    <div class="nav nav-tabs justify-content-end">
+        <a class="nav-link active" href="#">Summary</a>
+        <a class="nav-link" href="#">Source Terms</a>
+        {% if g.object.children %}<a class="nav-link" href="#">Bill of Materials</a>{% endif %}
+        <a class="nav-link" href="{{ url_for('.attachments', object=g.object) }}">Attachments
+            <span class="badge text-bg-secondary">{{ g.object.attachments|length }}</span>
+        </a>
+        <a class="nav-link" href="{{ url_for('.get_json', object=g.object) }}">Export</a>
+        <a class=" btn btn-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a>
+    </div>
+</div>
+{% endblock %}
+
+
+{% macro printspec(spec, cls) %}
+    {% for source in spec.sources %}
+                <tr class="source {% if source.generated_from %}autogen{% endif %}">
+                    {% if loop.index0 == 0 %}<td class="{{ cls }}" rowspan="{{ spec.sources|length }}">{% if cls == 'spec' %}<a href="{{ url_for('emissionspec.view', object=spec) }}">{{ spec.name }}</a>{% else %}self{% endif %}</td> {% endif %}
+                    <td>{{ source.name }}</td>
+                    <td>{{ source.category.name or '' }}</td>
+                    <td>{{ source.rate | printquantity }}</td>
+                </tr>
+    {% endfor %}
+{% endmacro %}
+
+
+{% block pagecontent %}
+<div class="row">
+    <h4>Info</h4>
+    <div class="col-lg-4 col-md-6">
+    <dl class="row">
+        {% for attr in ['description', 'material', 'notes', 'location'] %}
+        <dt class="col-4">{{ attr | title }}</dt><dd class="col-8">{{ g.object[attr] }} </dd>
+        {% endfor %}
+        {% for key, val in g.object.extra_metadata.items() %}
+        <dt class="col-4">{{ key }}</dt><dd class="col-4">{{ val | urlize }}</dd>
+        {% endfor %}
+    </dl>
+    </div>
+    <div class="col-lg-4 col-md-6">
+    <dl class="row">
+        {% for attr in ['mass', 'volume', 'inner_surface_area', 'outer_surface_area', 'length', 'width', 'height'] %}
+        <dt class="col-7">{{ attr | replace('_', ' ') | title }}</dt><dd class="col-5">{{ g.object[attr] | printquantity(g.object.__class__[attr].units) }}</dd>
+        {% endfor %}
+    </dl>
+    </div>
+    {% if g.object.purchaseinfo %}
+    <div class="col-lg-4 col-md-6">
+        <dl class="row">
+            {% for field in g.object.purchaseinfo %}
+            <dt class="col-4">{{ field | title }}</dt><dd class="col-8">{{ g.object.purchaseinfo[field] | urlize }}</dd>
+            {% endfor %}
+        </dl>
+    </div>
+    {% endif %}
+</div>
+
+<div class="row">
+    <div id="relationships" class="col-md-6">
+        {% set parents = g.object.find_parents() %}
+        {% if parents.count() or g.object.children %}
+        <h4>Relationships</h4>
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr><th>Component</th><th>Weight</th><th>Location</th></tr>
+            </thead>
+            <tbody class="table-group-divider">
+            {# TODO: put this in a macro #}
+            {% if g.object.children %}
+                <tr class="section table-group-divider"><td colspan="3">Children:</td></tr>
+            {% for child in g.object.children %}
+                <tr class="placement child">
+                    <td class="child component"><a href="{{ url_for('.view', object=child.component) }}">{{ child.name }}</a></td>
+                    <td>{{ child.weight }}</td>
+                    <td>{{ child.location or '' }}</td>
+                </tr>
+            {% endfor %}
+            {% endif %}
+            {% if parents.count() %}
+                <tr class="section table-group-divider"><td colspan="3">Placed in:</td></tr>
+            {% for parent in parents %}
+                {% for placement in parent.children if placement.component.id == g.object.id %}
+                <tr class="placement parent">
+                    <td class="parent component assembly"><a href="{{ url_for('.view', object=parent) }}">{{ parent.name }}</a>{%- if placement.label %} ({{ placement.label }}){%- endif -%}</td>
+                    <td>{{ placement.weight }}</td>
+                    <td>{{ placement.location or '' }}</td>
+                </tr>
+                {% endfor %}
+            {% endfor %}
+            {% endif %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+
+    <div id="specs" class="col-md-6">
+        {% if g.object.specs or g.object.sources %}
+        <h4>Radiation sources</h4>
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr><th>Spec</th><th>Source</th><th>Category</th><th>Rate</th></tr>
+            </thead>
+            <tbody class="table-group-divider">
+                {% for spec in g.object.specs %}
+                {{ printspec(spec, 'spec') }}
+                {% endfor %}
+                {{ printspec(g.object, 'component') }}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+
+
+</div>
+<h3>Background Contributions</h3>
+
+{% macro printscalar(calcresult, key, cfg) %}
+{% set val = calcresult.scalars[key] %}
+{% if val is not none %}
+{{ '$${:LS}$$'.format(val.to(cfg.display_unit).m) }}
+{% endif %}
+{% endmacro %}
+
+
+{% set scalarscfg = settings.hiteffdbconfig.display_scalars.items() %}
+
+<table class="table table-sm table-hover">
+    <thead>
+        <tr><th>Component</th>{% for key, entry in scalarscfg %}<th>{{ entry.display_name or key }} [{{ entry.display_unit or '' }}]</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+        {% for placement in [{'component': g.object, 'weight': 1, 'name': g.object.name}] recursive %}
+        {% set calcresult = get_calculation(placement.component, g.object) %}
+        <tr class="component depth{{ loop.depth0 }}">
+            <td>{{ placement.name }}</td>
+            {% for key, entry in scalarscfg if calcresult %}
+            <td>{{ printscalar(calcresult, key, entry) }}</td>
+            {% endfor %}
+        </tr>
+        {{ loop(placement.component.children) }}
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+{% endblock %}

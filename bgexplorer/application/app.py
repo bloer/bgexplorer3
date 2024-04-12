@@ -8,8 +8,10 @@ from ..models.settings import (get_settings, get_application_settings,
 from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
+from ..models.sourceterm import CalculatedResults
 from .common import pretty_date
 from .blueprints import CollectionViews
+from .forms import input_type
 from . import examples
 
 from ..models.asymmetric import AsymmetricUncertainty
@@ -65,6 +67,10 @@ def create_app(config_file=None):
         return (EmissionSpec.select_version(flask.g.active_version)
                 .distinct('sources.name'))
 
+    @app.template_global()
+    def get_calculation(obj, relativeto=None):
+        return CalculatedResults.for_object(obj, relativeto, True, True)
+
     @app.template_filter('sourcesort')
     def source_sort_val(rate):
         try:
@@ -76,6 +82,18 @@ def create_app(config_file=None):
             return rate.ppf(0.9)
         return rate.mode
 
+    @app.template_filter('printquantity')
+    def printquantity(q, unit=None):
+        try:
+            return q._fromstr
+        except AttributeError:
+            pass
+        if unit:
+            q = q.to(unit)
+        else:
+            q = q.to_compact()
+        return '{:.2g~P}'.format(q)
+
     @app.context_processor
     def inject_settings():
         try:
@@ -84,6 +102,7 @@ def create_app(config_file=None):
             return dict()
 
     app.add_template_global(pretty_date, 'pretty_date')
+    app.add_template_global(input_type, 'input_type')
 
     # app endpoints
     @app.get('/')
@@ -101,6 +120,15 @@ def create_app(config_file=None):
     def overview():
         return flask.render_template('overview.html')
 
+    @app.get('/explore/<path:active_version>/hitefflocations')
+    def hitefflocations():
+        """ Return a list of all 'location' keys in the HitEfficiency DB """
+        return flask.jsonify(HitEfficiency.select_version(flask.g.active_version)
+                             .distinct('location'))
+
     # examples.qis.populate_example(clean=True)
+    @app.get('/test')
+    def test():
+        return """<select value="x"></select>"""
 
     return app

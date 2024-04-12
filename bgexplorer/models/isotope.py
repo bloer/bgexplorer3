@@ -43,6 +43,10 @@ def get_halflife(source: IsotopeType) -> Optional[units.Quantity]:
         return isotope.half_life * units(unitstr)
     return None
 
+def get_tau(source: IsotopeType) -> Optional[units.Quantity]:
+    halflife = get_halflife(source)
+    if halflife is not None:
+        return halflife / _ln2
 
 def concentration_to_rate(source: IsotopeType,
                           concentration: Union[float, units.Quantity],

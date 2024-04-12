@@ -3,7 +3,8 @@ import operator
 from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
                          StringField, BooleanField, MapField, Document,
                          SortedListField, CASCADE, PULL, ReferenceField,
-                         EmbeddedDocumentListField, ObjectIdField)
+                         EmbeddedDocumentListField, ObjectIdField,
+                         ValidationError)
 from .verdoc import VersionedDocument, VersionedReferenceField, VersionedQuerySet
 from .component import Component, Placement, Assembly
 from .emissionspec import EmissionSpec, EmissionSource, Multiplier
@@ -235,12 +236,18 @@ class CalculatedResults(Document):
                                     save_intermediate=save_intermediate)
 
     @classmethod
+    def for_object(cls, obj, relativeto: Optional[Assembly] = None,
+                   save: bool = True, save_intermediate: bool = False):
+        sts = find_sourceterms(obj=obj, relativeto=relativeto)
+        return cls.from_sourceterms(sts, save=save,
+                                    save_intermediate=save_intermediate)
+
+    @classmethod
     def for_component(cls, component: Component,
                       relativeto: Optional[Assembly] = None,
                       save: bool = False, save_intermediate: bool = False):
-        sts = find_sourceterms(obj=component, relativeto=relativeto)
-        return cls.from_sourceterms(sts, save=save,
-                                    save_intermediate=save_intermediate)
+        """ Alias for for_object. To be deprecated """
+        return cls.for_object(component, relativeto, save, save_intermediate)
 
     def ito_reduced_units(self):
         for v in self.scalars.values():

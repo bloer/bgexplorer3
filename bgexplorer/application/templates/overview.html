@@ -1,14 +1,86 @@
 {% extends "versionbase.html" %}
 {% block pageheader %}
-<h1>Version {{ g.active_version }} </h1>
-<small>Last modified {{ pretty_date(settings.modified) }}</small>
+<h1>{{ 'Branch' if settings.editable else 'Version' }} {{ g.active_version }} </h1>
+<small class="mb-3">Last modified {{ pretty_date(settings.modified) }}</small>
 {% endblock %}
 {% block pagecontent %}
 
-
+{{ settings.description or '' }}
 <ul>
     <li><a href="{{ url_for('component.overview') }}">Components</a></li>
     <li><a href="{{ url_for('emissionspec.overview') }}">Emission Specs</a></li>
     <li><a href="{{ url_for('hitefficiency.overview') }}">Hit Efficiencies</a></li>
 </ul>
+<h2>Settings</h2>
+{% if settings.addsources %}
+<section>
+    <h3>Automatic sources</h3>
+    <table id="addsources" class="table">
+        <thead>
+            <tr><th>Source</th><th>Add source</th><th>Ratio</th><th>Ratio type</th><th>Comment</th></tr>
+        </thead>
+        <tbody>
+            {% for addsource in settings.addsources %}
+            <tr><td>{{ addsource.source }}</td><td>{{ addsource.newsource }}</td>
+                <td>{{ addsource.ratio }}</td><td>{{ addsource.ratiotype.name }}</td>
+                <td>{{ addsource.comment }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+
+<section>
+    <h3>Hit Efficiency Configuration</h3>
+    <dl class="row">
+        <dt class="col-sm-4">Include source distribution in query?</dt>
+        <dd class="col-sm-8">{{ settings.hiteffdbconfig.query_distribution }}</dd>
+
+        <dt class="col-sm-4">Extra table columns:</dt>
+        <dd class="col-sm-8">{{ settings.hiteffdbconfig.extra_columns or 'none' }}</dd>
+    </dl>
+    <h4>Display configuration</h4>
+    <table class="table" id="hiteffdbconfigtable">
+        <thead>
+            <tr><th>Key</th><th>Display name</th><th>Units</th><th>Description</th>
+                <th>Link to spectrum</th><th>Hide</th></tr>
+        </thead>
+        <tbody>
+            <tr><th colspan="6">Scalars</th></tr>
+            {% for key, cfg in settings.hiteffdbconfig.display_scalars.items() %}
+            <tr>
+                <td>{{ key }}</td><td>{{ cfg.display_name or '' }}</td><td>{{ cfg.display_unit }}</td>
+                <td>{{ cfg.description or '' }}</td><td>{{ cfg.link_spectrum or '' }}</td>
+                <td>{{ cfg.hide }}</td>
+            </tr>
+            {% endfor %}
+            <tr><th colspan="6">Spectra</th></tr>
+            {% for key, cfg in settings.hiteffdbconfig.display_spectra.items() %}
+            <tr>
+                <td>{{ key }}</td><td>{{ cfg.display_name or '' }}</td><td>{{ cfg.display_unit }}</td>
+                <td>{{ cfg.description or '' }}</td><td></td>
+                <td>{{ cfg.hide }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if settings.hiteffdbconfig.rois %}
+    <h4>Regions of interest (ROIs)</h4>
+    <table class="table" id="roistable">
+        <thead>
+            <tr><th>Title</th><th>Spectrum</th><th>Range</th><th>Mode</th>
+                <th>Units</th><th>Hide</th></tr>
+        </thead>
+        <tbody>
+            {% for roi in settings.hiteffdbconfig.rois %}
+            <tr><td>{{ roi.title }}</td><td>{{ roi.spectrum }}</td>
+                <td>{{ roi.start }} - {{ roi.stop }}</td>
+                <td>{{ roi.mode.name }} (binwidth={{ roi.binwidths }})</td>
+                <td>{{ roi.display_units }}</td><td>{{ roi.hide }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</section>
 {% endblock pagecontent %}

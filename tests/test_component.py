@@ -1,6 +1,6 @@
 import unittest
 from mongoengine import (connect, disconnect, StringField, ReferenceField,
-                         CASCADE, NULLIFY, PULL)
+                         CASCADE, NULLIFY, PULL, ValidationError)
 from bgexplorer.models.component import Component, Placement, Assembly
 from bgexplorer.models.common import units
 
@@ -72,4 +72,13 @@ class TestComponent(unittest.TestCase):
         c2 = Component.from_json(json)
         self.assertEqual(c1.id, c2.id)
         self.assertEqual(c1.mass, c2.mass)
+
+    def test3_circular(self):
+        """ Make sure circular references cause an error """
+        a1 = Assembly(name="a1").save()
+        a2 = Assembly(name="a2", components=[a1]).save()
+        a3 = Assembly(name="a3", components=[a2]).save()
+        a1.children.append(Placement(component=a3))
+        with self.assertRaises(ValidationError):
+            a1.save()
 

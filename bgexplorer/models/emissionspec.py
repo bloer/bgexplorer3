@@ -101,6 +101,7 @@ class Multiplier(Enum):
 
 class SourceCategory(Enum):
     target = 'target'
+    estimate = 'estimate'
     assay = 'assay'
     activation = 'activation'
     dust = 'dust'
@@ -160,6 +161,9 @@ class EmissionSpec(VersionedDocument):
                                  for k, v in sources.items()]
         super().__init__(*args, **kwargs)
         self.sourcemap = {s.name: s for s in self.sources}
+
+    def get_sources(self, component):
+        return self.sources
 
     def _addsource(self, newsource: settings.AddSource) -> None:
         """ Add or update sources from the VersionSettings/AddSource list """

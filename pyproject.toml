@@ -18,6 +18,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "uncertainties",
     "numpy",
     "scipy",
     "pint",
