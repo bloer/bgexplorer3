@@ -2,6 +2,7 @@ import flask
 from flask_bootstrap import Bootstrap5
 import mongoengine
 import secrets
+import enum
 import importlib
 from ..models.settings import (get_settings, get_application_settings,
                                VersionSettings)
@@ -94,6 +95,14 @@ def create_app(config_file=None):
             q = q.to_compact()
         return '{:.2g~P}'.format(q)
 
+    @app.template_filter('printstring')
+    def printstring(val):
+        if val is None:
+            return ''
+        if isinstance(val, enum.Enum):
+            return str(val.value)
+        return val
+
     @app.context_processor
     def inject_settings():
         try:
@@ -102,6 +111,7 @@ def create_app(config_file=None):
             return dict()
 
     app.add_template_global(pretty_date, 'pretty_date')
+    app.add_template_filter(pretty_date, 'pretty_date')
     app.add_template_global(input_type, 'input_type')
 
     # app endpoints
@@ -126,7 +136,7 @@ def create_app(config_file=None):
         return flask.jsonify(HitEfficiency.select_version(flask.g.active_version)
                              .distinct('location'))
 
-    # examples.qis.populate_example(clean=True)
+    #examples.qis.populate_example(clean=True)
     @app.get('/test')
     def test():
         return """<select value="x"></select>"""

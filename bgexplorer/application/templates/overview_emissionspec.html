@@ -50,7 +50,7 @@
 {% call datatable.render(headers) %}
     {% for spec in data %}
     <tr class="spec{% if spec.sample is defined %} assay{% endif %}" data-id="{{ spec.id }}" data-original_id="{{ spec.original_id }}">
-        <td><a href="{{ url_for('.get_json', object=spec) }}">{{ spec.name }}</a> {{ spec.description or '' }} </td>
+        <td><a href="{{ url_for('.view', object=spec) }}">{{ spec.name }}</a> {{ spec.description or '' }} </td>
         <td>{{ sample(spec) }}</td>
         {% for sourcename in sourcenames %}
         {{ sourcerate(spec, sourcename) }}

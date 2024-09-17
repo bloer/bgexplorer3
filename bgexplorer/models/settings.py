@@ -143,7 +143,6 @@ class SpectrumROI(HitEffConfig):
 
 class HitEffDbConfig(EmbeddedDocument):
     """ Configure the HitEfficiency database """
-    query_distribution = BooleanField(default=True)
     rois = EmbeddedDocumentListField(SpectrumROI)
     display_scalars = MapField(EmbeddedDocumentField(HitEffConfig),
                               default=dict)

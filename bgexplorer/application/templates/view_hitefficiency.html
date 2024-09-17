@@ -1,9 +1,58 @@
 {% extends "versionbase.html" %}
+{%- import "utils.html" as utils -%}
 
+{% set activepage = activepage | default("summary") %}
 {% block pageheader %}
-<h1>Hit Efficiency <small class="text-primary">{{ g.object.original_id }}</small></h1>
+<div class="col-5">
+    <h2>Hit Efficiency <small class="text-secondary">{{ g.object.source }} - {{ g.object.location }}</small></h2>
+</div>
+<div class="col-7">
+    <div class="nav nav-tabs justify-content-end">
+        <a class="nav-link {% if activepage == 'summary' %}active{% endif %}" href="{{ url_for('.view', object=g.object) }}">Summary</a>
+        <a class="nav-link {% if activepage == 'sourceterms' %}active{% endif %}" href="{{ url_for('.sourceterms', object=g.object) }}">Source Terms</a>
+        <a class="nav-link" href="{{ url_for('.get_json', object=g.object) }}">Export</a>
+        <a class="btn btn-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a>
+    </div>
+</div>
 {% endblock pageheader %}
 
-{% block pagebody %}
+{% block pagecontent %}
+<div class="row mb-3">
+    <div class="col-md-6 col-lg-4">
+        <h2>Info</h2>
+        {{ utils.print_document(g.object, g.object._fields_ordered | reject('in', ['scalars', 'spectra', 'rois', 'extra_metadata', 'scalars_keys', 'spectra_keys'])) }}
+    </div>
+
+    <div class="col-md-6 col-lg-4">
+        {%- if g.object.scalars -%}
+        <h3>Scalars</h3>
+        <dl class="row">
+            {%- for name, scalar in g.object.scalars.items() -%}
+            <dt class="col-4">{{ name }}</dt>
+            <dd class="col-8">{{ scalar | printquantity }}</dd>
+            {%- endfor -%}
+        </dl>
+        {%- endif -%}
+        {%- if g.object.rois -%}
+        <h3>ROIs</h3>
+        <dl class="row">
+            {%- for name, scalar in g.object.rois.items() -%}
+            <dt class="col-4">{{ name }}</dt>
+            <dd class="col-8">{{ scalar | printquantity }}</dd>
+            {%- endfor -%}
+        </dl>
+        {%- endif -%}
+    </div>
+    <div class="col-md-6 col-lg-4">
+        <h3>Spectra</h3>
+        <dl class="row">
+            {%- for name in g.object.spectra_keys -%}
+            <dt class="col-4">{{ name }}</dt>
+            <dd class="col-8">(image)</dd>
+            {%- endfor -%}
+        </dl>
+    </div>
+</div>
+
 {% endblock %}
 

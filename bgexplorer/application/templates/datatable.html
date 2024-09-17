@@ -22,7 +22,7 @@
 </script>
 {%- if initialize %}
 <script>
-    new DataTable("#{{ tableid }}");
+    document.querySelectorAll("table.datatable").forEach(table => {new DataTable(table);});
 </script>
 {% endif -%}
 {% endmacro %}

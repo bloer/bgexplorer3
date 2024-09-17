@@ -147,7 +147,7 @@ def populate_example(version_tag='examples/qis', clean: bool = False,
         Component(name='HEMT', mass='0.017 kg', location='4K Stage', specs=[Assay.objects.get(name='HEMT')]),
         Component(name='cryo filters', mass='0.015 kg', location='Package Connector Outside', specs=[Assay.objects.get(name='K&L filter')]),
         Component(name='cryo attenuator', mass='0.005 kg', location='Mixing Chamber Stage', specs=[Assay.objects.get(name='attenuator')]),
-        Component(name='Environment', location='Environment', sources=[EmissionSource(name='Gammaflux', rate='7.02095 1/cm**2/s', multiplier='none')], distribution='flux'),
+        Component(name='Environment', location='Environment', sources=[EmissionSource(name='Gammaflux', rate='7.02095 1/cm**2/s', multiplier='none', category='environment')]),
     ]
     for component in components:
         component.version_tags = [version_tag]

@@ -28,7 +28,7 @@ class SourceTerm(VersionedDocument):
     spec = VersionedReferenceField(EmissionSpec, reverse_delete_rule=CASCADE)
     # These are used to find hiteffs
     location = StringField()
-    distribution = StringField()
+    location_auto = BooleanField(default=True)
     # used to calculate results
     weight = FloatField(default=1)
     rate_multiplier = QuantityField(default=1)
@@ -72,14 +72,13 @@ class SourceTerm(VersionedDocument):
         self.placement_ids = [placement.id for placement in self.assemblyPath]
         # TODO: should these be cached properties rather than set by clean?
         # location is set by the component or placement closest to the leaf
-        for placement in reversed(self.assemblyPath):
-            self.location = (placement.component.location or
-                             placement.location)
-            if self.location:
-                break
-        self.location = self.location or self.assemblyRoot.location
-        self.distribution = \
-            self.source.multiplier.determine_distribution(self.component)
+        if self.location_auto:
+            for placement in reversed(self.assemblyPath):
+                self.location = (placement.component.location or
+                                 placement.location)
+                if self.location:
+                    break
+            self.location = self.location or self.assemblyRoot.location
         self.weight = reduce(operator.mul,
                              (p.weight for p in self.assemblyPath), 1)
         self.rate_multiplier = self.source.multiplier.getvalue(self.component)
@@ -104,9 +103,6 @@ class SourceTerm(VersionedDocument):
             location=self.location or self.componentName,
             material__in=(None, self.material),
             )
-        if settings.get_settings(self.active_version).hiteffdbconfig\
-                .query_distribution:
-            hits = hits(distribution=self.distribution)
         return hits
 
     def find_hiteffs(self, replace: bool = True) -> List[HitEfficiency]:
@@ -148,7 +144,6 @@ class SourceTerm(VersionedDocument):
                            set_on_insert__placement_ids=self.placement_ids,
                            set__source=self.source,
                            set__location=self.location,
-                           set__distribution=self.distribution,
                            set__weight=self.weight,
                            set__rate_multiplier=self.rate_multiplier,
                            set__componentName=self.component.name,
@@ -192,7 +187,7 @@ class SourceTerm(VersionedDocument):
         return st
 
 
-def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource],
+def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource, HitEfficiency],
                      relativeto: Optional[Assembly] = None,
                      active_version: Optional[str] = None,
                      ) -> VersionedQuerySet:
@@ -210,6 +205,8 @@ def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource],
         query = query(spec=obj)
     elif isinstance(obj, EmissionSource):
         query = query(source__id=obj.id)
+    elif isinstance(obj, HitEfficiency):
+        query = query(hiteffs=obj)
     return query
 
 

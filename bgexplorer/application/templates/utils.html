@@ -1,0 +1,89 @@
+{%- import "datatable.html" as datatable -%}
+
+{%- macro print_assemblypath(sourceterm, activecomponent=none) -%}
+<ol class="breadcrumb">
+    <li class="breadcrumb-item {%- if sourceterm.assemblyRoot.id == activecomponent.id %} active{%- endif %}"><a href="{{ url_for('component.view', object=sourceterm.assemblyRoot) }}">{{ sourceterm.assemblyRoot.name }}</a></li>
+    {%- for placement in sourceterm.assemblyPath %}
+    <li class="breadcrumb-item {%- if placement.component is sameas activecomponent %} active{%- endif %}"><a href="{{ url_for('component.view', object=placement.component) }}">{{ placement.name }}</a>{%- if placement.weight != 1 %} ({{ placement.weight }}){%- endif -%}</li>
+    {% endfor -%}
+</ol>
+{%- endmacro -%}
+
+{%- macro print_hiteffs(sourceterm) -%}
+{%- for hiteff in sourceterm.hiteffs -%}
+    {%- if loop.index0 -%}<br> {% endif -%} <a href="{{ url_for('hitefficiency.view', object=hiteff) }}">{{ hiteff.source }}, {{ hiteff.location }}</a> {%- if sourceterm.livetimes[loop.index0] %}: {{ sourceterm.livetimes[loop.index0] | printquantity('year') }}{%- endif -%}
+{%- endfor -%}
+{%- endmacro -%}
+
+{%- macro print_sourceterm(sourceterm, activecomponent=none) -%}
+    <tr class="sourceterm" data-id="{{ sourceterm.id }}" data-original_id="{{ sourceterm.original_id }}">
+        <td>{{ print_assemblypath(sourceterm, activecomponent=activecomponent) }}</td>
+        <td>{% if sourceterm.spec %}<a href="{{ url_for('emissionspec.view', object=sourceterm.spec) }}">{{ sourceterm.spec.name }}</a>{%- endif -%}</td>
+        <td>{{ sourceterm.source.name }}: {{ sourceterm.source.rate | printquantity }}</td>
+        <td>{{ sourceterm.emissionrate.to_reduced_units() | printquantity }}</td>
+        <td {%- if not sourceterm.location_auto %} class="manual" {%- endif -%}>{{ sourceterm.location }}</td>
+        <td {%- if not sourceterm.hiteffs_auto %} class="manual" {%- endif -%}> {{ print_hiteffs(sourceterm) }}</td>
+    </tr>
+{%- endmacro -%}
+
+{%- macro print_sourceterms(sourceterms, activecomponent=none) -%}
+{% set headers = ['Assembly Path', 'Emission spec', 'Source', 'Emission rate',
+                  'Location', 'Hit Efficiencies'] %}
+{% call datatable.render(headers) %}
+    {% for sourceterm in sourceterms %}
+    {{ print_sourceterm(sourceterm, activecomponent=activecomponent) }}
+    {% endfor %}
+{% endcall %}
+{%- endmacro -%}
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{%- macro descriptionlist(items, object=none) -%}
+<dl class="row">
+    {%- for key in items %}
+    <dt class="col-4">{{ key }}</dt>
+    <dd class="col-8">{{ (object[key] if object else items[key]) | printstring }}</dd>
+    {%- endfor %}
+</dl>
+{%- endmacro -%}
+
+{%- macro print_document(doc, fieldnames=none, type="dl") -%}
+{%- set fieldnames = fieldnames or doc._fields_ordered or doc -%}
+{%- set fields = doc._fields | default({}) -%}
+<{{ type }} class="{% if type == 'dl' %}row{% endif %} {{ doc.__class__.__name__ }}" data-id="{{ doc.id or '' }}" data-original_id="{{ doc.original_id or '' }}">
+    {%- for fieldname in fieldnames %}
+    {%- if (fieldname in doc) or (type == "tr") -%}
+    {%- set field = fields[fieldname] | default({}) -%}
+    {%- set label = field.label | default(fieldname) | replace('_', ' ') | title -%}
+    {%- set value = doc[fieldname] | default('') | printstring | urlize -%}
+    {%- if type == "dl" -%}
+    <dt class="col-4">{{ label }}</dt> <dd class="col-8">{{ value }}</dd>
+    {% elif type == "tr" -%}
+    <td>{{ value }}</td>
+    {%- endif -%}
+    {%- endif -%}
+    {% endfor %}
+</{{ type }}>
+{%- endmacro -%}
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{%- macro print_doclist(parent, fieldname, fieldnames=none) -%}
+{%- set subdoc = parent._fields[fieldname].field.document_type -%}
+{%- set fieldnames = (fieldnames or subdoc._fields_ordered) | reject('in', ['id','original_id']) | list -%}
+<table class="table datatable {{ subdoc.__class__.__name__ }}">
+    <thead>
+        <tr>
+            {%- for subfieldname in fieldnames -%}
+            {%- set subfield = subdoc._fields[subfieldname] | default({}) %}
+            <th>{{ subfield.label | default(subfieldname) | title }}</th>
+            {%- endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in parent[fieldname] %}
+        {{ print_document(item, fieldnames, type="tr") }}
+        {% endfor %}
+    </tbody>
+</table>
+{%- endmacro -%}
+

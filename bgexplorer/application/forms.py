@@ -61,7 +61,9 @@ def update_object(obj, form, prefix=None, index=0):
         # sometimes an empty string is a default that shouldn't be set, like id
         # sometimes the user will actually be nullifying something
         # how do we tell the difference?  Make a special default value?
-        if value or fieldname not in ('id', 'original_id'):
+        if value == '':
+            delattr(obj, fieldname)
+        else:
             setattr(obj, fieldname, value)
     return obj
 

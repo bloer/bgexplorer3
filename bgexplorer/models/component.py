@@ -54,14 +54,6 @@ class Component(VersionedDocument):
         help_text="Key to match against locations in HitEfficieny database",
         autocomplete="hitefflocations",
     )
-    treat_surface_as_bulk = BooleanField(
-        default=False,
-        help_text="Allow surface contamination to use bulk Hit Efficiencies",
-    )
-    distribution = StringField(
-        help_text="Override default distribution from rate units. This is useful e.g. to locate small components on the surface of some location.",
-        suggestions=['bulk', 'surface', 'inner_surface', 'outer_surface'],
-    )
 
     hierarchy_level = IntField(default=1, help_text="how many levels of nested components are below us?")
     # TODO: need to add some assay quality info

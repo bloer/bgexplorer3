@@ -6,3 +6,7 @@ nav img { max-height: 50px; }
 #content {background-color: white; overflow:auto; height: calc(100vh - 78px);}
 /* #pagecontent{ height: calc(100vh - 133px); overflow: auto; } */
 #pagefooter {text-align:center; height:21px}
+
+div.required-field label::after, th.required-field::after {content: " *"; color: red; font-weight:bold;}
+
+li.breadcrumb-item.active {font-weight: bold; }

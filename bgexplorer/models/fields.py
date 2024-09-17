@@ -1,6 +1,8 @@
 from mongoengine import (EmbeddedDocument, EmbeddedDocumentListField)
 from mongoengine.fields import (BaseField, StringField, BinaryField, IntField,
-                                DictField,)
+                                DictField, ObjectIdField, MapField)
+import bson
+import hashlib
 # import pint
 import logging
 from typing import Union, Optional
@@ -22,18 +24,21 @@ UnitType = Union[str, pint.Unit, pint.Quantity]
 
 class InlineAttachment(EmbeddedDocument):
     """ attachments stored as binary blobs within the document """
+    id = ObjectIdField(default=bson.ObjectId)
     filename = StringField()
     size = IntField()
     mimetype = StringField()
     description = StringField()
     metadata = DictField()
     data = BinaryField()
+    etag = StringField()
     thumbnail = BinaryField()
 
     def clean(self):
         super().clean()
         if self.data:
             self.size = len(self.data)
+            self.etag = hashlib.sha1(self.data).hexdigest()
             # generate thumbnail now or on demand?
 
 def AttachmentsField(**kwargs):

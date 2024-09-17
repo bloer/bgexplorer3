@@ -1,7 +1,10 @@
 import flask
 import mongoengine as me
 from bson import ObjectId
+from io import BytesIO
 from ..models.sourceterm import find_sourceterms
+from ..models.component import Component
+from ..models.fields import InlineAttachment
 from .forms import update_object
 
 
@@ -77,9 +80,15 @@ class CollectionViews(flask.Blueprint):
 
         @self.after_request
         def set_mtime(response):
-            if 'object' in flask.g:
+            try:
                 response.last_modified = self.get_mtime(flask.g.objid)
+            except:
+                pass
             return response
+
+        @self.context_processor
+        def inject_bp_settings():
+            return dict(doc_cls=self.doc_cls, clsname=self.clsname)
 
     def _create_endpoints(self):
         @self.get('/')
@@ -95,17 +104,28 @@ class CollectionViews(flask.Blueprint):
 
         @self.get('/<objid>')
         def view():
-            return flask.render_template(f'view_{self.clsname}.html')
+            components = []
+            if self.clsname == 'emissionspec':
+                components = Component.select_version(flask.g.active_version)(specs=flask.g.object)
+            return flask.render_template(f'view_{self.clsname}.html', components=components)
 
+        @self.route('/new', methods=['GET', 'POST'])
         @self.route('/<objid>/edit', methods=['GET', 'POST'])
         def edit():
             req = flask.request
+            errors = {}
+            if 'object' not in flask.g:
+                flask.g.object = self.doc_cls()
             if req.form and req.method == 'POST':
-                update_object(flask.g.object, req.form)
-                return flask.Response(flask.g.object.to_json(),
-                                     mimetype='application/json')
+                obj = update_object(flask.g.object, req.form)
+                try:
+                    obj.validate()
+                    flask.flash(f"Successfully saved {obj.name}", 'success')
+                except me.ValidationError as e:
+                    errors = e.to_dict()
             return flask.render_template(f'edit_{self.clsname}.html',
-                                         form=flask.request.form)
+                                         form=flask.request.form,
+                                         errors=errors)
 
         if self.has_attachments:
             @self.route('/<objid>/attachments', methods=['GET', 'POST'])
@@ -114,10 +134,41 @@ class CollectionViews(flask.Blueprint):
                     pass
                 return flask.render_template('attachments.html')
 
-            @self.get('<objid>/attachments/<index>')
-            def get_attachment(index):
-                abort(404)
-                data = self.doc_cls.objects(id=flask.g.object.id).aggregate(
-                    [{'$project': {'$data': f'attachments.{index}'}}]
-                    )
+            @self.get('<objid>/attachments/<attachmentid>')
+            def get_attachment(attachmentid):
+                attachment = self.doc_cls.objects(id=flask.g.object.id).aggregate(
+                    [{'$unwind': '$attachments'},
+                     {'$replaceWith': '$attachments'},
+                     {'$match': {'id': ObjectId(attachmentid)}},
+                     ]).next()
+                if not attachment:
+                    flask.abort(404)
+                return flask.send_file(BytesIO(attachment['data']),
+                                       mimetype=attachment.get('mimetype'),
+                                       download_name=attachment.get('filename'),
+                                       etag=attachment.get('etag'),
+                                       last_modified=attachment['id'].generation_time)
 
+
+            @self.post('<objid>/attachments/add')
+            def add_attachments():
+                _file = flask.request.files['fupload']
+                description = flask.request.form['description']
+                attachment = InlineAttachment(data=_file.read(),
+                                              filename=_file.filename,
+                                              mimetype=_file.mimetype,
+                                              description=description,
+                                              )
+                attachment.clean()
+                flask.g.object.modify(push__attachments=attachment)
+                return flask.redirect(flask.url_for('.attachments',
+                                                    object=flask.g.object))
+
+
+
+
+        @self.get('/<objid>/sourceterms')
+        def sourceterms():
+            sourceterms = find_sourceterms(flask.g.object)
+            return flask.render_template('view_sourceterms.html',
+                                         sourceterms=sourceterms)

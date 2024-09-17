@@ -9,12 +9,15 @@ def pretty_date(time=None):
     stolen from https://stackoverflow.com/questions/1551382/user-friendly-time-format-in-python
     """
     now = datetime.now()
+    if time is None:
+        time = datetime.now()
     if type(time) is int:
-        diff = now - datetime.fromtimestamp(time)
-    elif isinstance(time, datetime):
+        time = datetime.fromtimestamp(time)
+    try:
         diff = now - time
-    elif not time:
-        diff = 0
+    except TypeError: # try to correct naive type
+        diff = now.astimezone() - time
+
     second_diff = diff.seconds
     day_diff = diff.days
 
@@ -36,6 +39,7 @@ def pretty_date(time=None):
             return str(second_diff // 3600) + " hours ago"
     if day_diff == 1:
         return "yesterday"
+    return str(time.date())
     if day_diff < 7:
         return str(day_diff) + " days ago"
     if day_diff < 31:

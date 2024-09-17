@@ -1,0 +1,17 @@
+{% extends "view_"~clsname~".html" %}
+{% set activepage = "sourceterms" %}
+{% import "utils.html" as utils %}
+
+{% import "datatable.html" as datatable %}
+
+{% block pagecontent %}
+{{ utils.print_sourceterms(sourceterms, activecomponent=g.object) }}
+{% endblock %}
+
+{% block pagestyle %}
+{{ datatable.styles() }}
+{% endblock %}
+
+{% block pagescripts %}
+{{ datatable.scripts() }}
+{% endblock %}

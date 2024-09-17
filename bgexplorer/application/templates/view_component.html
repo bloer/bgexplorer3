@@ -9,17 +9,17 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 {% endblock %}
 
 
-
+{% set activepage = activepage | default("summary") %}
 {% block pageheader %}
 <div class="col-5">
     <h2>Component: <span class="objecttitle text-primary">{{ g.object.name }}</span></h2>
 </div>
 <div class="col-7">
     <div class="nav nav-tabs justify-content-end">
-        <a class="nav-link active" href="#">Summary</a>
-        <a class="nav-link" href="#">Source Terms</a>
+        <a class="nav-link {% if activepage == 'summary' %}active{% endif %}" href="{{ url_for('.view', object=g.object) }}">Summary</a>
+        <a class="nav-link {% if activepage == 'sourceterms' %}active{% endif %}" href="{{ url_for('.sourceterms', object=g.object) }}">Source Terms</a>
         {% if g.object.children %}<a class="nav-link" href="#">Bill of Materials</a>{% endif %}
-        <a class="nav-link" href="{{ url_for('.attachments', object=g.object) }}">Attachments
+        <a class="nav-link {% if activepage == 'attachments' %}active{% endif %}" href="{{ url_for('.attachments', object=g.object) }}">Attachments
             <span class="badge text-bg-secondary">{{ g.object.attachments|length }}</span>
         </a>
         <a class="nav-link" href="{{ url_for('.get_json', object=g.object) }}">Export</a>

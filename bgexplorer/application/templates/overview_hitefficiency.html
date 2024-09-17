@@ -9,7 +9,7 @@
 {% call datatable.render(headers) %}
     {% for hiteff in data %}
     <tr class="hiteff" data-id="{{ hiteff.id }}" data-original_id="{{ hiteff.original_id }}">
-        <td><a href="{{ url_for('.get_json', object=hiteff) }}">{{ hiteff.source }}</a> </td>
+        <td><a href="{{ url_for('.view', object=hiteff) }}">{{ hiteff.source }}</a> </td>
         <td>{{ hiteff.location }} {{ hiteff.distribution or '' }}</td>
         <td>{{ hiteff.nprimaries or 'N/A' }}{% if hiteff.biasweight and hiteff.biasweight != 1 %} biasweight={{ "{:.2g}".format(hiteff.biasweight) }}{% endif %}</td>
         <td>{{ hiteff.primary_particle or '' }} {{ hiteff.primary_spectrum or '' }}</td>

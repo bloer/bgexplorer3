@@ -1,0 +1,65 @@
+{% extends "view_"~clsname~".html" %}
+{% set activepage = "attachments" %}
+{% import "utils.html" as utils %}
+
+{% import "datatable.html" as datatable %}
+
+{% block pagecontent %}
+{% set pagemode = pagemode | default("view") %}
+<table id="attachments" class="table table-hover table-striped">
+    <thead>
+        <tr>
+            <th>Filename</th>
+            <th>Description</th>
+            <th>Size</th>
+            <th>Added</th>
+            {% if pagemode == "edit" %}
+            <th>Remove</th>
+            {% endif %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for attachment in g.object.attachments %}
+        <tr class="attachment" data-id="{{ attachment.id }}">
+            <td><a href="{{ url_for('.get_attachment', object=g.object, attachmentid=attachment.id) }}">{{ attachment.filename }}</a></td>
+            <td>{{ attachment.description or '' }}</td>
+            <td>{{ "{:.1f}".format(attachment.size/1000) }} kB</td>
+            <td>{{ attachment.id.generation_time | pretty_date }}</td>
+            {% if pagemode == "edit" %}
+            <td></td>
+            {% endif %}
+            {% endfor %}
+        </tr>
+    </tbody>
+</table>
+
+<form id="uploadform" action="{{ url_for('.add_attachments', object=g.object) }}" method="POST" class="form" enctype="multipart/form-data">
+  <div id="droptarget" class="droptarget">
+    <h5>Upload a new attachment</h5>
+    <div class="form-field">
+      <input type="file" class="form-control" name="fupload" id="fupload" required>
+      <small id="filehelp" class="form-text text-muted">Total upload size is limited to 16 MB</small>
+    </div>
+    <div class="form-field">
+        <label class="form-label">Description (required)</label>
+        <input type="text" class="form-control" name="description" id="description" required>
+    </div>
+    <div style="text-align:right">
+        <button type="submit" class="btn btn-success">Submit</button>
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block pagestyle %}
+{{ datatable.styles() }}
+<style>
+  div.droptarget {background-color:#D9EDF7; border: 2px dashed blue;
+                  padding:1em ; max-width:600px; margin:auto; }
+  div.droptarget.dragover { background-color: #90EE90; border: 2px solid green;}
+</style>
+{% endblock %}
+
+{% block pagescripts %}
+{{ datatable.scripts() }}
+{% endblock %}

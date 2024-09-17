@@ -101,9 +101,6 @@ def update_hiteff(sender, document, **kwargs):
         source__name=hiteff.source,
         location=hiteff.location,
         )
-    if settings.get_settings(hiteff.active_version).hiteffdbconfig\
-            .query_distribution:
-        matches = matches(distribution=hiteff.distribution)
     for st in matches(hiteffs__ne=hiteff):
         st.hiteffs.append(hiteff)
         # do save instead of push to force recalculation of livetimes

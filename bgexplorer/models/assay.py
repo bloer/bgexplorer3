@@ -7,29 +7,29 @@ from .common import PublicationInfo
 
 
 class SampleInfo(EmbeddedDocument):
-    id = StringField(verbose_name="Sample ID")
-    name = StringField(verbose_name="Sample name")
-    description = StringField(verbose_name="Sample Description")
+    id = StringField(label="Sample ID")
+    name = StringField(label="Sample name")
+    description = StringField(label="Sample Description")
     material = StringField()
     mass = QuantityField(units='kg')
-    vendor = StringField(verbose_name='Vendor/producer')
-    partnum = StringField(verbose_name="Vendor part number/identifier")
-    link = URLField(verbose_name="Link to product website")
-    batch = StringField(verbose_name='Batch number/ID')
-    purchased = DateField(verbose_name="Purchase date")
-    received = DateField(verbose_name="Date received")
-    ownerorg = StringField(verbose_name="Owning institution")
-    owner = StringField(verbose_name='Sample owner')
-    ownercontact = StringField(verbose_name='Owner contact info')
-    notes = StringField(verbose_name='Additional Notes')
+    vendor = StringField(label='Vendor/producer')
+    partnum = StringField(label="Vendor part number/identifier")
+    link = URLField(label="Link to product website")
+    batch = StringField(label='Batch number/ID')
+    purchased = DateField(label="Purchase date")
+    received = DateField(label="Date received")
+    ownerorg = StringField(label="Owning institution")
+    owner = StringField(label='Sample owner')
+    ownercontact = StringField(label='Owner contact info')
+    notes = StringField(label='Additional Notes')
 
 
 class MeasurementRequest(EmbeddedDocument):
     requestor = StringField(help_text="Name of person who requested assay")
-    requestorcontact = StringField(verbose_name="Requestor contact info")
-    date_requested = DateField(verbose_name="Date request was created")
-    targetsensitivity = StringField(verbose_name="Targeted sensitivity")
-    notes = StringField(verbose_name="Additional Notes")
+    requestorcontact = StringField(label="Requestor contact info")
+    date_requested = DateField(label="Date request was created")
+    targetsensitivity = StringField(label="Targeted sensitivity")
+    notes = StringField(label="Additional Notes")
 
 
 class MeasurementResult(EmbeddedDocument):
@@ -37,29 +37,32 @@ class MeasurementResult(EmbeddedDocument):
     mass = QuantityField(units='kg')
     isotopes = MapField(UncertainQuantityField())
 
+    def __str__(self):
+        return str({k:str(v) for k,v in self.isotopes.items()})
+
 class MeasurementInfo(EmbeddedDocument):
-    id = StringField(verbose_name="Measurement ID")
-    technique = StringField(verbose_name='Measurement technique')
-    institution = StringField(verbose_name='Institution/Location')
-    instrument = StringField(verbose_name='Instrument used')
-    date_received = DateField(verbose_name="Date sample received")
-    date_measured = DateField(verbose_name='Measurement date')
+    id = StringField(label="Measurement ID")
+    technique = StringField(label='Measurement technique')
+    institution = StringField(label='Institution/Location')
+    instrument = StringField(label='Instrument used')
+    date_received = DateField(label="Date sample received")
+    date_measured = DateField(label='Measurement date')
     count_time = QuantityField(units='hour')
     operator = StringField(help_text='Name of person who made measurement')
-    operatorcontact = StringField(verbose_name='Operator contact info')
-    notes = StringField(verbose_name='Additional Notes')
+    operatorcontact = StringField(label='Operator contact info')
+    notes = StringField(label='Additional Notes')
     results = EmbeddedDocumentListField(MeasurementResult)
 
 
 class Assay(EmissionSpec):
     """ An emission spec based on material or surface assay measurement """
     sample = EmbeddedDocumentField(SampleInfo,
-                                   verbose_name="Sample Information")
+                                   label="Sample Information")
     request = EmbeddedDocumentField(MeasurementRequest)
     measurement = EmbeddedDocumentField(MeasurementInfo,
-                                        verbose_name="Measurement details")
+                                        label="Measurement details")
     publication = EmbeddedDocumentField(PublicationInfo)
-    radiopurityid = StringField(verbose_name="radiopurity.org database id")
+    radiopurityid = StringField(label="radiopurity.org database id")
     extra_metadata = DictField()
     attachments = AttachmentsField()
 

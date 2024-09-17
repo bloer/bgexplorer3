@@ -1,0 +1,70 @@
+{% extends "versionbase.html" %}
+{%- import "utils.html" as utils -%}
+
+{% set activepage = activepage | default("summary") %}
+{% block pageheader %}
+<div class="col-5">
+    <h2>Emission source <small class="text-secondary">{{ g.object.name }}</small></h2>
+</div>
+<div class="col-7">
+    <div class="nav nav-tabs justify-content-end">
+        <a class="nav-link {% if activepage == 'summary' %}active{% endif %}" href="{{ url_for('.view', object=g.object) }}">Summary</a>
+        <a class="nav-link {% if activepage == 'sourceterms' %}active{% endif %}" href="{{ url_for('.sourceterms', object=g.object) }}">Source Terms</a>
+        <a class="nav-link" href="{{ url_for('.get_json', object=g.object) }}">Export</a>
+        <a class="btn btn-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a>
+    </div>
+</div>
+{% endblock pageheader %}
+
+{% block pagecontent %}
+<div class="row mb-3">
+    <div class="col-md-6 col-lg-4">
+        <h2>Info</h2>
+        {{ utils.print_document(g.object, ['name', 'description', 'comment', 'category', 'radiopurityid']) }}
+        <h4>Extra metadata</h4>
+        {{ utils.print_document(g.object.extra_metadata) }}
+    </div>
+
+    <div class="col-md-12 col-lg-8">
+        <h2>Sources</h2>
+        {{ utils.print_doclist(g.object, 'sources', ['name', 'comment', 'rate', 'multiplier']) }}
+    </div>
+</div>
+{% if components %}
+<div class="row mb-3">
+    <h2>Associated with components</h2>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th><th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for component in components %}
+            <tr class="component" data-id="{{ component.id }}" data-original_id="{{ component.original_id }}">
+                <td><a href="{{ url_for('component.view', object=component) }}">{{ component.name }}</a></td>
+                <td>{{ component.description }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="row">
+    {%- for subdoc in ['sample', 'request', 'measurement', 'publication'] -%}
+    {%- if subdoc in g.object %}
+    <div class="col-md-6 col-lg-4">
+        <h2>{{ subdoc | replace('_', ' ') | title }}</h2>
+        {{ utils.print_document(g.object[subdoc]) }}
+    </div>
+    {%- endif -%}
+    {%- endfor -%}
+
+</div>
+
+
+
+
+
+{% endblock %}

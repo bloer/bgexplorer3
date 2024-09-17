@@ -72,25 +72,6 @@ class Multiplier(Enum):
         raise ValidationError(f"Rate units {rate.u} invalid"
                               f" for multiplier {self}")
 
-    @property
-    def default_distribution(self) -> str:
-        return {Multiplier.mass: 'bulk',
-                Multiplier.volume: 'bulk',
-                Multiplier.surface: 'surface',
-                Multiplier.inner_surface: 'inner_surface',
-                Multiplier.outer_surface: 'outer_surface',
-                Multiplier.length: 'bulk',
-                Multiplier.none: 'bulk',
-                None: None}[self]
-
-    def determine_distribution(self, component):
-        if component.distribution:
-            return component.distribution
-        dist = self.default_distribution
-        if component.treat_surface_as_bulk and dist.find('surface') != -1:
-            dist = 'bulk'
-        return dist
-
     def getvalue(self, component) -> Union[float, units.Quantity]:
         """ Extract the numerical value of the multipler from component """
         mult = 1
@@ -106,6 +87,8 @@ class SourceCategory(Enum):
     activation = 'activation'
     dust = 'dust'
     radon = 'radon'
+    environment = 'environment'
+    other = 'other'
 
 
 class EmissionSource(EmbeddedDocument):

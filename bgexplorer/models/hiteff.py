@@ -48,8 +48,6 @@ class HitEfficiency(DynamicVersionedDocument):
        source (str): What is the radiation source? Match name from assay, etc.
        location (str): Where the source is located relative to the detector
                        usually the name of a MC volume
-       distribution (str): whether the source is distributed in the bulk,
-                           on a surface, or some other way
        norm (NormMultiplier): To convert HitEfficiency to rates in detector,
                               multiply by emission rate in some units,
                               usually 'rate' (decays/s), but can be
@@ -86,7 +84,6 @@ class HitEfficiency(DynamicVersionedDocument):
     # required metadata and results
     source = StringField(required=True)
     location = StringField(required=True)
-    distribution = StringField(required=False, default='bulk')
     norm = EnumField(NormMultiplier, required=False,
                      default=NormMultiplier.rate)
     scalars = MapField(UncertainQuantityField(allownone=True),
@@ -110,14 +107,14 @@ class HitEfficiency(DynamicVersionedDocument):
     files = SortedListField(StringField(), required=False)
     uuids = SortedListField(UUIDField(), required=False)
     date = DynamicField(required=False)
-    metadata = DictField()
+    extra_metadata = DictField()
 
     # for internal use
     scalars_keys = ListField(StringField())
     spectra_keys = ListField(StringField())
 
     meta = {
-        'indexes': ['location', 'distribution', 'source', 'version', 'date',
+        'indexes': ['location', 'source', 'version', 'date',
                     'scalars_keys', 'spectra_keys']
     }
 
@@ -164,7 +161,7 @@ class HitEfficiency(DynamicVersionedDocument):
 
     @property
     def key(self):
-        getattr(self, '_id', (self.source, self.location, self.distribution))
+        getattr(self, '_id', (self.source, self.location))
 
     def get_result_unit(self, val):
         """ Determine the output unit for a value from scalars or spectra

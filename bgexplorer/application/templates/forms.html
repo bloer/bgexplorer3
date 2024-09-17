@@ -72,6 +72,16 @@
 
 
 {# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{%- macro finderrmsg(fieldnames) -%}
+{%- set ns = namespace(e=errors) -%}
+{%- for name in fieldnames -%}
+{%- set ns.e = ns.e[name] | default({}) -%}
+{%- endfor -%}
+{{ ns.e or '' }}
+{%- endmacro -%}
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
 {%- macro tag(type, open=true) -%}
 {%- if type == "textarea" or type == "select"-%}
 {{ type }}
@@ -83,7 +93,7 @@ input{% if open %} type="{{ type }}"{% endif -%}
 
 
 {#~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
-{%- macro forminput(field, value, name, id=none, title=none) -%}
+{%- macro forminput(field, value, name, id=none, title=none, errmsg=none) -%}
 {%- set type = input_type(field) -%}
 {%- set value = '' if value is none else value -%}
 {%- set inputclass = "form-control" -%}
@@ -93,7 +103,7 @@ input{% if open %} type="{{ type }}"{% endif -%}
 {%- set inputclass = inputclass~" basicAutoComplete" -%}
 {%- endif -%}
 
-    <{{ tag(type, true) }} class="{{ inputclass }}" name="{{ name }}" value="{{ value.original_id or value.id or value }}"
+    <{{ tag(type, true) }} class="{{ inputclass }} {%- if errmsg %} is-invalid {%- endif -%}" name="{{ name }}" value="{{ value.original_id or value.id or value }}"
         {%- if id %} id="{{ id }}"{%- endif -%}
         {%- if title %} title="{{ title }}"{%- endif -%}
         {%- if field.required %} required{% endif -%}
@@ -128,12 +138,13 @@ input{% if open %} type="{{ type }}"{% endif -%}
 
 
 {# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
-{% macro formfield(obj, fieldname, field=none, nameprefix='', outerclass="") -%}
+{% macro formfield(obj, fieldname, field=none, nameprefix='', outerclass="", errmsg=none) -%}
 {%- set field = field or obj._fields[fieldname] -%}
 {%- set value = obj[fieldname] | default('') -%}
 {%- set name = nameprefix~fieldname -%}
 {%- set type = input_type(field) -%}
 {%- set labelclass = "form-label" -%}
+{%- set errmsg = finderrmsg([name])  -%}
 
 {%- if type == "checkbox" -%}
 {%- set outerclass = outerclass~" form-check" -%}
@@ -144,10 +155,13 @@ input{% if open %} type="{{ type }}"{% endif -%}
     {% if not field.hidden -%}
         <label for="{{ name }}" class="{{ labelclass }}">{{ field.label | default(fieldname) | replace('_', ' ') | title }}</label>
     {% endif -%}
-    {{ forminput(field, value, name, id=name) }}
+    {{ forminput(field, value, name, id=name, errmsg=errmsg) }}
     {%- if field.help_text is defined and not field.hidden %}
         <div class="form-text mb-3">{{ field.help_text }}</div>
-    {% endif %}
+    {% endif -%}
+    {%- if errmsg %}
+        <div class="invalid-feedback">{{ errmsg }}</div>
+    {% endif -%}
 </div>
 {% endmacro -%}
 
@@ -164,8 +178,9 @@ input{% if open %} type="{{ type }}"{% endif -%}
 
 
 
+
 {# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
-{%- macro dynamictablerow(obj, fieldname, entry=none, template=false, plainref=false) -%}
+{%- macro dynamictablerow(obj, fieldname, entry=none, template=false, plainref=false, index=none) -%}
 {%- set embeddedfield = obj._fields[fieldname].field -%}
 {%- set subdoc = embeddedfield.document_type -%}
     <tr>
@@ -179,8 +194,10 @@ input{% if open %} type="{{ type }}"{% endif -%}
         {%- set default = field.default | default('') -%}
         {%- set default = default() if default is callable else default -%}
         {%- set value = default if template and subfieldname != 'id' else value -%}
+        {%- set errmsg = finderrmsg([fieldname, index, subfieldname]) -%}
         <td {%- if type == "hidden" %} style="display:none"{%- endif -%}>
-            {{ forminput(field, value, fieldname~'.'~subfieldname, title=field.help_text) }}
+            {{ forminput(field, value, fieldname~'.'~subfieldname, title=field.help_text, errmsg=errmsg) }}
+            {%- if errmsg -%}<div class="invalid-feedback">{{ errmsg }}</div>{%- endif -%}
         </td>
         {%- endfor -%}
         {%- endif -%}
@@ -204,7 +221,8 @@ input{% if open %} type="{{ type }}"{% endif -%}
             <th>Name</th>
             {% else -%}
             {%- for subfieldname in subdoc._fields_ordered -%}
-            <th {%- if input_type(subdoc._fields[subfieldname]) == "hidden" %} style="display:none;"{%- endif %} title="{{ subdoc._fields[subfieldname].help_text | default('') }}">{{ subfieldname | title }}</th>
+            {%- set subfield = subdoc._fields[subfieldname] -%}
+            <th {%- if input_type(subfield) == "hidden" %} style="display:none;"{%- endif %} title="{{ subfield.help_text | default('') }}" {%- if subfield.required %} class="required-field" {%- endif -%}>{{ subfieldname | title }}</th>
             {% endfor -%}
             {%- endif -%}
             <th></th>
@@ -212,7 +230,7 @@ input{% if open %} type="{{ type }}"{% endif -%}
     </thead>
     <tbody>
         {%- for listitem in obj[fieldname] -%}
-        {{ dynamictablerow(obj, fieldname, entry=listitem, plainref=plainref) }}
+        {{ dynamictablerow(obj, fieldname, entry=listitem, plainref=plainref, index=loop.index0) }}
         {%- endfor -%}
     </tbody>
 </table>

@@ -1,5 +1,5 @@
 {% extends "versionbase.html" %}
-{% from "forms.html" import formfield, formscripts, subdocform, dynamictable, modal %}
+{% from "forms.html" import formfield, formscripts, subdocform, dynamictable, modal with context %}
 {% import "datatable.html" as datatable %}
 
 {%- block pagestyle %}
@@ -24,11 +24,14 @@
 <p>Branch: {{ g.object.active_version }}</p>
 <p>Current revision: {{g.object.revision }}</p>
 <p>Last modified: {{ pretty_date(g.object.modified) }}</p>
+{%- if errors -%}
+<div id="toperror" class="border border-danger text-danger m-3" style="font-weight:bold">Errors found in form; please correct and resubmit. {{ errors.__all__ | default('') }}</div>
+{%- endif -%}
 <form method="POST" id="mainform">
     <div class="row mb-3">
         <fieldset class="col-sm-12 col-md-6">
             <legend>Basic Info</legend>
-            {%- for fieldname in ['name', 'description', 'notes', 'material'] -%}
+            {%- for fieldname in ['name', 'description', 'notes', 'location'] -%}
             {{ formfield(g.object, fieldname) }}
             {%- endfor -%}
         </fieldset>
@@ -36,7 +39,7 @@
             {% if not isassembly %}
             <legend>Physical Characteristics</legend>
             <div class="row">
-            {%- for fieldname in ['mass', 'volume', 'inner_surface_area',
+            {%- for fieldname in ['material', 'mass', 'volume', 'inner_surface_area',
                                   'outer_surface_area', 'length', 'width', 'height'] -%}
             {{ formfield(g.object, fieldname, outerclass='col-sm-6') }}
             {%- endfor -%}
@@ -48,12 +51,6 @@
         </fieldset>
     </div>
     <div class="row mb-3">
-        <fieldset class="col-sm-12 col-md-6">
-            <legend>Hit Efficiency matching</legend>
-            {%- for fieldname in ['location', 'treat_surface_as_bulk', 'distribution'] -%}
-            {{ formfield(g.object, fieldname) }}
-            {%- endfor -%}
-        </fieldset>
         {%- if not isassembly %}
         <fieldset class="col-sm-12 col-md-6"
             <legend>Radiation specifications</legend>
@@ -81,6 +78,9 @@
         <a class="btn btn-danger" href="{{ url_for('.view', object=g.object) }}">Cancel</a>
     </div>
 </form>
+<br>
+{{ errors }}
+<br>
 {{ form.to_dict(flat=False) }}
 {{ modal() }}
 {% endblock pagecontent %}
