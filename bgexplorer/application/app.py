@@ -97,11 +97,15 @@ def create_app(config_file=None):
 
     @app.template_filter('printstring')
     def printstring(val):
+        try:
+            return val._fromstr
+        except AttributeError:
+            pass
         if val is None:
             return ''
         if isinstance(val, enum.Enum):
             return str(val.value)
-        return val
+        return str(val)
 
     @app.context_processor
     def inject_settings():
@@ -124,7 +128,7 @@ def create_app(config_file=None):
 
     @app.get('/favicon.ico')
     def favicon():
-        return flask.send_static_file('favicon.ico')
+        return app.send_static_file('favicon.ico')
 
     @app.get('/explore/<path:active_version>')
     def overview():

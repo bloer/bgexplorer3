@@ -87,6 +87,7 @@ class SourceCategory(Enum):
     activation = 'activation'
     dust = 'dust'
     radon = 'radon'
+    radon_emanation = 'radon_emanation'
     environment = 'environment'
     other = 'other'
 

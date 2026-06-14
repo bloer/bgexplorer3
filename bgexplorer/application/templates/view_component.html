@@ -134,7 +134,7 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 {% macro printscalar(calcresult, key, cfg) %}
 {% set val = calcresult.scalars[key] %}
 {% if val is not none %}
-{{ '$${:LS}$$'.format(val.to(cfg.display_unit).m) }}
+{{ '\({:LS}\)'.format(val.to(cfg.display_unit).m) }}
 {% endif %}
 {% endmacro %}
 

@@ -79,9 +79,8 @@
     </div>
 </form>
 <br>
-{{ errors }}
+{{ errors or '' }}
 <br>
-{{ form.to_dict(flat=False) }}
 {{ modal() }}
 {% endblock pagecontent %}
 

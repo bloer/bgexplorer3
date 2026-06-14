@@ -119,7 +119,7 @@ class CollectionViews(flask.Blueprint):
             if req.form and req.method == 'POST':
                 obj = update_object(flask.g.object, req.form)
                 try:
-                    obj.validate()
+                    obj.save()
                     flask.flash(f"Successfully saved {obj.name}", 'success')
                 except me.ValidationError as e:
                     errors = e.to_dict()

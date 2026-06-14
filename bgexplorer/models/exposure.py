@@ -2,7 +2,7 @@ from math import exp
 from .emissionspec import EmissionSpec, EmissionSource
 from .fields import QuantityField
 from .common import units
-from .isotope import get_halflife
+from .isotope import get_tau
 
 _tau_rn222 = get_tau('Rn222')
 _tau_pb210 = get_tau('Pb210')

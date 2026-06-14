@@ -66,11 +66,9 @@ class SourceTerm(VersionedDocument):
             rate = concentration_to_rate(rate, self.source.name)
         return rate * self.weight * self.rate_multiplier
 
-    def clean(self):
-        super().clean()
-        self.clear_results()
-        self.placement_ids = [placement.id for placement in self.assemblyPath]
-        # TODO: should these be cached properties rather than set by clean?
+
+    def set_location(self):
+        """ Update the `location` attribute if it is auto """
         # location is set by the component or placement closest to the leaf
         if self.location_auto:
             for placement in reversed(self.assemblyPath):
@@ -79,6 +77,15 @@ class SourceTerm(VersionedDocument):
                 if self.location:
                     break
             self.location = self.location or self.assemblyRoot.location
+        return self.location
+
+
+    def clean(self):
+        super().clean()
+        self.clear_results()
+        self.placement_ids = [placement.id for placement in self.assemblyPath]
+        # TODO: should these be cached properties rather than set by clean?
+        self.set_location()
         self.weight = reduce(operator.mul,
                              (p.weight for p in self.assemblyPath), 1)
         self.rate_multiplier = self.source.multiplier.getvalue(self.component)

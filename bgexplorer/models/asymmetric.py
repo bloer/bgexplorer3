@@ -423,18 +423,20 @@ class AsymmetricUncertainty:
         if len(s) == 2:
             if not np.isscalar(s[0]):
                 return ' +/- '.join([str(v) for v in s])
+            if not s[1]:
+                return s[0].__format__(float_spec)
             return ufloat(*s).__format__(format_spec)
         elif len(s) == 3:
             if not np.isscalar(s[0]):
-                return ' '.join([str(s[0]), '+', str(s[1]), '-', str(s[2])])
+                return ' '.join([str(s[0]), '+', str(s[2]), '-', str(s[1])])
             str1 = ufloat(s[0], s[1]).__format__(format_spec)
             str2 = ufloat(s[0], s[2]).__format__(format_spec)
             if str1 == str2:
                 return str1
             ss = [v.__format__(float_spec) for v in s]
             if 'L' in format_spec:
-                return '{}^{{+{}}}_{{-{}}}'.format(*ss)
-            return '{} + {} - {}'.format(*ss)
+                return '{}_{{-{}}}^{{+{}}}'.format(*ss)
+            return '{} + {} - {}'.format(ss[0], ss[2], ss[1])
 
             m0, s0 = list(refloat.finditer(str1))[:2]
             m1, s1 = list(refloat.finditer(str2))[:2]

@@ -30,6 +30,7 @@ def delete_component(sender, document, **kwargs):
 
 def update_component(sender, document, **kwargs):
     component = document
+    print("update_component for", component.name)
     # first, generate the list of all source terms for this component
     sourceterms = []
     for spec in list(component.specs) + [component]:
@@ -44,12 +45,32 @@ def update_component(sender, document, **kwargs):
         assemblyRoot=component,
         id__nin=[st.id for st in sourceterms],
         ).delete()
-    # TODO: need to remove all calculated results that reference
-
     # do we calculate the result now, or do it on demand?
     # update all assemblies containing us
     for parent in component.find_parents():
-        update_assembly(sender=None, document=parent, component=component)
+        #update_assembly(sender=None, document=parent, component=component)
+        for st in sourceterms:
+            update_parent(parent, st)
+    return sourceterms
+
+def update_parent(assembly, child_sourceterm):
+    # find or create a sourceterm adder for each placement with this component
+    sourceterms = []
+    for child in assembly.children:
+        if child.component.id != child_sourceterm.assemblyRoot.id:
+            continue
+        st = SourceTerm.from_placement(child_sourceterm, assembly, child)
+        sourceterms.append(st)
+    # remove any that didn't match
+    SourceTerm.objects(
+        version_tags=assembly.active_version,
+        assemblyRoot=assembly,
+        assemblyPath__0__component=child_sourceterm.assemblyRoot,
+        id__nin=[st.id for st in sourceterms]).delete()
+    print("update_parent", assembly.name, child_sourceterm.assemblyRoot.name, len(sourceterms))
+    for parent in assembly.find_parents():
+        for st in sourceterms:
+            update_parent(parent, st)
     return sourceterms
 
 
@@ -58,8 +79,8 @@ def update_assembly(sender, document, component=None, placement=None,
     assembly = document
     sourceterms = []
     for child in assembly.children:
-        if (component and child.component.id != component.id or
-                placement and child.id != placement.id):
+        if ((component and child.component.id != component.id) or
+                (placement and child.id != placement.id)):
             continue
         childterms = SourceTerm.select_version(assembly.active_version)(
             assemblyRoot=child.component,
@@ -75,7 +96,9 @@ def update_assembly(sender, document, component=None, placement=None,
     query.delete()
 
     for parent in assembly.find_parents():
-        update_assembly(sender=None, document=parent, component=assembly)
+        for st in sourceterms:
+            update_parent(parent, st)
+        #update_assembly(sender=None, document=parent, component=assembly)
 
 
 def update_placement(sender, document, **kwargs):
