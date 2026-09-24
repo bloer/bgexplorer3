@@ -5,7 +5,9 @@ from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
                          SortedListField, CASCADE, PULL, ReferenceField,
                          EmbeddedDocumentListField, ObjectIdField,
                          ValidationError)
-from .verdoc import VersionedDocument, VersionedReferenceField, VersionedQuerySet
+from .verdoc import (VersionedDocument, VersionedReferenceField,
+                     VersionedQuerySet, VersionedListField,
+                     VersionedEmbeddedDocumentListField)
 from .component import Component, Placement, Assembly
 from .emissionspec import EmissionSpec, EmissionSource, Multiplier
 from .fields import QuantityField, UncertainQuantityField, HistogramField
@@ -23,7 +25,7 @@ class SourceTerm(VersionedDocument):
     # these fields are keys used for finding SourceTerms in the db
     assemblyRoot = VersionedReferenceField(Component, required=True,
                                            reverse_delete_rule=CASCADE)
-    assemblyPath = EmbeddedDocumentListField(Placement)
+    assemblyPath = VersionedEmbeddedDocumentListField(Placement)
     source = EmbeddedDocumentField(EmissionSource, required=True)
     spec = VersionedReferenceField(EmissionSpec, reverse_delete_rule=CASCADE)
     # These are used to find hiteffs
@@ -32,8 +34,8 @@ class SourceTerm(VersionedDocument):
     # used to calculate results
     weight = FloatField(default=1)
     rate_multiplier = QuantityField(default=1)
-    hiteffs = ListField(VersionedReferenceField(HitEfficiency,
-                                                reverse_delete_rule=PULL))
+    hiteffs = VersionedListField(VersionedReferenceField(
+        HitEfficiency, reverse_delete_rule=PULL))
     hiteffs_auto = BooleanField(default=True)
     livetimes = ListField(QuantityField(units='day', allownone=True,
                                         convert=True))
@@ -146,9 +148,11 @@ class SourceTerm(VersionedDocument):
                            set_on_insert__original_id=self.original_id,
                            set_on_insert__version_tags=[self.active_version],
                            set_on_insert__assemblyRoot=self.assemblyRoot,
-                           set_on_insert__assemblyPath=self.assemblyPath,
                            set_on_insert__spec=self.spec,
                            set_on_insert__placement_ids=self.placement_ids,
+                           # placement ids are in the query, but copied
+                           # labels, weights, etc may have changed
+                           set__assemblyPath=self.assemblyPath,
                            set__source=self.source,
                            set__location=self.location,
                            set__weight=self.weight,

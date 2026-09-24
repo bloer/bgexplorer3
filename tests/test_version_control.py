@@ -35,9 +35,9 @@ class TestVersionedDocument(unittest.TestCase):
     def test1_createversion(self):
         create_version('test')
         settings = get_settings('test', create=False)
-        self.assertEquals(settings.version_tag, 'test')
+        self.assertEqual(settings.version_tag, 'test')
 
-    def test2_branch(self):
+    def _make_branch(self):
         create_version('test')
         c1 = Component(name='c1', version_tag='test').save()
         a1 = Assay(name='a1', version_tag='test').save()
@@ -48,8 +48,11 @@ class TestVersionedDocument(unittest.TestCase):
         self.assertEqual(a1.version_tags, ['test', 'branch'])
         return (c1, a1)
 
+    def test2_branch(self):
+        self._make_branch()
+
     def test3_delete(self):
-        c1, a1 = self.test2_branch()
+        c1, a1 = self._make_branch()
         delete_version('branch')
         c1.reload()
         a1.reload()

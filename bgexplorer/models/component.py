@@ -6,10 +6,11 @@ from mongoengine import (EmbeddedDocument, StringField, DateField,
                          PULL, IntField)
 from bson import ObjectId
 
-from .verdoc import VersionedDocument, VersionedReferenceField
+from .verdoc import (VersionedDocument, VersionedReferenceField,
+                     VersionedListField, VersionedEmbeddedDocumentListField)
 from .fields import QuantityField, AttachmentsField
 from .emissionspec import EmissionSpec, EmissionSource
-from .common import units
+from .common import units, validate_unique_ids
 
 
 class PurchaseInfo(EmbeddedDocument):
@@ -63,10 +64,10 @@ class Component(VersionedDocument):
     attachments = AttachmentsField()
     history = EmbeddedDocumentListField(HistoryEntry)
 
-    specs = ListField(VersionedReferenceField(EmissionSpec,
-                      reverse_delete_rule=PULL,
-                      endpoint='emissionspec',
-                      ))
+    specs = VersionedListField(VersionedReferenceField(EmissionSpec,
+                               reverse_delete_rule=PULL,
+                               endpoint='emissionspec',
+                               ))
     sources = EmbeddedDocumentListField(EmissionSource)
 
     meta = {'allow_inheritance': True}
@@ -79,6 +80,10 @@ class Component(VersionedDocument):
     @property
     def surface_area(self):
         return self.inner_surface_area + self.outer_surface_area
+
+    def clean(self):
+        super().clean()
+        validate_unique_ids(self.sources, 'sources')
 
     def find_parents(self):
         """ Locate all Assemblies with a Placement pointing to this component
@@ -123,7 +128,7 @@ def test_circular_assembly(component, assemblyPath=[]):
         pass
 
 class Assembly(Component):
-    children = EmbeddedDocumentListField(Placement)
+    children = VersionedEmbeddedDocumentListField(Placement)
     meta = {
         'indexes': ['children.component'],
     }
@@ -148,6 +153,7 @@ class Assembly(Component):
         # query against it. Maybe add to the sourceterm calc?
 
         super().clean()
+        validate_unique_ids(self.children, 'children')
         # test for circular references
         # TODO: this is pretty expensive...
         test_circular_assembly(self)

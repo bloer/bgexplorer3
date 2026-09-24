@@ -5,7 +5,7 @@ from mongoengine import (StringField, EnumField, ValidationError,
 from bson import ObjectId
 from enum import Enum
 from typing import Optional, Union
-from .common import units
+from .common import units, validate_unique_ids
 from .isotope import (concentration_to_rate, rate_to_concentration,
                       get_isotope, compare_source_names)
 from .fields import UncertainQuantityField
@@ -93,7 +93,7 @@ class SourceCategory(Enum):
 
 
 class EmissionSource(EmbeddedDocument):
-    id = ObjectIdField(default=ObjectId)
+    id = ObjectIdField(required=True, default=ObjectId)
     name = StringField(required=True)
     comment = StringField()
     category = EnumField(SourceCategory)
@@ -111,6 +111,9 @@ class EmissionSource(EmbeddedDocument):
 
     def clean(self):
         """ make sure multiplier has a sensible value """
+        # rate and id may have been set after __init__ (e.g. by forms)
+        if self.rate is not None:
+            self.rate.m.id = self.id
         if self.multiplier is None:
             self.multiplier = Multiplier.get_multiplier(self.rate)
             # ^ will raise ValidationError if it can't be auto-determined
@@ -191,6 +194,7 @@ class EmissionSpec(VersionedDocument):
     def clean(self):
         """ Automatically populate derived spectra from settings """
         super().clean()
+        validate_unique_ids(self.sources, 'sources')
         # TODO: error checking on active_version and config validity
         config = settings.get_settings(self.active_version)
         # remove all auto-generated sources that no longer have an original

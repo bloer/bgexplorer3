@@ -26,6 +26,15 @@ def validate_unit(value, unit, allow_none=True):
         raise ValidationError(f"Value {value} does not match unit {unit}")
 
 
+def validate_unique_ids(items, fieldname):
+    """ Embedded documents used as SourceTerm keys (EmissionSource, Placement)
+    must have ids that are unique within their parent document
+    """
+    ids = [item.id for item in items or []]
+    if len(ids) != len(set(ids)):
+        raise ValidationError(f"Entries in '{fieldname}' have duplicate ids")
+
+
 def opnone(a, b, op):
     if a is None:
         return b

@@ -103,6 +103,37 @@ class TestSourceTerm(unittest.TestCase):
         self.assertEqual(st.location, "c2 placement location")
         self.assertEqual(st.weight, 2)
 
+    def test2_nested_assembly(self):
+        """ Saving a component must not delete sibling SourceTerms further
+        up the assembly tree
+        """
+        e1 = EmissionSpec(name="e1", sources=[EmissionSource(name="Th232", rate="10 +- 1 mBq/kg"),
+                                              EmissionSource(name="K40", rate="<25 mBq/kg")]).save()
+        c1 = Component(name="c1", mass="2 kg",
+                       sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
+                       specs=[e1]).save()
+        c2 = Component(name="c2", mass="2 kg", specs=[e1]).save()
+        a1 = Assembly(name="a1", components=[c1, c2]).save()
+        a2 = Assembly(name="a2", components=[a1, c2]).save()
+
+        def counts():
+            return {path: SourceTerm.objects(assemblyPathStr=path).count()
+                    for path in ('a1/c1', 'a1/c2', 'a2/a1/c1', 'a2/a1/c2',
+                                 'a2/c2')}
+        expected = {'a1/c1': 3, 'a1/c2': 2, 'a2/a1/c1': 3, 'a2/a1/c2': 2,
+                    'a2/c2': 2}
+        self.assertEqual(counts(), expected)
+        c1.save()
+        self.assertEqual(counts(), expected)
+        c2.save()
+        self.assertEqual(counts(), expected)
+
+        # removing a source removes it everywhere, and only it
+        c1.sources = []
+        c1.save()
+        expected.update({'a1/c1': 2, 'a2/a1/c1': 2})
+        self.assertEqual(counts(), expected)
+
     def test3_hiteffs(self):
         """ Test that queries find HitEfficiencies """
         h1 = HitEfficiency(source="Th232", location="c1 location",
@@ -188,6 +219,8 @@ class TestSourceTerm(unittest.TestCase):
         SourceTerm.objects(assemblyPathStr="c2", source__name="K40")\
                   .update(set__hiteffs_auto=False, set__hiteffs=[h4])
         c2.save()
+        # saving c2 must regenerate all of its terms in a1, not just one
+        self.assertEqual(SourceTerm.objects(assemblyPathStr="a1/c2").count(), 3)
         for st in SourceTerm.objects(source__name="K40"):
             if st.component.id == c2.id and st.source.name == "K40":
                 self.assertFalse(st.hiteffs_auto)

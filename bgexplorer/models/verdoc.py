@@ -1,7 +1,9 @@
 """ Define VersionedDocument class """
 from mongoengine import (Document, ReferenceField, ObjectIdField,
                          StringField, QuerySet, IntField, DateTimeField,
-                         signals, ValidationError, ListField)
+                         signals, ValidationError, ListField,
+                         EmbeddedDocumentListField)
+from mongoengine.dereference import DeReference
 
 from mongoengine import CASCADE, NULLIFY, PULL
 from bson import ObjectId, DBRef
@@ -384,7 +386,7 @@ class VersionedReferenceField(ReferenceField):
                 ref_value.collection,
                 ref_value.id,
                 ref_value.database,
-                active_version=instance.active_version
+                active_version=get_active_version(instance)
             )
         return super().__get__(instance, owner)
 
@@ -410,6 +412,75 @@ class VersionedReferenceField(ReferenceField):
             document = DBRef(document._get_collection_name(),
                              document.original_id)
         return super().to_mongo(document)
+
+
+def get_active_version(instance) -> Optional[str]:
+    """ Get the active_version of `instance`. For EmbeddedDocuments, walk up
+    the chain of owners to the root VersionedDocument. Returns None if no
+    versioned owner can be found
+    """
+    while instance is not None and not isinstance(instance, VersionedDocument):
+        instance = getattr(instance, '_instance', None)
+    return None if instance is None else instance.active_version
+
+
+class VersionedDeReference(DeReference):
+    """ Bulk dereference that looks up VersionedDocuments by
+    (original_id, active_version) rather than by _id.
+
+    mongoengine dereferences all references inside a list or embedded
+    document list in one bulk query by _id, which bypasses
+    `VersionedReferenceField._lazy_load_ref`
+    """
+    def __init__(self, active_version: Optional[str] = None):
+        self.active_version = active_version
+
+    def _fetch_objects(self, doc_type=None):
+        if self.active_version is None:
+            return super()._fetch_objects(doc_type=doc_type)
+        object_map = {}
+        remaining = {}
+        for collection, refs in self.reference_map.items():
+            # plain lists of references are keyed by collection name
+            doc_cls = collection
+            if isinstance(collection, str) and isinstance(doc_type, type):
+                doc_cls = doc_type
+            if (isinstance(doc_cls, type)
+                    and issubclass(doc_cls, VersionedDocument)):
+                col_name = doc_cls._get_collection_name()
+                docs = doc_cls.objects(original_id__in=list(refs),
+                                       version_tags=self.active_version)
+                for doc in docs:
+                    object_map[(col_name, doc.original_id)] = doc
+            else:
+                remaining[collection] = refs
+        self.reference_map = remaining
+        object_map.update(super()._fetch_objects(doc_type=doc_type))
+        return object_map
+
+
+class _VersionedDereferenceMixin:
+    """ Dereference with VersionedDeReference using the owner's
+    active_version
+    """
+    @staticmethod
+    def _lazy_load_refs(instance, name, ref_values, *, max_depth):
+        dereference = VersionedDeReference(get_active_version(instance))
+        return dereference(ref_values, max_depth=max_depth,
+                           instance=instance, name=name)
+
+
+class VersionedListField(_VersionedDereferenceMixin, ListField):
+    """ ListField that dereferences VersionedReferenceFields according to
+    the owner's active_version
+    """
+
+
+class VersionedEmbeddedDocumentListField(_VersionedDereferenceMixin,
+                                         EmbeddedDocumentListField):
+    """ EmbeddedDocumentListField that dereferences VersionedReferenceFields
+    inside the embedded documents according to the owner's active_version
+    """
 
 
 """

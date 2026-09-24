@@ -1,6 +1,6 @@
 import unittest
 from mongoengine import (connect, disconnect, StringField, ReferenceField,
-                         CASCADE, NULLIFY, PULL)
+                         EmbeddedDocument, CASCADE, NULLIFY, PULL)
 import mongomock
 from bgexplorer.models.verdoc import *
 
@@ -22,6 +22,17 @@ class C2(VersionedDocument):
 class C3(VersionedDocument):
     name = StringField()
     a = ListField(VersionedReferenceField(A, reverse_delete_rule=PULL))
+
+class D(VersionedDocument):
+    name = StringField()
+    a = VersionedListField(VersionedReferenceField(A))
+
+class Holder(EmbeddedDocument):
+    a = VersionedReferenceField(A)
+
+class E(VersionedDocument):
+    name = StringField()
+    holders = VersionedEmbeddedDocumentListField(Holder)
 
 
 
@@ -49,6 +60,8 @@ class TestVersionedDocument(unittest.TestCase):
         C.drop_collection()
         C2.drop_collection()
         C3.drop_collection()
+        D.drop_collection()
+        E.drop_collection()
 
 
     def tearDown(self):
@@ -213,6 +226,44 @@ class TestVersionedDocument(unittest.TestCase):
         a1.update(pull__version_tags=self.default_tag)
         self.assertEqual(A.objects.count(), 0)
         self.assertEqual(C.objects.count(), 0)
+
+    def _edit_a1(self, a1):
+        """ Tag everything as v1, then edit a1 in the default tag so that
+        the two versions are stored in separate documents
+        """
+        for cls in (A, C3, D, E):
+            cls.create_tag('v1')
+        a1 = A.select_tag(self.default_tag).get(original_id=a1.original_id)
+        a1.name = "a1 changed"
+        a1.save()
+        self.assertEqual(A.objects.count(), 2)
+
+    def test10_versionref_list(self):
+        a1 = A(name="a1").save()
+        D(name="d1", a=[a1]).save()
+        self._edit_a1(a1)
+        self.assertEqual(D.objects.count(), 1)
+        self.assertEqual(D.select_tag('v1').get().a[0].name, "a1")
+        self.assertEqual(D.select_tag(self.default_tag).get().a[0].name,
+                         "a1 changed")
+
+    def test10_versionref_embedded_list(self):
+        a1 = A(name="a1").save()
+        E(name="e1", holders=[Holder(a=a1)]).save()
+        self._edit_a1(a1)
+        self.assertEqual(E.objects.count(), 1)
+        self.assertEqual(E.select_tag('v1').get().holders[0].a.name, "a1")
+        self.assertEqual(E.select_tag(self.default_tag).get().holders[0].a.name,
+                         "a1 changed")
+
+    def test10_embedded_active_version(self):
+        a1 = A(name="a1").save()
+        E(name="e1", holders=[Holder(a=a1)]).save()
+        A.create_tag('v1')
+        E.create_tag('v1')
+        e1 = E.select_tag('v1').get()
+        self.assertEqual(get_active_version(e1.holders[0]), 'v1')
+        self.assertIsNone(get_active_version(Holder(a=a1)))
 
 
 

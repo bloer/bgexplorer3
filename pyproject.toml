@@ -33,7 +33,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["mongomock", "flake8"]
+dev = ["mongomock", "flake8", "pytest"]
 
 [project.urls]
 "Homepage" = "https://github.com/bloer/bgexplorer3"
@@ -44,3 +44,7 @@ dev = ["mongomock", "flake8"]
 [tool.hatch.build.targets.wheel]
 packages = ["bgexplorer"]
 exclude = ["*.bak"]
+
+# tests are unittest-style, but pytest gives better reporting
+[tool.pytest.ini_options]
+testpaths = ["tests"]

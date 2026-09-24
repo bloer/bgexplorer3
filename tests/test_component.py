@@ -2,6 +2,7 @@ import unittest
 from mongoengine import (connect, disconnect, StringField, ReferenceField,
                          CASCADE, NULLIFY, PULL, ValidationError)
 from bgexplorer.models.component import Component, Placement, Assembly
+from bgexplorer.models.emissionspec import EmissionSource
 from bgexplorer.models.common import units
 
 class TestComponent(unittest.TestCase):
@@ -81,4 +82,29 @@ class TestComponent(unittest.TestCase):
         a1.children.append(Placement(component=a3))
         with self.assertRaises(ValidationError):
             a1.save()
+
+    def test4_children_versions(self):
+        """ Placements should resolve to the child in the same version """
+        tag = Component.get_default_tag()
+        c1 = Component(name="c1", mass="10 kg").save()
+        Assembly(name="a1", components=[c1]).save()
+        Component.create_tag('v1')
+        c1 = Component.select_tag(tag).get(name="c1")
+        c1.mass = 20 * units.kg
+        c1.save()
+        a1v1 = Assembly.select_tag('v1').get(name="a1")
+        a1main = Assembly.select_tag(tag).get(name="a1")
+        self.assertEqual(a1v1.children[0].component.mass, 10 * units.kg)
+        self.assertEqual(a1main.children[0].component.mass, 20 * units.kg)
+
+    def test5_unique_ids(self):
+        c1 = Component(name="c1").save()
+        p = Placement(component=c1)
+        with self.assertRaises(ValidationError):
+            Assembly(name="a1", children=[p, Placement(id=p.id, component=c1)]
+                     ).save()
+        s = EmissionSource(name="K40", rate="1 mBq/kg")
+        with self.assertRaises(ValidationError):
+            Component(name="c2", sources=[s, EmissionSource(
+                id=s.id, name="U238", rate="1 mBq/kg")]).save()
 

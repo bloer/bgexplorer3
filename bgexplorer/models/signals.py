@@ -49,28 +49,35 @@ def update_component(sender, document, **kwargs):
     # update all assemblies containing us
     for parent in component.find_parents():
         #update_assembly(sender=None, document=parent, component=component)
-        for st in sourceterms:
-            update_parent(parent, st)
+        update_parent(parent, component, sourceterms)
     return sourceterms
 
-def update_parent(assembly, child_sourceterm):
-    # find or create a sourceterm adder for each placement with this component
-    sourceterms = []
-    for child in assembly.children:
-        if child.component.id != child_sourceterm.assemblyRoot.id:
-            continue
-        st = SourceTerm.from_placement(child_sourceterm, assembly, child)
-        sourceterms.append(st)
+def update_parent(assembly, component, child_sourceterms, scope=()):
+    """ Find or create SourceTerms in `assembly` for each placement of
+    `component`, then recurse up the assembly tree.
+
+    `child_sourceterms` must be the complete set of SourceTerms rooted at
+    `component` below the placement path `scope` (a list of sets of
+    placement ids). Any other SourceTerms in `assembly` along that path
+    are deleted.
+    """
+    placements = [p for p in assembly.children
+                  if p.component.original_id == component.original_id]
+    sourceterms = [SourceTerm.from_placement(st, assembly, placement)
+                   for placement in placements
+                   for st in child_sourceterms]
+    scope = [{p.id for p in placements}] + list(scope)
     # remove any that didn't match
     SourceTerm.objects(
         version_tags=assembly.active_version,
         assemblyRoot=assembly,
-        assemblyPath__0__component=child_sourceterm.assemblyRoot,
-        id__nin=[st.id for st in sourceterms]).delete()
-    print("update_parent", assembly.name, child_sourceterm.assemblyRoot.name, len(sourceterms))
+        id__nin=[st.id for st in sourceterms],
+        __raw__={f'placement_ids.{i}': {'$in': list(ids)}
+                 for i, ids in enumerate(scope)},
+        ).delete()
+    print("update_parent", assembly.name, component.name, len(sourceterms))
     for parent in assembly.find_parents():
-        for st in sourceterms:
-            update_parent(parent, st)
+        update_parent(parent, assembly, sourceterms, scope)
     return sourceterms
 
 
@@ -78,10 +85,12 @@ def update_assembly(sender, document, component=None, placement=None,
                     **kwargs):
     assembly = document
     sourceterms = []
+    updated = set()
     for child in assembly.children:
         if ((component and child.component.id != component.id) or
                 (placement and child.id != placement.id)):
             continue
+        updated.add(child.id)
         childterms = SourceTerm.select_version(assembly.active_version)(
             assemblyRoot=child.component,
             )
@@ -95,9 +104,11 @@ def update_assembly(sender, document, component=None, placement=None,
     query = query(id__nin=[st.id for st in sourceterms])
     query.delete()
 
+    # if only some children were updated, limit deletions further up the
+    # tree to paths through those children
+    scope = [updated] if (component or placement) else []
     for parent in assembly.find_parents():
-        for st in sourceterms:
-            update_parent(parent, st)
+        update_parent(parent, assembly, sourceterms, scope)
         #update_assembly(sender=None, document=parent, component=assembly)
 
 

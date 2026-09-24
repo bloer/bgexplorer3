@@ -10,6 +10,7 @@ from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.histogram import Histogram
 
 class TestDoc(Document):
+    __test__ = False  # not a test case, don't let pytest collect it
     val = QuantityField()
     qval = QuantityField(units='s')
     uval = UncertainQuantityField()
