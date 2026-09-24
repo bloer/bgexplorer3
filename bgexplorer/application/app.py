@@ -19,7 +19,12 @@ from ..models.asymmetric import AsymmetricUncertainty
 import pint
 
 
-def create_app(config_file=None):
+def create_app(config_file=None, config=None):
+    """ Create the flask app. Configuration is read in order from
+    config_default, the file named by the BGEXPLORER_CONFIG environment
+    variable, `config_file`, FLASK_* environment variables, and the
+    `config` mapping, with later sources overriding earlier ones
+    """
     app = flask.Flask(__name__)
     # app configuration
     app.config.from_object('bgexplorer.application.config_default')
@@ -27,6 +32,8 @@ def create_app(config_file=None):
     if config_file:
         app.config.from_pyfile(config_file)
     app.config.from_prefixed_env()
+    if config:
+        app.config.update(config)
     # this is a really bad idea
     if 'SECRET_KEY' not in app.config:
         app.config['SECRET_KEY'] = secrets.token_hex()

@@ -3,11 +3,13 @@ from mongoengine import connect, disconnect, Document, ValidationError
 from bgexplorer.models.emissionspec import EmissionSource, EmissionSpec, Multiplier
 from bgexplorer.models.common import units, DimensionalityError
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
+from bgexplorer.models.isotope import concentration_to_rate
+from tests.dbutil import connect_test_db
 
 class TestEmission(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        connect(uuidRepresentation='standard')
+        connect_test_db()
 
     @classmethod
     def tearDownClass(cls):
@@ -99,6 +101,20 @@ class TestEmission(unittest.TestCase):
         self.assertEqual(len(spec.sources), 2)
         spec.validate()
         self.assertEqual(len(spec.sources), 0)
+
+    def test3_autogen_concentration(self):
+        """ sources derived from a concentration have the right rate """
+        source = EmissionSource(name='U238', rate='81 ppb')
+        spec = EmissionSpec(name='', sources=[source])
+        spec.validate()
+        rates = {s.name: s.rate for s in spec.sources}
+        self.assertEqual(set(rates), {'U238', 'U235', 'Ra226'})
+        # secular equilibrium
+        self.assertAlmostEqual(
+            concentration_to_rate('Ra226', rates['Ra226']).to('Bq/kg').mode,
+            concentration_to_rate('U238', rates['U238']).to('Bq/kg').mode)
+        # relative abundance
+        self.assertAlmostEqual(rates['U235'].to('ppb').mode, 81 * 0.00725)
 
     def test4_rateid(self):
         # test that emissionrate has an id assigned

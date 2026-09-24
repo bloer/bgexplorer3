@@ -8,6 +8,7 @@ from bgexplorer.models.fields import *
 from bgexplorer.models.common import units, DimensionalityError
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.histogram import Histogram
+from tests.dbutil import connect_test_db
 
 class TestDoc(Document):
     __test__ = False  # not a test case, don't let pytest collect it
@@ -24,7 +25,7 @@ class HistUnitsDoc(Document):
 class TestFields(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        connect(uuidRepresentation='standard')
+        connect_test_db()
 
     @classmethod
     def tearDownClass(cls):

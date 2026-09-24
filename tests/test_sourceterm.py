@@ -9,16 +9,12 @@ from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.isotope import concentration_to_rate
 import numpy as np
+from tests.dbutil import connect_test_db
 
 class TestSourceTerm(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # TODO: try to use mongo, and if it fails, switch to monomock
-        # and add an expected failure for all $merge pipelines
-        connect(uuidRepresentation='standard')
-        #connect('mongoenginetest', host='mongodb://localhost',
-        #        mongo_client_class=mongomock.MongoClient,
-        #        uuidRepresentation='stanard')
+        connect_test_db()
 
     @classmethod
     def tearDownClass(cls):

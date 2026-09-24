@@ -3,6 +3,7 @@ from mongoengine import (connect, disconnect, StringField, ReferenceField,
                          EmbeddedDocument, CASCADE, NULLIFY, PULL)
 import mongomock
 from bgexplorer.models.verdoc import *
+from tests.dbutil import connect_test_db
 
 class A(VersionedDocument):
     name = StringField()
@@ -42,12 +43,7 @@ DROPONTEARDOWN = False
 class TestVersionedDocument(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # TODO: try to use mongo, and if it fails, switch to monomock
-        # and add an expected failure for all $merge pipelines
-        connect(uuidRepresentation='standard')
-        #connect('mongoenginetest', host='mongodb://localhost',
-        #        mongo_client_class=mongomock.MongoClient,
-        #        uuidRepresentation='stanard')
+        connect_test_db()
 
     @classmethod
     def tearDownClass(cls):

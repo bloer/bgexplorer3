@@ -1,4 +1,5 @@
 import re
+import functools
 import mendeleev
 from mendeleev.models import Isotope
 import math
@@ -12,6 +13,15 @@ IsotopeType = Union[str, Isotope]
 _isotopestr = re.compile(r'(\d{1,3})?([A-Z][a-z]?[a-z]?)-?(\d{1,3})?')
 
 
+@functools.lru_cache(maxsize=None)
+def _lookup_isotope(symbol: str, A: Optional[str]) -> Optional[Isotope]:
+    """ Cached, since each mendeleev lookup is a slow database query """
+    try:
+        return mendeleev.isotope(symbol, A)
+    except Exception:
+        return None
+
+
 def get_isotope(source: IsotopeType) -> Optional[Isotope]:
     """ If string represents an isotope, look it up """
     if isinstance(source, Isotope):
@@ -19,11 +29,7 @@ def get_isotope(source: IsotopeType) -> Optional[Isotope]:
     match = _isotopestr.match(source)
     if match:
         A, symbol, A2 = match.groups()
-        A = A or A2
-        try:
-            return mendeleev.isotope(symbol, A)
-        except Exception:
-            pass
+        return _lookup_isotope(symbol, A or A2)
     return None
 
 def compare_source_names(source1: IsotopeType, source2: IsotopeType) -> bool:
@@ -79,8 +85,11 @@ def concentration_to_rate(source: IsotopeType,
 
 
 def rate_to_concentration(source: IsotopeType, rate: units.Quantity,
-                          applyabundance: bool = True) -> units.Quantity:
-    """ convert decay rate to fractional quantity """
+                          applyabundance: Optional[bool] = None,
+                          ) -> units.Quantity:
+    """ convert decay rate to fractional quantity. Inverse of
+    `concentration_to_rate`, see there for `applyabundance`
+    """
     # TODO: handle surface rates
     if source in ('K', 'natK', 'K-nat', 'Knat'):
         source = 'K40'

@@ -7,17 +7,13 @@ from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.settings import VersionSettings, SpectrumROI, get_settings
 from bgexplorer.models import sourceterm  # need this to get signals registered
 import numpy as np
+from tests.dbutil import connect_test_db
 
 
 class TestHitEFficiency(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # TODO: try to use mongo, and if it fails, switch to monomock
-        # and add an expected failure for all $merge pipelines
-        connect(uuidRepresentation='standard')
-        #connect('mongoenginetest', host='mongodb://localhost',
-        #        mongo_client_class=mongomock.MongoClient,
-        #        uuidRepresentation='stanard')
+        connect_test_db()
 
     @classmethod
     def tearDownClass(cls):

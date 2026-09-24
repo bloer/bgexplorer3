@@ -21,8 +21,10 @@
     <div class="col-md-6 col-lg-4">
         <h2>Info</h2>
         {{ utils.print_document(g.object, ['name', 'description', 'comment', 'category', 'radiopurityid']) }}
+        {%- if g.object.extra_metadata %}
         <h4>Extra metadata</h4>
         {{ utils.print_document(g.object.extra_metadata) }}
+        {%- endif %}
     </div>
 
     <div class="col-md-12 col-lg-8">

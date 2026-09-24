@@ -4,16 +4,12 @@ from mongoengine import (connect, disconnect, StringField, ReferenceField,
 from bgexplorer.models.component import Component, Placement, Assembly
 from bgexplorer.models.emissionspec import EmissionSource
 from bgexplorer.models.common import units
+from tests.dbutil import connect_test_db
 
 class TestComponent(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # TODO: try to use mongo, and if it fails, switch to monomock
-        # and add an expected failure for all $merge pipelines
-        connect(uuidRepresentation='standard')
-        #connect('mongoenginetest', host='mongodb://localhost',
-        #        mongo_client_class=mongomock.MongoClient,
-        #        uuidRepresentation='stanard')
+        connect_test_db()
 
     @classmethod
     def tearDownClass(cls):

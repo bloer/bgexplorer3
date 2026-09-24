@@ -18,7 +18,9 @@
 {% set sourcenames = all_source_names() %}
 {% set headers = ['Name', 'Sample'] + sourcenames + ['Measurement', 'Reference', 'Modified'] %}
 
+{# publication, sample, and measurement are only defined for Assays #}
 {% macro reference(spec) %}
+{% if spec.publication %}
 <td {% if spec.publication.reference %}title="{{ spec.publication.reference }}"{% endif %}>
 {{ spec.publication.org or '' }}
 {% if spec.publication.url %}<a href="{{ spec.publication.url }}" target="_blank">{% endif %}
@@ -26,16 +28,21 @@
 {% if spec.publication.url %}</a>{% endif %}
 {% if spec.publication.details %}({{ spec.publication.details }}){% endif %}
 </td>
+{% else %}<td></td>{% endif %}
 {% endmacro %}
 
 {% macro sample(spec) %}
+{% if spec.sample %}
 {{ spec.sample.material or '' }}
 {{ spec.sample.vendor or '' }} {{ spec.sample.partnum or '' }}
 {%- if spec.sample.batch %} (batch {{ spec.sample.batch }}) {% endif %}
+{% endif %}
 {% endmacro %}
 
 {% macro measurement(spec) %}
+{% if spec.measurement %}
 {{ spec.measurement.institution or '' }} {{ spec.measurement.technique or '' }}
+{% endif %}
 {% endmacro %}
 
 {% macro sourcerate(spec, sourcename) %}
