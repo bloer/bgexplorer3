@@ -49,7 +49,7 @@
 {% set source = spec.sourcemap.get(sourcename) %}
 {% if source %}<td data-order="{{ source.rate | sourcesort }}"
                    class="emissionrate {% if source.generated_from %}autosource{% endif %}">
-   {% if source.rate._fromstr %} {{ source.rate._fromstr }} {% else %} {{ "{:.2g~C}".format(source.rate) }} {% endif %}
+   {% if get_fromstr(source.rate) %} {{ get_fromstr(source.rate) }} {% else %} {{ "{:.2g~C}".format(source.rate) }} {% endif %}
 {% else %}<td>{% endif %}</td>
 {% endmacro %}
 

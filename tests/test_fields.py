@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 from mongoengine import connect, disconnect, Document,ValidationError
 import numpy as np
 from numpy.testing import *
@@ -120,6 +121,21 @@ class TestFields(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.test.val = "<10 +/- 3"
+
+    def test3_get_fromstr(self):
+        self.test.val = "10 +/- 3"
+        self.assertEqual(get_fromstr(self.test.val), "10 +/- 3")
+        self.assertIsNone(get_fromstr(10 * units.kg))
+        self.assertIsNone(get_fromstr(None))
+        self.assertIsNone(get_fromstr(AsymmetricUncertainty(1, 1)))
+        # getattr on a miss formats the whole magnitude, which is very slow
+        # for big arrays. get_fromstr shouldn't
+        big = units.Quantity(AsymmetricUncertainty(np.ones(10000), 1), 'kg')
+        with mock.patch.object(AsymmetricUncertainty, '__format__',
+                               side_effect=AssertionError("formatted")):
+            self.assertIsNone(get_fromstr(big))
+            # nor should any other attribute miss on a Quantity
+            self.assertFalse(hasattr(big, '_fromstr'))
 
     def test4_hist(self):
         self.test.hval = Histogram(np.arange(20))

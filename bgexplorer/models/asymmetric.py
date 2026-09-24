@@ -1,4 +1,5 @@
 from scipy.stats import norm, halfnorm, rv_continuous
+from scipy.special import ndtri
 import numpy as np
 import operator
 import io
@@ -403,8 +404,16 @@ class AsymmetricUncertainty:
         return np.where(q < self.qlow, q / self.qlow, (1.-q)/(1.-self.qlow))
 
     def ppf(self, q):
+        # same as AsymmetricUncertaintyDistribution._ppf, but constructing
+        # an rv_continuous is slow
         with np.errstate(divide='ignore', invalid='ignore'):
-            return AsymmetricUncertaintyDistribution(self)._ppf(q)
+            qlow = self.qlow
+            qpup = (1+q-2*qlow)/(2*(1-qlow))
+            # closed forms of halfnorm.ppf and norm.ppf
+            return self.mode + np.where(
+                self.s0 <= 0, self.s1 * ndtri((1+q)/2),
+                np.where(q < qlow, self.s0 * ndtri(q/qlow/2),
+                         self.s1 * ndtri(qpup)))
 
     def get_upper_limit(self, quantile=0.9):
         """ alias for ppf """

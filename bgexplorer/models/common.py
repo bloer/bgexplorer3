@@ -2,6 +2,7 @@ import pint
 from typing import Union
 import operator
 from pint import Quantity
+from pint.facets.numpy.numpy_func import HANDLED_UFUNCS
 from pint.errors import DimensionalityError
 from mongoengine.errors import ValidationError
 from mongoengine import EmbeddedDocument, StringField, URLField
@@ -17,6 +18,31 @@ units.load_definitions([
     "ppt = 1e-12 = ppt = parts_per_trillion",
     "ppq = 1e-15 = ppq = parts_per_quadrillion",
 ])
+
+
+_pint_getattr = Quantity.__getattr__
+
+
+def _quantity_getattr(self, item):
+    """ On a miss, pint's Quantity.__getattr__ formats the whole magnitude
+    into the AttributeError message. That is very slow for
+    AsymmetricUncertainty arrays, and misses are common: mongoengine and
+    jinja probe values with hasattr. Raise the same error without formatting
+    """
+    if (item.startswith('__array_') or item == 'ndim'
+            or item in self._wrapped_numpy_methods
+            or item in HANDLED_UFUNCS):
+        return _pint_getattr(self, item)
+    try:
+        return getattr(self._magnitude, item)
+    except AttributeError:
+        raise AttributeError(
+            f"Neither Quantity object nor its magnitude "
+            f"({type(self._magnitude).__name__}) has attribute '{item}'"
+        ) from None
+
+
+Quantity.__getattr__ = _quantity_getattr
 
 
 def validate_unit(value, unit, allow_none=True):

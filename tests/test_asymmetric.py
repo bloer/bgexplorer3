@@ -186,3 +186,24 @@ class TestAsymmetric(unittest.TestCase):
 
 
 
+
+    def test7_ppf(self):
+        """ ppf should match the scipy distribution """
+        from scipy.stats import norm, halfnorm
+        # upper limit
+        ul = AsymmetricUncertainty(0, 0, 2)
+        self.assertAlmostEqual(ul.ppf(0.9), halfnorm(0, 2).ppf(0.9))
+        # symmetric: same as a normal distribution
+        sym = AsymmetricUncertainty(5, 1)
+        for q in (0.05, 0.5, 0.9):
+            self.assertAlmostEqual(sym.ppf(q), norm(5, 1).ppf(q))
+        # asymmetric: each side is a scaled half of a normal distribution
+        asym = AsymmetricUncertainty(5, 1, 3)
+        self.assertAlmostEqual(asym.ppf(asym.qlow), 5)
+        self.assertAlmostEqual(asym.ppf(0.1), norm(5, 1).ppf(0.1/0.25/2))
+        self.assertAlmostEqual(asym.ppf(0.9), norm(5, 3).ppf(1.4/1.5))
+        # arrays
+        arr = AsymmetricUncertainty(np.array([0, 5, 5.]), np.array([0, 1, 1]),
+                                    np.array([2, 1, 3]))
+        assert_allclose(arr.ppf(0.9), [ul.ppf(0.9), sym.ppf(0.9),
+                                       asym.ppf(0.9)])

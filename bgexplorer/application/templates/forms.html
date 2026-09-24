@@ -103,7 +103,7 @@ input{% if open %} type="{{ type }}"{% endif -%}
 {%- set inputclass = inputclass~" basicAutoComplete" -%}
 {%- endif -%}
 
-    <{{ tag(type, true) }} class="{{ inputclass }} {%- if errmsg %} is-invalid {%- endif -%}" name="{{ name }}" value="{{ value.original_id or value.id or value._fromstr or value }}"
+    <{{ tag(type, true) }} class="{{ inputclass }} {%- if errmsg %} is-invalid {%- endif -%}" name="{{ name }}" value="{{ input_value(value) }}"
         {%- if id %} id="{{ id }}"{%- endif -%}
         {%- if title %} title="{{ title }}"{%- endif -%}
         {%- if field.required %} required{% endif -%}

@@ -91,6 +91,18 @@ def decompress(blob: bytes) -> dict:
     return value
 
 
+def get_fromstr(value) -> Optional[str]:
+    """ Return the string `value` was parsed from by `QuantityField`, if any.
+    Don't use getattr for this: on a miss, pint's Quantity.__getattr__
+    formats the whole magnitude into its error message, which is very slow
+    for AsymmetricUncertainty arrays
+    """
+    try:
+        return vars(value).get('_fromstr')
+    except TypeError:
+        return None
+
+
 def utostr(unit):
     return '{:~C}'.format(unit)
 
@@ -215,7 +227,7 @@ class QuantityField(BaseField):
         if not isinstance(value, pint.Quantity):
             value = pint.Quantity(value, units)
         if self.forceasym and not isinstance(value.m, AsymmetricUncertainty):
-            _fromstr = getattr(value, '_fromstr', None)
+            _fromstr = get_fromstr(value)
             value = pint.Quantity(AsymmetricUncertainty(value.m, 0), value.u)
             if _fromstr:
                 value._fromstr = _fromstr
@@ -226,7 +238,7 @@ class QuantityField(BaseField):
         return value
 
     def to_mongo(self, value):
-        if _fromstr := getattr(value, '_fromstr', None):
+        if _fromstr := get_fromstr(value):
             return _fromstr
         if value is None:
             return value

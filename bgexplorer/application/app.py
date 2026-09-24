@@ -10,9 +10,10 @@ from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
 from ..models.sourceterm import CalculatedResults
+from ..models.fields import get_fromstr
 from .common import pretty_date
 from .blueprints import CollectionViews
-from .forms import input_type
+from .forms import input_type, input_value
 from . import examples
 
 from ..models.asymmetric import AsymmetricUncertainty
@@ -92,10 +93,8 @@ def create_app(config_file=None, config=None):
 
     @app.template_filter('printquantity')
     def printquantity(q, unit=None):
-        try:
-            return q._fromstr
-        except AttributeError:
-            pass
+        if fromstr := get_fromstr(q):
+            return fromstr
         if unit:
             q = q.to(unit)
         else:
@@ -104,10 +103,8 @@ def create_app(config_file=None, config=None):
 
     @app.template_filter('printstring')
     def printstring(val):
-        try:
-            return val._fromstr
-        except AttributeError:
-            pass
+        if fromstr := get_fromstr(val):
+            return fromstr
         if val is None:
             return ''
         if isinstance(val, enum.Enum):
@@ -124,6 +121,8 @@ def create_app(config_file=None, config=None):
     app.add_template_global(pretty_date, 'pretty_date')
     app.add_template_filter(pretty_date, 'pretty_date')
     app.add_template_global(input_type, 'input_type')
+    app.add_template_global(input_value, 'input_value')
+    app.add_template_global(get_fromstr, 'get_fromstr')
 
     # app endpoints
     @app.get('/')

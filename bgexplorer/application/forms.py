@@ -1,5 +1,6 @@
 import mongoengine as me
 from ..models.verdoc import VersionedDocument
+from ..models.fields import get_fromstr
 
 def input_type(field):
     """ Determine the <input> type for the given field """
@@ -25,6 +26,15 @@ def input_type(field):
     if isinstance(field, me.BooleanField):
         return 'checkbox'
     return 'text'
+
+def input_value(value):
+    """ Determine the <input> value for a field value """
+    if isinstance(value, me.Document):
+        return getattr(value, 'original_id', None) or value.id
+    if isinstance(value, me.EmbeddedDocument):
+        return getattr(value, 'id', None) or value
+    return get_fromstr(value) or value
+
 
 LISTFIELDS_KEY = '_listfields'
 
