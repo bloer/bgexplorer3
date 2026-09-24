@@ -226,7 +226,7 @@ def populate_example(version_tag='examples/qis', clean: bool = False,
                      components=[internals, shield]+list(Component.objects(name='Environment')),
                      ).save()
     log.debug("Calculating results")
-    result = CalculatedResults.for_component(total, save=True, save_intermediate=True)
+    result = CalculatedResults.for_component(total, save=True)
 
     if print_results:
         # everything is relative to 'total'

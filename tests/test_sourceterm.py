@@ -310,6 +310,28 @@ class TestSourceTerm(unittest.TestCase):
         self.assertAlmostEqual(val.s0, 10.903300234332724)
         self.assertAlmostEqual(val.s1, 13.212474184422296)
 
+        # for_tree calculates every row at once, same as one at a time
+        tree = CalculatedResults.for_tree(a1)
+        self.assertEqual(set(tree), {a1.original_id, c1.original_id,
+                                     c2.original_id, c3.original_id})
+        for obj in (a1, c1, c2, c3):
+            expected = CalculatedResults.for_object(obj, relativeto=a1,
+                                                    save=False)
+            got = tree[obj.original_id].scalars['v1'].to('dru')
+            expected = expected.scalars['v1'].to('dru')
+            self.assertAlmostEqual(got.mode, expected.mode)
+            self.assertAlmostEqual(got.s0, expected.s0)
+            self.assertAlmostEqual(got.s1, expected.s1)
+        # a separately loaded root is still the root
+        root = Assembly.objects.get(id=a1.id)
+        cr = CalculatedResults.for_object(root, relativeto=a1, save=False)
+        self.assertAlmostEqual(cr.scalars['v1'].to('dru').mode, 101)
+
+        # scalar-only results are never cached
+        CalculatedResults.drop_collection()
+        CalculatedResults.for_object(a1, save=True, spectra=False)
+        self.assertEqual(CalculatedResults.objects.count(), 0)
+
         # test that hiteffs are removed appropriately
         h1.location = 'somewhere else'
         h1.save()

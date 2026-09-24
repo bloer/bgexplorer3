@@ -15,7 +15,9 @@ from .hiteff import HitEfficiency
 from .isotope import concentration_to_rate
 from .common import units, addnone, multnone
 from . import settings
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Tuple, Iterable
+from collections import defaultdict
+from bson import ObjectId
 from itertools import chain
 import logging
 log = logging.getLogger(__name__)
@@ -207,7 +209,8 @@ def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource, HitEffi
     if relativeto is not None:
         query = query(assemblyRoot=relativeto)
     if isinstance(obj, Component):
-        if relativeto is not None and relativeto is not obj:
+        if (relativeto is not None and
+                relativeto.original_id != obj.original_id):
             query = query(assemblyPath__component=obj)
         else:
             query = query(assemblyRoot=obj)
@@ -234,17 +237,41 @@ class CalculatedResults(Document):
 
     @classmethod
     def for_object(cls, obj, relativeto: Optional[Assembly] = None,
-                   save: bool = True, save_intermediate: bool = False):
+                   save: bool = True, spectra: bool = True):
         sts = find_sourceterms(obj=obj, relativeto=relativeto)
-        return cls.from_sourceterms(sts, save=save,
-                                    save_intermediate=save_intermediate)
+        return cls.from_sourceterms(sts, save=save, spectra=spectra)
 
     @classmethod
     def for_component(cls, component: Component,
                       relativeto: Optional[Assembly] = None,
-                      save: bool = False, save_intermediate: bool = False):
+                      save: bool = False, spectra: bool = True):
         """ Alias for for_object. To be deprecated """
-        return cls.for_object(component, relativeto, save, save_intermediate)
+        return cls.for_object(component, relativeto, save, spectra)
+
+    @classmethod
+    def for_tree(cls, root: Component, spectra: bool = False
+                 ) -> Dict[ObjectId, 'CalculatedResults']:
+        """ Calculate results for `root` and, relative to `root`, every
+        component placed anywhere below it. This is equivalent to calling
+        `for_object(component, relativeto=root)` for each of them, but
+        loads everything once.
+
+        Returns a dict keyed by component original_id. Results aren't
+        cached in the database.
+        """
+        sourceterms = list(find_sourceterms(root))
+        hiteffs = load_hiteffs(sourceterms, spectra)
+        parts = {st.id: cls._calculate(st, hiteffs, spectra)
+                 for st in sourceterms}
+        groups = defaultdict(list)
+        groups[root.original_id] = sourceterms
+        for st in sourceterms:
+            # a component may be placed more than once in the same path
+            for cid in {_ref_id(p._data.get('component'))
+                        for p in st._data.get('assemblyPath') or []}:
+                groups[cid].append(st)
+        return {cid: cls._sum(sts, (parts[st.id] for st in sts))
+                for cid, sts in groups.items()}
 
     def ito_reduced_units(self):
         for v in self.scalars.values():
@@ -275,18 +302,63 @@ class CalculatedResults(Document):
                                           other.spectra.get(key))
         return result.ito_reduced_units()
 
+    @staticmethod
+    def _calculate(sourceterm: SourceTerm,
+                   hiteffs: Dict[ObjectId, HitEfficiency],
+                   spectra: bool = True) -> Optional[Tuple[dict, dict]]:
+        """ Multiply the sourceterm's emission rate by each of its
+        hiteffs, which are looked up in `hiteffs` (see `load_hiteffs`).
+        Returns (scalars, spectra) dicts, or None if there are no hiteffs.
+        Units aren't reduced.
+        """
+        scalars, hists = {}, {}
+        found = False
+        for ref in sourceterm._data.get('hiteffs') or []:
+            hiteff = hiteffs.get(_ref_id(ref))
+            if hiteff is None:
+                if not isinstance(ref, HitEfficiency):
+                    log.warning(f"HitEfficiency {_ref_id(ref)} for "
+                                f"SourceTerm {sourceterm.id} not found")
+                    continue
+                hiteff = ref
+            found = True
+            erate = sourceterm.emissionrate
+            if not hiteff.norm.check(erate):
+                raise units.DimensionalityError(
+                    "incompatible emissionrate units")
+            for key, val in chain(hiteff.scalars.items(),
+                                  hiteff.rois.items()):
+                if val is not None:
+                    scalars[key] = addnone(scalars.get(key),
+                                           multnone(val, erate))
+            if spectra:
+                for key, val in hiteff.spectra.items():
+                    if val is not None:
+                        hists[key] = addnone(hists.get(key),
+                                             multnone(val, erate))
+        return (scalars, hists) if found else None
+
     @classmethod
-    def _from_hiteff(cls, sourceterm: SourceTerm, hiteff: HitEfficiency
-                     ) -> 'CalculatedResults':
-        erate = sourceterm.emissionrate
-        if not hiteff.norm.check(erate):
-            raise units.DimensionalityError("incompatible emissionrate units")
-        return cls(scalars={key: multnone(val,  erate) for key, val in
-                            chain(hiteff.scalars.items(), hiteff.rois.items())
-                            if val is not None},
-                   spectra={key: multnone(val, erate) for key, val in
-                            hiteff.spectra.items() if val is not None},
-                   ).ito_reduced_units()
+    def _sum(cls, sourceterms: List[SourceTerm],
+             parts: Iterable[Optional[Tuple[dict, dict]]]
+             ) -> Optional['CalculatedResults']:
+        """ Add up the output of `_calculate` for each of `sourceterms`.
+        Returns None if none of them have hiteffs
+        """
+        scalars, hists = {}, {}
+        found = False
+        for part in parts:
+            if part is None:
+                continue
+            found = True
+            for key, val in part[0].items():
+                scalars[key] = addnone(scalars.get(key), val)
+            for key, val in part[1].items():
+                hists[key] = addnone(hists.get(key), val)
+        if not found:
+            return None
+        return cls(scalars=scalars, spectra=hists,
+                   sources=list(sourceterms)).ito_reduced_units()
 
     @classmethod
     def from_db(cls, sourceterms: List[SourceTerm]):
@@ -296,42 +368,62 @@ class CalculatedResults(Document):
 
     @classmethod
     def from_sourceterm(cls, sourceterm: SourceTerm, allowcache: bool = True,
-                        save: bool = False,
+                        save: bool = False, spectra: bool = True,
                         ) -> 'CalculatedResults':
         """ Calculalte all results for a single SourceTerm """
-        if not sourceterm.hiteffs:
-            return None
-        if allowcache and (result := cls.from_db([sourceterm])) is not None:
+        return cls.from_sourceterms([sourceterm], allowcache=allowcache,
+                                    save=save, spectra=spectra)
+
+    @classmethod
+    def from_sourceterms(cls, sourceterms: Iterable[SourceTerm],
+                         allowcache: bool = True, save: bool = False,
+                         spectra: bool = True,
+                         ) -> Optional['CalculatedResults']:
+        """ Calculate the sum of results for all `sourceterms`. Returns None
+        if none of them have hiteffs.
+
+        If `allowcache`, first look for a saved result in the database. If
+        `save`, save the result. If not `spectra`, only calculate scalars;
+        these partial results are never saved.
+        """
+        sourceterms = list(sourceterms)
+        if allowcache and (result := cls.from_db(sourceterms)) is not None:
             return result
-        result = sum((cls._from_hiteff(sourceterm, h)
-                      for h in sourceterm.hiteffs),
-                     cls(sources=[sourceterm]))
-        try:
-            result.ito_reduced_units()
-        except AttributeError:
-            pass
-        if save:
+        hiteffs = load_hiteffs(sourceterms, spectra)
+        result = cls._sum(sourceterms, (cls._calculate(st, hiteffs, spectra)
+                                        for st in sourceterms))
+        if result is not None and save and spectra:
             result.save()
         return result
 
-    @classmethod
-    def from_sourceterms(cls, sourceterms: List[SourceTerm],
-                         allowcache: bool = True, save: bool = False,
-                         save_intermediate: bool = False,
-                         ) -> 'CalculatedResults':
-        if allowcache and (result := cls.from_db(sourceterms)) is not None:
-            return result
-        # even if subs are cached, re-calculate to pick up correlations
-        result = sum((cls.from_sourceterm(st, allowcache=False,
-                                          save=save_intermediate)
-                      for st in sourceterms if st.hiteffs),
-                     cls())
-        if not result.sources:
-            return None
-        try:
-            result.ito_reduced_units()
-        except AttributeError:
-            pass
-        if save:
-            result.save()
-        return result
+
+def _ref_id(ref):
+    """ The stored id of a reference, which may not be dereferenced yet """
+    if isinstance(ref, VersionedDocument):
+        return ref.original_id
+    if isinstance(ref, Document):
+        return ref.id
+    # DBRef or plain id
+    return getattr(ref, 'id', ref)
+
+
+def load_hiteffs(sourceterms: Iterable[SourceTerm], spectra: bool = True
+                 ) -> Dict[ObjectId, HitEfficiency]:
+    """ Load all HitEfficiencies referenced by `sourceterms` with one query
+    per version, rather than dereferencing each sourceterm's list. If not
+    `spectra`, don't load spectra.
+
+    Returns a dict keyed by original_id
+    """
+    ids = defaultdict(set)
+    for st in sourceterms:
+        ids[st.active_version].update(
+            _ref_id(ref) for ref in st._data.get('hiteffs') or [])
+    result = {}
+    for version, versionids in ids.items():
+        query = HitEfficiency.select_version(version)(
+            original_id__in=list(versionids))
+        if not spectra:
+            query = query.exclude('spectra')
+        result.update((hiteff.original_id, hiteff) for hiteff in query)
+    return result

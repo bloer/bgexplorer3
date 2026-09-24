@@ -146,8 +146,9 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
         <tr><th>Component</th>{% for key, entry in scalarscfg %}<th>{{ entry.display_name or key }} [{{ entry.display_unit or '' }}]</th>{% endfor %}</tr>
     </thead>
     <tbody>
+        {% set calcresults = get_tree_calculations(g.object) %}
         {% for placement in [{'component': g.object, 'weight': 1, 'name': g.object.name}] recursive %}
-        {% set calcresult = get_calculation(placement.component, g.object) %}
+        {% set calcresult = calcresults.get(placement.component.original_id) %}
         <tr class="component depth{{ loop.depth0 }}">
             <td>{{ placement.name }}</td>
             {% for key, entry in scalarscfg if calcresult %}

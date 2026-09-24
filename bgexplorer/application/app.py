@@ -78,7 +78,14 @@ def create_app(config_file=None, config=None):
 
     @app.template_global()
     def get_calculation(obj, relativeto=None):
-        return CalculatedResults.for_object(obj, relativeto, True, True)
+        return CalculatedResults.for_object(obj, relativeto, save=True)
+
+    @app.template_global()
+    def get_tree_calculations(root, spectra=False):
+        """ results for root and all its subcomponents relative to root,
+        keyed by component original_id
+        """
+        return CalculatedResults.for_tree(root, spectra=spectra)
 
     @app.template_filter('sourcesort')
     def source_sort_val(rate):
