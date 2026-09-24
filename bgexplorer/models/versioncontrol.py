@@ -4,13 +4,52 @@ from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, CalculatedResults
 from .settings import VersionSettings, get_settings, touch
-from typing import Optional
+from .verdoc import VersionedDocument
+from typing import Optional, Dict
 from enum import Enum
+import datetime
 import logging
 log = logging.getLogger(__name__)
 
 
 _versioned_classes = [Component, EmissionSpec, HitEfficiency, SourceTerm]
+
+# first path segments used by application routes, which can't start a version
+RESERVED_NAMES = ('api', 'versions', 'settings')
+
+
+def validate_version_name(version_tag: str) -> None:
+    """ Raise ValueError if `version_tag` can't be used as a version name """
+    if not isinstance(version_tag, str) or not version_tag.strip():
+        raise ValueError("Version name must not be empty")
+    if version_tag != version_tag.strip():
+        raise ValueError("Version name must not start or end with whitespace")
+    parts = version_tag.split('/')
+    if any(not part for part in parts):
+        raise ValueError("Version name must not start or end with '/' "
+                         "or contain '//'")
+    if parts[0] in RESERVED_NAMES or version_tag in RESERVED_NAMES:
+        raise ValueError(f"Version name must not start with "
+                         f"{', '.join(RESERVED_NAMES)}")
+
+
+def list_versions():
+    """ Get all versions' settings, ordered by name """
+    return VersionSettings.objects.order_by('version_tag')
+
+
+def version_summary(version_tag: str) -> Dict[str, Dict[str, int]]:
+    """ Count the documents in `version_tag` for each versioned class.
+    'total' is the number of documents in the version, and 'unique' the
+    number that belong only to this version, which would be removed from the
+    database if the version were deleted
+    """
+    verify_version(version_tag)
+    return {cls.__name__: {'total': cls.objects(version_tags=version_tag)
+                           .count(),
+                           'unique': cls.objects(version_tags=[version_tag])
+                           .count()}
+            for cls in _versioned_classes}
 
 
 def version_exists(version_tag: str) -> bool:
@@ -37,6 +76,7 @@ def create_version(version_tag: str, fromtag: Optional[str] = None,
     tag, otherwise create an empty version. Editable and description
     are passed to the VersionSettings object, which is returned
     """
+    validate_version_name(version_tag)
     # make sure such a version doesn't already exist
     verify_version(version_tag, want_exists=False)
     if not fromtag:
@@ -48,9 +88,16 @@ def create_version(version_tag: str, fromtag: Optional[str] = None,
     # if we get here, we are constructing from previous version
     # clone into a new version
     log.info(f"Creating new version {version_tag} from {fromtag}")
-    newsettings = get_settings(fromtag).clone(version_tag)
+    newsettings = get_settings(fromtag, create=False).clone(version_tag)
+    # use update rather than save: settings cloned from a tag are read-only
+    changes = dict(set__editable=editable,
+                   set__modified=datetime.datetime.now())
+    if description is not None:
+        changes['set__description'] = description
+    newsettings.update(**changes)
     for cls in _versioned_classes:
         cls.create_tag(version_tag, fromtag)
+    newsettings.reload()
     return newsettings
 
 
@@ -67,9 +114,18 @@ def create_branch(version_tag: str, fromtag: Optional[str] = None,
 
 
 def delete_version(version_tag: str) -> None:
-    """ delete the selected tag.
-    Raises KeyError if version_Tag doesn't exist
+    """ delete the selected tag. Read-only versions (tags) can be deleted.
+    Raises KeyError if version_tag doesn't exist and ValueError if it is the
+    default version
     """
+    if version_tag == VersionedDocument.get_default_tag():
+        raise ValueError(f"The default version '{version_tag}' "
+                         "can't be deleted")
+    _delete_version(version_tag)
+
+
+def _delete_version(version_tag: str) -> None:
+    """ delete_version without protecting the default version """
     verify_version(version_tag)
     log.warning(f"About to delete tag {version_tag}")
     for cls in _versioned_classes:
@@ -103,7 +159,7 @@ def merge_version(version_tag: str, onto: str, keep: bool = True,
                        description=settings.description)
     elif method is MergeMethod.replace_all:
         # delete the target version then create from this one
-        delete_version(onto)
+        _delete_version(onto)
         create_version(onto, version_tag, editable=settings.editable,
                        description=settings.description)
     elif method is MergeMethod.keep_othertag:

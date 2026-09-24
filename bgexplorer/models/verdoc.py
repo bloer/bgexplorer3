@@ -11,7 +11,32 @@ import datetime
 from typing import Optional, List
 
 
+class ReadOnlyVersionError(PermissionError):
+    """ Raised when trying to modify documents in a read-only version (tag) """
+
+
+def check_writable(version_tag: Optional[str]) -> None:
+    """ Raise ReadOnlyVersionError if `version_tag` is a read-only version.
+    Versions without a VersionSettings document are writable
+    """
+    if version_tag is None:
+        return
+    # imported here to avoid a circular import
+    from .settings import VersionSettings
+    editable = VersionSettings.objects(version_tag=version_tag)\
+        .only('editable').as_pymongo().first()
+    if editable is not None and editable.get('editable', True) is False:
+        raise ReadOnlyVersionError(f"Version '{version_tag}' is read-only")
+
+
 # FIXME: need to override update, modify, etc
+def _readonly_kwargs(document_cls, bypass_readonly: bool) -> dict:
+    """ Pass bypass_readonly on only to versioned querysets """
+    if bypass_readonly and issubclass(document_cls, VersionedDocument):
+        return {'bypass_readonly': True}
+    return {}
+
+
 class VersionedQuerySet(QuerySet):
     """ Override queryset to keep track of the currently active tag """
     def __init__(self, *args, active_version: Optional[str] = None, **kwargs):
@@ -51,8 +76,14 @@ class VersionedQuerySet(QuerySet):
         return self.select_version(tag)
 
     def delete(self, *args, bypass_version_control: bool = False,
-               bypass_reverse_delete: bool = False, **kwargs):
-        """ Override base delete if active_version is set """
+               bypass_reverse_delete: bool = False,
+               bypass_readonly: bool = False, **kwargs):
+        """ Override base delete if active_version is set. Raises
+        ReadOnlyVersionError if active_version is read-only, unless
+        `bypass_readonly` is set
+        """
+        if not bypass_readonly:
+            check_writable(self.active_version)
         if self.active_version is not None and not bypass_version_control:
             # instead of directly deleting, pull the currently active tag from
             # all documents matching the filter. Then delete all documents
@@ -60,7 +91,8 @@ class VersionedQuerySet(QuerySet):
             qs = self.clone()
             count = qs.update(pull__version_tags=self.active_version,
                               bypass_version_control=True,
-                              bypass_reverse_delete=bypass_reverse_delete)
+                              bypass_reverse_delete=bypass_reverse_delete,
+                              bypass_readonly=bypass_readonly)
             # empty version tags objects are deleted by the update call
             return count
         # TODO: should this cause an error? how to prevent accidental
@@ -104,7 +136,8 @@ class VersionedQuerySet(QuerySet):
                           ])
         return response
 
-    def handle_reverse_delete(self, write_concern=None):
+    def handle_reverse_delete(self, write_concern=None,
+                              bypass_readonly: bool = False):
         # this is copied straight from BaseQueryset
         queryset = self.clone()
         doc = queryset._document
@@ -131,22 +164,27 @@ class VersionedQuerySet(QuerySet):
                 )
                 if refs.count() > 0:
                     refs.delete(write_concern=write_concern,
-                                cascade_refs=cascade_refs)
+                                cascade_refs=cascade_refs,
+                                **_readonly_kwargs(document_cls,
+                                                   bypass_readonly))
             elif rule == NULLIFY:
                 document_cls.objects(**{field_name + "__in": self},
                                      **tag_query).update(
                     write_concern=write_concern,
+                    **_readonly_kwargs(document_cls, bypass_readonly),
                     **{"unset__%s" % field_name: 1}
                 )
             elif rule == PULL:
                 document_cls.objects(**{field_name + "__in": self},
                                      **tag_query).update(
                     write_concern=write_concern,
+                    **_readonly_kwargs(document_cls, bypass_readonly),
                     **{"pull_all__%s" % field_name: self}
                 )
 
     def update(self, *args, bypass_version_control: bool = False,
-               bypass_reverse_delete: bool = False, **kwargs):
+               bypass_reverse_delete: bool = False,
+               bypass_readonly: bool = False, **kwargs):
         """ If trying to update a document with multiple version tags,
         we need to remove the active_version and switch to upsert.
         This will almost certainly cause problems if the update arguments
@@ -154,6 +192,8 @@ class VersionedQuerySet(QuerySet):
         """
         qs = self.clone()
         if self.active_version is not None and not bypass_version_control:
+            if not bypass_readonly:
+                check_writable(self.active_version)
             qs = self.prepare_edit()
             kwargs['inc__revision'] = 1
             kwargs['set__modified'] = datetime.datetime.now()
@@ -164,7 +204,8 @@ class VersionedQuerySet(QuerySet):
             if not bypass_reverse_delete:
                 # removing a version tag is equivalent to deleting
                 write_concern = kwargs.get('write_concern')
-                qs.handle_reverse_delete(write_concern=write_concern)
+                qs.handle_reverse_delete(write_concern=write_concern,
+                                         bypass_readonly=bypass_readonly)
 
         count = QuerySet.update(qs, *args, **kwargs)
         if count and delete_after:
@@ -175,6 +216,7 @@ class VersionedQuerySet(QuerySet):
     def modify(self, *args, bypass_version_control: bool = False, **kwargs):
         qs = self.clone()
         if self.active_version is not None and not bypass_version_control:
+            check_writable(self.active_version)
             qs = self.prepare_edit()
             kwargs['inc__revision'] = 1
             kwargs['set__modified'] = datetime.datetime.now()
@@ -268,7 +310,7 @@ class VersionedDocument(Document):
         """ Remove the version tag `tag` from all documents in the collection
         If any documents contain *only* this tag, they are deleted.
         """
-        cls.objects.select_tag(tag).delete()
+        cls.objects.select_tag(tag).delete(bypass_readonly=True)
 
     @classmethod
     def list_tags(cls) -> List[str]:
@@ -288,6 +330,20 @@ class VersionedDocument(Document):
     @classmethod
     def get_default_tag(cls):
         return cls._DEFAULT_TAG
+
+    def delete(self, *args, **kwargs):
+        # documents with a single tag are deleted by pk, so the queryset
+        # doesn't know the version
+        check_writable(self.active_version)
+        return super().delete(*args, **kwargs)
+
+    def update(self, **kwargs):
+        check_writable(self.active_version)
+        return super().update(**kwargs)
+
+    def modify(self, *args, **kwargs):
+        check_writable(self.active_version)
+        return super().modify(*args, **kwargs)
 
     def clean(self) -> None:
         """ called during validation.
@@ -341,6 +397,7 @@ def pre_save_post_validation(sender, document=None, created=False, **kwargs):
     """
     if document is None or not isinstance(document, VersionedDocument):
         return
+    check_writable(document.active_version)
     # if this version already exists in the db with multiple tags,
     # we need to remove this tag from the previous, create a new one,
     # and update our ID to match the new one

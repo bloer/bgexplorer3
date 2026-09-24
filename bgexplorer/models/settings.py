@@ -221,6 +221,11 @@ class VersionSettings(Document):
         return VersionSettings.objects.get(version_tag=newtag)
 
     def clean(self):
+        # settings of a read-only version can't be changed, including
+        # making it editable again
+        if self.id is not None:
+            verdoc.check_writable(VersionSettings.objects(id=self.id)
+                                  .scalar('version_tag').first())
         # make sure we haven't set a display_unit that conflicts with
         # an already-existing hiteff
         for type_ in ('scalars', 'spectra'):
