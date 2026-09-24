@@ -14,6 +14,7 @@ from uncertainties import ufloat
 from difflib import SequenceMatcher
 import re
 import logging
+from .arrays import encode_array, decode_array, is_encoded_array
 try:
     import pint
 except ImportError:
@@ -284,10 +285,8 @@ class AsymmetricUncertainty:
         if np.all(self.s0 == self.s1):
             result = (self.mode, self.s0)
         if compressarrays and isinstance(result[0], np.ndarray):
-            # compress the array as a binary blob
-            buf = io.BytesIO()
-            np.savez_compressed(buf, *result)
-            result = (buf.getvalue(),)
+            # store the raw array bytes
+            result = tuple(encode_array(np.asarray(r)) for r in result)
         return result
 
     def todict(self) -> dict:
@@ -325,8 +324,10 @@ class AsymmetricUncertainty:
                 unit = val[-1]
                 val = val[:-1]
         if isinstance(val[0], bytes) and len(val) == 1:
-            # this is a compressed numpy archive
+            # legacy compressed numpy archive
             val = tuple(np.load(io.BytesIO(val[0])).values())
+        val = tuple(decode_array(v) if is_encoded_array(v) else v
+                    for v in val)
         result = AsymmetricUncertainty(*val, forceposdef=False)
         if unit is not None:
             result = unit_registry.Quantity(result, unit)

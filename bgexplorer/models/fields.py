@@ -8,11 +8,11 @@ import logging
 from typing import Union, Optional
 import numpy as np
 import io
-import json
 import re
 from collections.abc import Mapping
 
 from .asymmetric import AsymmetricUncertainty
+from .arrays import encode_array, decode_array, is_encoded_array
 from .histogram import Histogram
 from .common import units as unitreg
 from .common import pint
@@ -45,50 +45,26 @@ def AttachmentsField(**kwargs):
     return EmbeddedDocumentListField(InlineAttachment, **kwargs)
 
 
-class NumpyEncoder(json.JSONEncoder):
-    """ needed to json encode numpy arrays. stolen from
-    https://stackoverflow.com/a/47626762/3657349
+def compress(doc: dict) -> dict:
+    """ Encode all numpy arrays in `doc` for storage """
+    return {k: encode_array(v) if isinstance(v, np.ndarray) else v
+            for k, v in doc.items()}
+
+
+def decompress(value: Union[Mapping, bytes]) -> dict:
+    """ Return a dict of numpy arrays and other values from the output of
+    `compress`. Also reads the legacy npz blobs and plain lists
     """
-    def default(self, obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return json.JSONEncoder.default(self, obj)
-
-
-def nparraystolists(doc: dict) -> dict:
-    """ Convert all np arrays to lists for storage in db """
-    for k, v in list(doc.items()):
-        if isinstance(v, np.ndarray):
-            doc[k] = v.tolist()
-    return doc
-
-
-def compress(doc: dict, force: bool = False) -> Union[dict, bytes]:
-    """ If the document is smaller as a compressed npz blob than string,
-    return the compressed version
-    If Force is True, always return binary, otherwise test if
-    json representation is smaller
-    """
-    buf = io.BytesIO()
-    np.savez_compressed(buf, **doc)
-    if not force:
-        if buf.tell() > len(json.dumps(doc, cls=NumpyEncoder)):
-            # nake sure all numpy arrays are plain lists
-            return nparraystolists(doc)
-    return buf.getvalue()
-
-
-def decompress(blob: bytes) -> dict:
-    """ return a dict from the output of `compress` """
-    buf = io.BytesIO(blob)
-    value = dict(**np.load(buf))
-    # remore np.array wrapper from non-array items
-    for k, v in list(value.items()):
-        try:
-            value[k] = v.item()
-        except (ValueError, AttributeError):
-            pass
-    return value
+    if isinstance(value, bytes):
+        # legacy npz archive
+        value = dict(**np.load(io.BytesIO(value)))
+        # remove np.array wrapper from non-array items
+        for k, v in list(value.items()):
+            if v.ndim == 0:
+                value[k] = v.item()
+        return value
+    return {k: decode_array(v) if is_encoded_array(v) else v
+            for k, v in value.items()}
 
 
 def get_fromstr(value) -> Optional[str]:
@@ -218,6 +194,7 @@ class QuantityField(BaseField):
             value = self._fromstr(value)
 
         if isinstance(value, Mapping):
+            value = decompress(value)
             units = value.pop('units', units)
             if 'sigma' in value:
                 value = AsymmetricUncertainty(**value)
@@ -247,7 +224,7 @@ class QuantityField(BaseField):
             result = value.m.todict()
         if not value.dimensionless:
             result['units'] = utostr(value.u)
-        return result
+        return compress(result)
 
     def validate(self, value):
         if value is None and self.allownone:
@@ -284,7 +261,7 @@ class HistogramField(UncertainQuantityField):
     def to_python(self, value):
         if value is None:
             return value
-        if isinstance(value, bytes):
+        if isinstance(value, (bytes, Mapping)):
             value = decompress(value)
         if isinstance(value, Mapping):
             try:

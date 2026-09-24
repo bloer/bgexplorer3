@@ -207,3 +207,23 @@ class TestAsymmetric(unittest.TestCase):
                                     np.array([2, 1, 3]))
         assert_allclose(arr.ppf(0.9), [ul.ppf(0.9), sym.ppf(0.9),
                                        asym.ppf(0.9)])
+
+    def test8_serialize(self):
+        arr = AsymmetricUncertainty(np.arange(3.), np.ones(3), np.full(3, 2.))
+        for val in (arr, AsymmetricUncertainty(np.arange(3.), 1),
+                    AsymmetricUncertainty(2, 1, 3)):
+            for q in (val, val * units.keV):
+                ser = AsymmetricUncertainty.serializeq(q)
+                result = AsymmetricUncertainty.deserialize(ser)
+                assert_equal(result.mode, q.mode)
+                assert_equal(result.s0, q.s0)
+                assert_equal(result.s1, q.s1)
+                self.assertEqual(getattr(result, 'units', None),
+                                 getattr(q, 'units', None))
+        # legacy npz archive
+        import io
+        buf = io.BytesIO()
+        np.savez_compressed(buf, *arr.serialize(compressarrays=False))
+        result = AsymmetricUncertainty.deserialize((buf.getvalue(), 'keV'))
+        assert_equal(result.s1, arr.s1)
+        self.assertEqual(result.u, units.keV)

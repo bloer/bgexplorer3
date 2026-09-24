@@ -206,3 +206,57 @@ class TestFields(unittest.TestCase):
         self.assertAlmostEqual(test.uval.mode, test2.uval.mode)
         self.assertAlmostEqual(test.uval.s0, test2.uval.s0)
         assert_equal(test.hval.hist.mode, test2.hval.hist.mode)
+
+    def test6_array_storage(self):
+        hist = Histogram(AsymmetricUncertainty(np.arange(50.), np.ones(50),
+                                               np.full(50, 2.)),
+                         np.arange(51.))
+        test = TestDoc(val=units.Quantity(np.arange(3.), 'kg'), hval=hist)
+        test.save()
+        raw = TestDoc._get_collection().find_one()
+        # arrays are stored as raw bytes
+        self.assertEqual(raw['hval']['value']['dtype'], '<f8')
+        self.assertEqual(raw['hval']['value']['shape'], [50])
+        self.assertNotIn('zlib', raw['hval']['value'])
+        self.assertEqual(raw['val']['value']['shape'], [3])
+        test2 = TestDoc.objects.get()
+        assert_equal(test2.hval.hist.mode, hist.hist.mode)
+        assert_equal(test2.hval.hist.s0, hist.hist.s0)
+        assert_equal(test2.hval.hist.s1, hist.hist.s1)
+        assert_equal(test2.hval.bin_edges.m, np.arange(51.))
+        assert_equal(test2.val.m, np.arange(3.))
+        self.assertEqual(test2.val.u, units.kg)
+        # decoded arrays are writeable
+        test2.hval.hist.mode[0] = 5
+
+        # big arrays are compressed
+        test = TestDoc(hval=Histogram(np.zeros(10000))).save()
+        raw = TestDoc._get_collection().find_one({'_id': test.id})
+        self.assertTrue(raw['hval']['value']['zlib'])
+        assert_equal(TestDoc.objects.get(id=test.id).hval.hist.mode,
+                     np.zeros(10000))
+
+    def test6_array_encoding(self):
+        for arr in (np.arange(12.).reshape(3, 4), np.arange(5, dtype='>i4'),
+                    np.ones((200, 200)), np.arange(10.)[::2]):
+            decoded = decode_array(encode_array(arr))
+            assert_equal(decoded, arr)
+            self.assertEqual(decoded.dtype, arr.dtype)
+        self.assertEqual(encode_array(np.float64(3)), 3)
+
+    def test6_legacy_storage(self):
+        """ npz blobs and plain lists written by older versions still load """
+        import io
+        buf = io.BytesIO()
+        np.savez_compressed(buf, value=np.arange(3.), sigma=np.ones(3),
+                            bins=np.arange(4.), units='keV')
+        coll = TestDoc._get_collection()
+        npzid = coll.insert_one({'hval': buf.getvalue()}).inserted_id
+        coll.insert_one({'hval': {'value': [0., 1., 2.],
+                                            'sigma': [1., 1., 1.],
+                                            'bins': [0., 1., 2., 3.]}})
+        for doc in TestDoc.objects:
+            assert_equal(doc.hval.hist.mode, np.arange(3.))
+            assert_equal(doc.hval.hist.s0, np.ones(3))
+            assert_equal(doc.hval.bin_edges.m, np.arange(4.))
+        self.assertEqual(TestDoc.objects.get(id=npzid).hval.hist.u, units.keV)
