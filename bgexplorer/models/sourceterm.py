@@ -16,10 +16,11 @@ from .isotope import concentration_to_rate
 from .common import units, addnone, multnone
 from . import settings
 from typing import List, Optional, Union, Dict, Tuple, Iterable
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from bson import ObjectId
 from itertools import chain
 import logging
+import threading
 log = logging.getLogger(__name__)
 
 
@@ -237,9 +238,20 @@ class CalculatedResults(Document):
 
     @classmethod
     def for_object(cls, obj, relativeto: Optional[Assembly] = None,
-                   save: bool = True, spectra: bool = True):
-        sts = find_sourceterms(obj=obj, relativeto=relativeto)
-        return cls.from_sourceterms(sts, save=save, spectra=spectra)
+                   save: bool = True, spectra: bool = True,
+                   cache: bool = True):
+        """ Calculate results for all SourceTerms of `obj`, optionally
+        only the part in assembly `relativeto`. If `cache`, results are
+        kept in memory until any data in the version changes.
+        """
+        def calculate():
+            sts = find_sourceterms(obj=obj, relativeto=relativeto)
+            return cls.from_sourceterms(sts, save=save, spectra=spectra)
+        if not cache:
+            return calculate()
+        key = _cache_key(obj, 'object', type(obj).__name__, _ref_id(obj),
+                         relativeto and _ref_id(relativeto), spectra)
+        return _cached(key, calculate)
 
     @classmethod
     def for_component(cls, component: Component,
@@ -249,16 +261,20 @@ class CalculatedResults(Document):
         return cls.for_object(component, relativeto, save, spectra)
 
     @classmethod
-    def for_tree(cls, root: Component, spectra: bool = False
-                 ) -> Dict[ObjectId, 'CalculatedResults']:
+    def for_tree(cls, root: Component, spectra: bool = False,
+                 cache: bool = True) -> Dict[ObjectId, 'CalculatedResults']:
         """ Calculate results for `root` and, relative to `root`, every
         component placed anywhere below it. This is equivalent to calling
         `for_object(component, relativeto=root)` for each of them, but
         loads everything once.
 
         Returns a dict keyed by component original_id. Results aren't
-        cached in the database.
+        cached in the database, but if `cache` they are kept in memory
+        until any data in the version changes.
         """
+        if cache:
+            key = _cache_key(root, 'tree', root.original_id, spectra)
+            return _cached(key, lambda: cls.for_tree(root, spectra, False))
         sourceterms = list(find_sourceterms(root))
         hiteffs = load_hiteffs(sourceterms, spectra)
         parts = {st.id: cls._calculate(st, hiteffs, spectra)
@@ -395,6 +411,48 @@ class CalculatedResults(Document):
         if result is not None and save and spectra:
             result.save()
         return result
+
+
+# In-memory LRU cache of calculated results. Keys start with the version's
+# cache token, which changes whenever any data in the version changes, so
+# entries never need invalidating and it is safe with multiple processes.
+RESULTS_CACHE_SIZE = 128
+_results_cache = OrderedDict()
+_results_cache_lock = threading.Lock()
+_MISSING = object()
+
+
+def _cache_key(obj, *args) -> Optional[tuple]:
+    """ Cache key for results of `obj`, or None if they can't be cached """
+    version = getattr(obj, 'active_version', None)
+    token = version and settings.get_cache_token(version)
+    return (token,) + args if token is not None else None
+
+
+def _cached(key: Optional[tuple], calculate):
+    """ Return the cached result for `key` or else calculate and cache it.
+    Results are shared, so must not be modified
+    """
+    if key is None:
+        return calculate()
+    with _results_cache_lock:
+        result = _results_cache.get(key, _MISSING)
+        if result is not _MISSING:
+            _results_cache.move_to_end(key)
+            return result
+    # if the data change while calculating, the result is stored with the
+    # old token and never used
+    result = calculate()
+    with _results_cache_lock:
+        _results_cache[key] = result
+        while len(_results_cache) > RESULTS_CACHE_SIZE:
+            _results_cache.popitem(last=False)
+    return result
+
+
+def clear_results_cache():
+    with _results_cache_lock:
+        _results_cache.clear()
 
 
 def _ref_id(ref):

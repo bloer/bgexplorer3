@@ -1,9 +1,12 @@
 import unittest
+from unittest import mock
 from mongoengine import (connect, disconnect, StringField, ReferenceField,
                          CASCADE, NULLIFY, PULL)
 from bgexplorer.models.component import Component, Placement, Assembly
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
-from bgexplorer.models.sourceterm import SourceTerm, CalculatedResults
+from bgexplorer.models.sourceterm import (SourceTerm, CalculatedResults,
+                                          clear_results_cache)
+from bgexplorer.models.settings import VersionSettings, get_settings
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
@@ -363,3 +366,45 @@ class TestSourceTerm(unittest.TestCase):
 
 
 
+
+    def test5_cache(self):
+        """ Results are cached in memory until data in the version change """
+        VersionSettings.drop_collection()
+        get_settings()
+        clear_results_cache()
+        h = HitEfficiency(source="Co60", location="loc", scalars=dict(
+            v1=AsymmetricUncertainty(0.1, 0.01)*units('dru/mBq'))).save()
+        c = Component(name="c", mass="2 kg", location="loc", sources=[
+            EmissionSource(name="Co60", rate="10 +- 1 mBq/kg")]).save()
+        a = Assembly(name="a", components=[c]).save()
+
+        def results(**kwargs):
+            obj = CalculatedResults.for_object(c, **kwargs)
+            tree = CalculatedResults.for_tree(a, **kwargs)[c.original_id]
+            return [r.scalars['v1'].to('dru').mode for r in (obj, tree)]
+
+        assert_allclose = np.testing.assert_allclose
+        assert_allclose(results(), [2, 2])
+        # repeated calls don't calculate
+        with mock.patch.object(CalculatedResults, '_calculate',
+                               side_effect=AssertionError("calculated")):
+            assert_allclose(results(), [2, 2])
+            with self.assertRaises(AssertionError):
+                results(cache=False)
+
+        # editing a component changes the result
+        c.sources[0].rate = "20 +- 1 mBq/kg"
+        c.save()
+        assert_allclose(results(), [4, 4])
+        # so does changing hiteff values, which doesn't touch sourceterms
+        h.scalars['v1'] = AsymmetricUncertainty(0.2, 0.01)*units('dru/mBq')
+        h.save()
+        # for_object would find the old result in the database if it
+        # weren't cleared
+        assert_allclose(results(), [8, 8])
+        assert_allclose(results(cache=False), [8, 8])
+
+        # cloned settings get a new token
+        settings = get_settings()
+        clone = settings.clone('other')
+        self.assertNotEqual(settings.cache_token, clone.cache_token)

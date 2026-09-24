@@ -2,7 +2,8 @@ from mongoengine import (Document, DateTimeField, StringField, BooleanField,
                          EmbeddedDocument, EmbeddedDocumentListField, signals,
                          FloatField, EnumField, MapField, URLField,
                          EmbeddedDocumentField, ListField, BinaryField,
-                         ValidationError)
+                         ValidationError, ObjectIdField)
+from bson import ObjectId
 from .fields import UnitField, QuantityField
 from . import hiteff
 from . import verdoc
@@ -33,6 +34,30 @@ def get_settings(version_tag: Optional[str] = None, create: bool = True,
             log.warning("creating version with defaults")
             return VersionSettings(version_tag=version_tag).save()
         raise KeyError(version_tag) from e
+
+
+def touch(version_tag: str):
+    """ Mark that data in `version_tag` changed, so any in-memory cache of
+    calculated results for it is invalid
+    """
+    VersionSettings.objects(version_tag=version_tag).update(
+        set__modified=datetime.datetime.now(), set__cache_token=ObjectId())
+
+
+def get_cache_token(version_tag: str) -> Optional[ObjectId]:
+    """ Return a token that changes whenever data in `version_tag` changes,
+    or None if the version has no settings
+    """
+    # read the raw value: mongoengine would fill in a new default for
+    # settings saved before cache_token existed
+    doc = VersionSettings.objects(version_tag=version_tag)\
+                         .only('cache_token').as_pymongo().first()
+    if doc is None:
+        return None
+    if doc.get('cache_token') is None:
+        touch(version_tag)
+        return get_cache_token(version_tag)
+    return doc['cache_token']
 
 
 def get_application_settings() -> 'ApplicationSettings':
@@ -169,6 +194,8 @@ class VersionSettings(Document):
     version_tag = StringField(unique=True, required=True)
     description = StringField()
     modified = DateTimeField(default=datetime.datetime.now)
+    # replaced whenever any data in this version changes, see `touch`
+    cache_token = ObjectIdField(default=ObjectId)
     editable = BooleanField(required=True, default=True)
     addsources = EmbeddedDocumentListField(AddSource,
                                            default=_default_auto_sources)
@@ -185,7 +212,8 @@ class VersionSettings(Document):
         VersionSettings.objects(id=self.id).aggregate([
             {'$unset': '_id'},
             {'$set': {'version_tag': newtag,
-                      'modified': datetime.datetime.now()}},
+                      'modified': datetime.datetime.now(),
+                      'cache_token': ObjectId()}},
             {'$merge': {'into': VersionSettings.objects._collection.name,
                         'on': 'version_tag',
                         'whenMatched': 'replace'}},
@@ -227,6 +255,7 @@ class VersionSettings(Document):
                     for roi in document.hiteffdbconfig.rois}
             # use update rather than save or we'll get stuck in a loop
             he.update(set__rois=rois)
+        touch(document.version_tag)
 
 
 signals.post_save.connect(VersionSettings.post_save, sender=VersionSettings)
@@ -242,16 +271,13 @@ class ApplicationSettings(Document):
 
 
 def post_save(sender, document, **kwargs):
-    """ Update the 'modified' time for VersionSettings any time a versioned
-    document is saved
+    """ Update the 'modified' time and cache token for VersionSettings any
+    time a versioned document is saved or deleted
     """
-
-    try:
-        VersionSettings.objects(version_tag=document.active_version)\
-                       .update(modified=datetime.datetime.now)
-    except AttributeError:
-        # this isn't a VersionedDocument
-        pass
+    version_tag = getattr(document, 'active_version', None)
+    if version_tag is not None:
+        touch(version_tag)
 
 
 signals.post_save.connect(post_save)
+signals.post_delete.connect(post_save)

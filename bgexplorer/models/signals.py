@@ -2,7 +2,7 @@ import mongoengine
 from .component import Component, Assembly
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
-from .sourceterm import SourceTerm
+from .sourceterm import SourceTerm, CalculatedResults, find_sourceterms
 from . import settings
 
 """
@@ -26,6 +26,7 @@ def delete_component(sender, document, **kwargs):
         parent.children = [p for p in parent.children
                            if p.component.original_id != component.original_id]
         parent.save()
+    settings.touch(component.active_version)
 
 
 def update_component(sender, document, **kwargs):
@@ -50,6 +51,9 @@ def update_component(sender, document, **kwargs):
     for parent in component.find_parents():
         #update_assembly(sender=None, document=parent, component=component)
         update_parent(parent, component, sourceterms)
+    # the generic post_save signal may have run before the sourceterms
+    # were updated
+    settings.touch(component.active_version)
     return sourceterms
 
 def update_parent(assembly, component, child_sourceterms, scope=()):
@@ -110,6 +114,7 @@ def update_assembly(sender, document, component=None, placement=None,
     for parent in assembly.find_parents():
         update_parent(parent, assembly, sourceterms, scope)
         #update_assembly(sender=None, document=parent, component=assembly)
+    settings.touch(assembly.active_version)
 
 
 def update_placement(sender, document, **kwargs):
@@ -150,12 +155,16 @@ def update_hiteff(sender, document, **kwargs):
         st.hiteffs = [h for h in st.hiteffs
                       if h.original_id != hiteff.original_id]
         st.save()
+    # the values may have changed without changing which sourceterms match
+    CalculatedResults.objects(
+        sources__in=list(find_sourceterms(hiteff).scalar('id'))).delete()
 
     # update default units
     vsettings = settings.get_settings(hiteff.active_version)
     vsettings.hiteffdbconfig.update_from(hiteff)
     # call update rather than save to bypass cleaning and post-save signals
     vsettings.update(set__hiteffdbconfig=vsettings.hiteffdbconfig)
+    settings.touch(hiteff.active_version)
 
 
 mongoengine.signals.pre_delete.connect(delete_component)

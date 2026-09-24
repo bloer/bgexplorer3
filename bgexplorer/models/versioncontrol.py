@@ -3,7 +3,7 @@ from .component import Component
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, CalculatedResults
-from .settings import VersionSettings, get_settings
+from .settings import VersionSettings, get_settings, touch
 from typing import Optional
 from enum import Enum
 import logging
@@ -155,5 +155,6 @@ def merge_version(version_tag: str, onto: str, keep: bool = True,
     # remove all CalculatedResults
     sourceterms = SourceTerm.select_version(onto).scalar('id')
     CalculatedResults.objects(sources__in=sourceterms).delete()
+    touch(onto)
     if not keep:
         delete_version(version_tag)
