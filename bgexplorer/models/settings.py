@@ -88,7 +88,8 @@ class AddSource(EmbeddedDocument):
 
     def clean(self):
         if self.source == self.newsource:
-            self.error("`source` and `newsource` must be different")
+            raise ValidationError("`source` and `newsource` must be different",
+                                  field_name='newsource')
 
 
 def _default_auto_sources():

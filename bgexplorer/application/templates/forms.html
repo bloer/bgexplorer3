@@ -103,14 +103,20 @@ input{% if open %} type="{{ type }}"{% endif -%}
 {%- set inputclass = inputclass~" basicAutoComplete" -%}
 {%- endif -%}
 
-    <{{ tag(type, true) }} class="{{ inputclass }} {%- if errmsg %} is-invalid {%- endif -%}" name="{{ name }}" value="{{ input_value(value) }}"
+    <{{ tag(type, true) }} class="{{ inputclass }} {%- if errmsg %} is-invalid {%- endif -%}" name="{{ name }}"
+        {%- if type == "checkbox" %} value="true"{% if value %} checked{% endif %}
+        {%- else %} value="{{ input_value(value) }}"{% endif -%}
         {%- if id %} id="{{ id }}"{%- endif -%}
         {%- if title %} title="{{ title }}"{%- endif -%}
         {%- if field.required %} required{% endif -%}
         {%- if field.suggestions or field.autocomplete %} autocomplete="off" list="{{ name }}_suggestions"{% endif -%}
         {%- if type == "number" %} step="any"{%- endif -%}
     >
-    {%- if type == "textarea" -%}
+    {%- if type == "checkbox" -%}
+        {#- update_object uses the first value, so this only counts when unchecked.
+            Not usable in dynamic table rows, which are matched by position -#}
+        <input type="hidden" name="{{ name }}" value="false">
+    {%- elif type == "textarea" -%}
         {{ value }}</textarea>
     {%- elif type == "select" %}
         {%- if value == '' or value is none %}

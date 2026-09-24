@@ -110,7 +110,7 @@ class AppSmokeTest:
                          'component.get_attachment',
                          'emissionspec.sourceterms', 'hitefficiency.view',
                          'versions.new', 'versions.delete',
-                         'api.list_versions', 'api.get_version'):
+                         'edit_settings', 'api.list_versions', 'api.get_version'):
             self.assertIn(endpoint, tested)
 
     @unittest.expectedFailure
@@ -284,6 +284,120 @@ class TestAppVersions(unittest.TestCase):
             'component.view', active_version='main', object=self.c1))
             .get_data(as_text=True))
         self.assertEqual(self.client.get(edit).status_code, 200)
+
+    def test_settings(self):
+        HitEfficiency(source='K40', location='c1',
+                      scalars=dict(v1='0.1 dru/mBq')).save()
+        url = self.url('edit_settings', active_version='main')
+        html = self.client.get(self.url('overview', active_version='main'))\
+            .get_data(as_text=True)
+        self.assertIn(url, html)
+        html = self.client.get(url).get_data(as_text=True)
+        self.assertIn('name="hiteffdbconfig.display_scalars[v1].display_unit"',
+                      html)
+        self.assertIn('name="addsources.source"', html)
+        scalar = 'hiteffdbconfig.display_scalars[v1]'
+        data = {
+            'description': 'edited',
+            '_listfields': ['addsources', 'hiteffdbconfig.rois',
+                            'hiteffdbconfig.extra_columns', 'editable'],
+            'addsources.source': ['Th232'],
+            'addsources.newsource': ['Ra228'],
+            'addsources.ratio': ['0.5'],
+            'addsources.ratiotype': ['abundance'],
+            'addsources.comment': [''],
+            'hiteffdbconfig.extra_columns': ['material', ''],
+            f'{scalar}.display_name': 'V1',
+            f'{scalar}.display_unit': 'mdru',
+            f'{scalar}.description': '',
+            f'{scalar}.link_spectrum': '',
+            f'{scalar}.hide': 'true',
+            'hiteffdbconfig.rois.display_name': ['roi1', 'roi2'],
+            'hiteffdbconfig.rois.link_spectrum': ['s1', 's2'],
+            'hiteffdbconfig.rois.start': ['1 keV', '2 keV'],
+            'hiteffdbconfig.rois.stop': ['10 keV', '20 keV'],
+            'hiteffdbconfig.rois.mode': ['integrate', 'average'],
+            'hiteffdbconfig.rois.binwidths': ['false', 'true'],
+            'hiteffdbconfig.rois.hide': ['true', 'false'],
+            # not editable here
+            'version_tag': 'hacked',
+            'editable': 'false',
+        }
+        response = self.client.post(url, data=data)
+        self.assertEqual(response.status_code, 302,
+                         response.get_data(as_text=True))
+        self.assertEqual(response.location,
+                         self.url('overview', active_version='main'))
+        settings = get_settings('main', create=False)
+        self.assertEqual(settings.description, 'edited')
+        self.assertTrue(settings.editable)
+        self.assertEqual(len(settings.addsources), 1)
+        self.assertEqual(settings.addsources[0].ratio, 0.5)
+        self.assertEqual(settings.addsources[0].ratiotype.value, 'abundance')
+        config = settings.hiteffdbconfig
+        self.assertEqual(config.extra_columns, ['material'])
+        self.assertEqual(str(config.display_scalars['v1'].display_unit),
+                         'mdru')
+        self.assertEqual(config.display_scalars['v1'].display_name, 'V1')
+        self.assertTrue(config.display_scalars['v1'].hide)
+        self.assertEqual([r.display_name for r in config.rois],
+                         ['roi1', 'roi2'])
+        self.assertEqual(config.rois[0].mode.value, 'integrate')
+        self.assertEqual(config.rois[1].start.m, 2)
+        self.assertEqual([r.binwidths for r in config.rois], [False, True])
+        self.assertEqual([r.hide for r in config.rois], [True, False])
+        # the form shows the saved values
+        html = self.client.get(url).get_data(as_text=True)
+        self.assertIn('value="2 keV"', html)
+        self.assertIn('<option value="integrate" selected>', html)
+
+        # errors are shown and nothing is saved
+        response = self.client.post(url, data={f'{scalar}.display_unit': 'kg',
+                                               'description': 'x'})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('hiteffdbconfig.display_scalars',
+                      response.get_data(as_text=True))
+        response = self.client.post(url, data={
+            f'{scalar}.display_unit': 'notaunit',
+            'hiteffdbconfig.rois.display_name': ['roi1'],
+            'hiteffdbconfig.rois.start': ['1 keV'],
+            'hiteffdbconfig.rois.stop': ['bogus'],
+            'addsources.source': ['U238'],
+            'addsources.newsource': ['U238']})
+        self.assertEqual(response.status_code, 400)
+        html = response.get_data(as_text=True)
+        self.assertIn('hiteffdbconfig.display_scalars.v1.display_unit', html)
+        self.assertIn('hiteffdbconfig.rois.0.stop', html)
+        self.assertIn('is-invalid', html)
+        response = self.client.post(url, data={
+            'addsources.source': ['U238'], 'addsources.newsource': ['U238']})
+        self.assertEqual(response.status_code, 400)
+        html = unescape(response.get_data(as_text=True))
+        self.assertIn('addsources.0.newsource', html)
+        self.assertIn('must be different', html)
+        settings.reload()
+        self.assertEqual(settings.description, 'edited')
+        self.assertEqual(str(config.display_scalars['v1'].display_unit),
+                         'mdru')
+
+        # lists can be emptied
+        response = self.client.post(url, data={
+            '_listfields': ['addsources', 'hiteffdbconfig.rois']})
+        self.assertEqual(response.status_code, 302)
+        settings.reload()
+        self.assertEqual(len(settings.addsources), 0)
+        self.assertEqual(len(settings.hiteffdbconfig.rois), 0)
+        self.assertEqual(settings.hiteffdbconfig.extra_columns, ['material'])
+
+        # tags can't be edited
+        tagurl = self.url('edit_settings', active_version='v1')
+        self.assertNotIn(tagurl, self.client.get(self.url(
+            'overview', active_version='v1')).get_data(as_text=True))
+        self.assertEqual(self.client.get(tagurl).status_code, 403)
+        self.assertEqual(self.client.post(tagurl, data={'description': 'x'})
+                         .status_code, 403)
+        self.assertEqual(get_settings('v1', create=False).description,
+                         'first tag')
 
 
 class TestCSRF(unittest.TestCase):

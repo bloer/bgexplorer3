@@ -15,7 +15,7 @@ from ..models.fields import get_fromstr
 from .common import pretty_date
 from .blueprints import CollectionViews
 from .api import create_api, API_VERSION
-from .versions import create_versions_blueprint
+from .versions import create_versions_blueprint, edit_settings
 from ..models.versioncontrol import list_versions, version_exists
 from ..models.verdoc import VersionedDocument
 from .forms import input_type, input_value
@@ -192,6 +192,9 @@ def create_app(config_file=None, config=None):
     @app.get('/explore/<path:active_version>')
     def overview():
         return flask.render_template('overview.html')
+
+    app.add_url_rule('/explore/<path:active_version>/settings',
+                     'edit_settings', edit_settings, methods=['GET', 'POST'])
 
     @app.get('/explore/<path:active_version>/hitefflocations')
     def hitefflocations():

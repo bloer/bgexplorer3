@@ -174,8 +174,11 @@ class TestAPIVersions(unittest.TestCase):
         self.assertError(patch({'addsources': [{'source': 'U238',
                                                 'bogus': 1}]}), 400,
                          'addsources')
-        self.assertError(patch({'addsources': [{'source': 'U238',
-                                                'newsource': 'U238'}]}), 400)
+        error = self.assertError(patch({'addsources': [
+            {'source': 'U238', 'newsource': 'U238'}]}), 400,
+            'addsources.0.newsource')
+        self.assertIn('must be different',
+                      error['fields']['addsources.0.newsource'])
         self.assertError(patch({'editable': False}), 400, 'editable')
         self.assertError(patch({'version_tag': 'x'}), 400, 'version_tag')
         self.assertError(patch({'hiteffdbconfig': {'bogus': 1}}), 400,

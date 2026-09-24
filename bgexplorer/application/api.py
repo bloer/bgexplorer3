@@ -72,35 +72,27 @@ def settings_to_json(settings: VersionSettings) -> dict:
     return result
 
 
-def validation_fields(error: ValidationError, prefix: str = '') -> dict:
-    """ Flatten a mongoengine ValidationError into {dotted field: message} """
-    if error.errors:
+def validation_fields(error, prefix: str = '', named: bool = False
+                      ) -> dict:
+    """ Flatten a mongoengine ValidationError into {dotted field: message}.
+    List indices and map keys are path elements. If `named`, a leaf error's
+    `field_name` is appended to `prefix`, as for errors raised by `clean`
+    """
+    errors = error.errors if isinstance(error, ValidationError) else error
+    if isinstance(errors, dict) and errors:
         fields = {}
-        for name, sub in error.errors.items():
-            if name == NON_FIELD_ERRORS and isinstance(sub, ValidationError):
-                # raised by clean, which may name the field
-                fields.update(validation_fields(sub, prefix))
-            else:
-                fields.update(_flatten(_to_dict(sub), f"{prefix}{name}"))
-        return fields
-    name = getattr(error, 'field_name', None)
-    return {f"{prefix}{name}" if name else prefix.rstrip('.') or 'settings':
-            error.message}
-
-
-def _to_dict(error):
-    if isinstance(error, ValidationError):
-        return error.to_dict() if error.errors else error.message
-    return error
-
-
-def _flatten(errors, prefix):
-    if isinstance(errors, dict):
-        result = {}
         for name, sub in errors.items():
-            result.update(_flatten(sub, f"{prefix}.{name}"))
-        return result
-    return {prefix: str(errors)}
+            if name == NON_FIELD_ERRORS:
+                # raised by clean, which may name the field
+                fields.update(validation_fields(sub, prefix, named=True))
+            else:
+                fields.update(validation_fields(sub, f"{prefix}{name}."))
+        return fields
+    name = getattr(error, 'field_name', None) if named else None
+    message = error.message if isinstance(error, ValidationError) \
+        else str(error)
+    return {f"{prefix}{name}" if name else prefix.rstrip('.') or 'settings':
+            message}
 
 
 def parse_field(doc_cls, name: str, value, prefix: str = ''):
@@ -109,7 +101,8 @@ def parse_field(doc_cls, name: str, value, prefix: str = ''):
         return doc_cls._fields[name].to_python(value)
     except ValidationError as e:
         raise APIError(f"Invalid value for {prefix}{name}",
-                       fields=validation_fields(e, f"{prefix}{name}.")) from e
+                       fields=validation_fields(e, f"{prefix}{name}.",
+                                                named=True)) from e
     except (FieldDoesNotExist, ValueError, TypeError, AttributeError,
             PintError) as e:
         raise APIError(f"Invalid value for {prefix}{name}",

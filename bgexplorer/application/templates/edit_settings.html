@@ -1,0 +1,192 @@
+{% extends "versionbase.html" %}
+{% from "forms.html" import formscripts %}
+
+{#- Inputs are named for update_object: list entries as `list.field`, one per
+    row, and map entries as `map[key].field`. `errors` is keyed by dotted
+    path, with list indices and map keys as path elements -#}
+
+{%- macro cell(field, value, name, errkey=none) -%}
+{%- set type = input_type(field) -%}
+{%- set errmsg = errors.get(errkey) if errkey else none -%}
+{%- set value = '' if value is none else value -%}
+{%- set invalid = ' is-invalid' if errmsg else '' -%}
+<td>
+    {%- if type == 'checkbox' -%}
+    {#- a select rather than a checkbox, so each row submits a value -#}
+    <select class="form-select{{ invalid }}" name="{{ name }}">
+        <option value="false" {%- if not value %} selected{% endif %}>no</option>
+        <option value="true" {%- if value %} selected{% endif %}>yes</option>
+    </select>
+    {%- elif type == 'select' -%}
+    <select class="form-select{{ invalid }}" name="{{ name }}">
+        {%- for option in field.choices %}
+        {%- set optval = option.value if option.value is defined else option %}
+        <option value="{{ optval }}" {%- if value == option or value == optval %} selected{% endif %}>{{ optval }}</option>
+        {%- endfor %}
+    </select>
+    {%- else -%}
+    <input type="{{ type }}" class="form-control{{ invalid }}" name="{{ name }}" value="{{ input_value(value) }}"
+        {%- if type == 'number' %} step="any"{% endif %}{% if field.required %} required{% endif %}>
+    {%- endif -%}
+    {%- if errmsg %}<div class="invalid-feedback">{{ errmsg }}</div>{% endif -%}
+</td>
+{%- endmacro -%}
+
+{%- macro removebutton() -%}
+<td style="text-align:right"><a href="#" onclick="removeDynamicTableRow(this);" class="btn btn-danger" style="font-weight:bold">x</a></td>
+{%- endmacro -%}
+
+{%- macro listrow(doctype, fieldnames, prefix, entry=none, index=none) -%}
+<tr>
+    {%- for f in fieldnames -%}
+    {%- set field = doctype._fields[f] -%}
+    {%- if entry is none -%}
+    {%- set value = field.default() if field.default is callable else field.default -%}
+    {%- else -%}
+    {%- set value = entry[f] -%}
+    {%- endif -%}
+    {{ cell(field, value, prefix~'.'~f, prefix~'.'~index~'.'~f if index is not none else none) }}
+    {%- endfor -%}
+    {{ removebutton() }}
+</tr>
+{%- endmacro -%}
+
+{#- a list of EmbeddedDocuments with add and remove buttons -#}
+{%- macro listtable(tableid, doctype, fieldnames, prefix, entries) -%}
+<input type="hidden" name="_listfields" value="{{ prefix }}">
+<table class="table" id="{{ tableid }}">
+    <thead>
+        <tr>
+            {%- for f in fieldnames %}
+            <th {%- if doctype._fields[f].required %} class="required-field"{% endif %}>{{ f | replace('_', ' ') | title }}</th>
+            {%- endfor %}
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {%- for entry in entries %}
+        {{ listrow(doctype, fieldnames, prefix, entry, loop.index0) }}
+        {%- endfor %}
+    </tbody>
+</table>
+<template id="{{ tableid }}_template">
+    {{ listrow(doctype, fieldnames, prefix) }}
+</template>
+<div class="d-flex justify-content-end">
+    <button class="btn btn-primary" type="button" data-tableid="{{ tableid }}" data-templateid="{{ tableid }}_template" onClick="addDynamicTableRow(this);">Add</button>
+</div>
+{%- endmacro -%}
+
+{#- one row per key of a map of HitEffConfigs -#}
+{%- macro maptable(tableid, type_, fieldnames) -%}
+{%- set prefix = 'hiteffdbconfig.display_'~type_ -%}
+{%- set entries = settings.hiteffdbconfig['display_'~type_] -%}
+{%- set doctype = settings.hiteffdbconfig._fields['display_'~type_].field.document_type -%}
+<table class="table" id="{{ tableid }}">
+    <thead>
+        <tr><th>Key</th>
+            {%- for f in fieldnames %}<th>{{ f | replace('_', ' ') | title }}</th>{% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {%- for key in keys[type_] %}
+        {%- set entry = entries.get(key) %}
+        <tr><th>{{ key }}</th>
+            {%- for f in fieldnames -%}
+            {%- set field = doctype._fields[f] -%}
+            {%- set value = entry[f] if entry else (field.default() if field.default is callable else field.default) -%}
+            {{ cell(field, value, prefix~'['~key~'].'~f, prefix~'.'~key~'.'~f) }}
+            {%- endfor -%}
+        </tr>
+        {%- else %}
+        <tr><td colspan="{{ fieldnames | length + 1 }}">No {{ type_ }} in this version's hit efficiencies</td></tr>
+        {%- endfor %}
+    </tbody>
+</table>
+{%- endmacro -%}
+
+
+{% block pageheader %}
+<div class="col-5">
+    <h2>Settings for {{ g.active_version }}</h2>
+</div>
+<div class="col-7">
+    <div class="d-flex justify-content-end">
+        <button class="btn btn-success me-1" type="submit" form="mainform">Save</button>
+        <a class="btn btn-warning me-1" href="{{ url_for('edit_settings') }}">Reload</a>
+        <a class="btn btn-danger" href="{{ url_for('overview') }}">Cancel</a>
+    </div>
+</div>
+{% endblock pageheader %}
+
+{% block pagecontent %}
+{%- if errors %}
+<div id="toperror" class="alert alert-danger m-3">
+    Errors found in form; please correct and resubmit.
+    <ul class="mb-0">
+        {%- for name, message in errors.items() %}
+        <li><code>{{ name }}</code>: {{ message }}</li>
+        {%- endfor %}
+    </ul>
+</div>
+{%- endif %}
+{%- set config = settings.hiteffdbconfig -%}
+<form method="POST" id="mainform">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <fieldset class="mb-4">
+        <legend>Description</legend>
+        <textarea class="form-control {%- if errors.description %} is-invalid{% endif %}" name="description" rows="3">{{ settings.description or '' }}</textarea>
+    </fieldset>
+
+    <fieldset class="mb-4">
+        <legend>Automatic sources</legend>
+        {{ listtable('addsources', settings._fields['addsources'].field.document_type,
+                     ['source', 'newsource', 'ratio', 'ratiotype', 'comment'],
+                     'addsources', settings.addsources) }}
+    </fieldset>
+
+    <fieldset class="mb-4">
+        <legend>Hit efficiency table columns</legend>
+        <p class="form-text">Extra columns to show in the hit efficiency table</p>
+        <input type="hidden" name="_listfields" value="hiteffdbconfig.extra_columns">
+        <table class="table" id="extra_columns">
+            <tbody>
+                {%- for column in config.extra_columns %}
+                <tr><td><input type="text" class="form-control" name="hiteffdbconfig.extra_columns" value="{{ column }}"></td>{{ removebutton() }}</tr>
+                {%- endfor %}
+            </tbody>
+        </table>
+        <template id="extra_columns_template">
+            <tr><td><input type="text" class="form-control" name="hiteffdbconfig.extra_columns" value=""></td>{{ removebutton() }}</tr>
+        </template>
+        <div class="d-flex justify-content-end">
+            <button class="btn btn-primary" type="button" data-tableid="extra_columns" data-templateid="extra_columns_template" onClick="addDynamicTableRow(this);">Add</button>
+        </div>
+    </fieldset>
+
+    <fieldset class="mb-4">
+        <legend>Scalar display</legend>
+        {{ maptable('display_scalars', 'scalars',
+                    ['display_name', 'display_unit', 'description', 'link_spectrum', 'hide']) }}
+    </fieldset>
+
+    <fieldset class="mb-4">
+        <legend>Spectrum display</legend>
+        {{ maptable('display_spectra', 'spectra',
+                    ['display_name', 'display_unit', 'description', 'hide']) }}
+    </fieldset>
+
+    <fieldset class="mb-4">
+        <legend>Regions of interest (ROIs)</legend>
+        <p class="form-text">Scalars calculated from a spectrum. Mode "average" or "integrate" over [start, stop]</p>
+        {{ listtable('rois', config._fields['rois'].field.document_type,
+                     ['display_name', 'link_spectrum', 'start', 'stop', 'mode',
+                      'binwidths', 'display_unit', 'description', 'hide'],
+                     'hiteffdbconfig.rois', config.rois) }}
+    </fieldset>
+</form>
+{% endblock pagecontent %}
+
+{% block pagescripts %}
+{{ formscripts() }}
+{% endblock pagescripts %}

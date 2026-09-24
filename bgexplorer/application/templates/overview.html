@@ -20,7 +20,12 @@
     <li><a href="{{ url_for('emissionspec.overview') }}">Emission Specs</a></li>
     <li><a href="{{ url_for('hitefficiency.overview') }}">Hit Efficiencies</a></li>
 </ul>
-<h2>Settings</h2>
+<div class="d-flex align-items-center">
+    <h2 class="me-3">Settings</h2>
+    {% if settings.editable %}
+    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('edit_settings') }}">Edit settings</a>
+    {% endif %}
+</div>
 {% if settings.addsources %}
 <section>
     <h3>Automatic sources</h3>
@@ -83,7 +88,7 @@
             <tr><td>{{ roi.title }}</td><td>{{ roi.spectrum }}</td>
                 <td>{{ roi.start }} - {{ roi.stop }}</td>
                 <td>{{ roi.mode.name }} (binwidth={{ roi.binwidths }})</td>
-                <td>{{ roi.display_units }}</td><td>{{ roi.hide }}</td></tr>
+                <td>{{ roi.display_unit or '' }}</td><td>{{ roi.hide }}</td></tr>
             {% endfor %}
         </tbody>
     </table>
