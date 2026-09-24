@@ -288,13 +288,14 @@ class HistogramField(UncertainQuantityField):
         if not isinstance(value.hist, pint.Quantity):
             value.hist = pint.Quantity(value.hist, self.units)
         if not isinstance(value.bin_edges, pint.Quantity):
-            value.bin_edges = pint.Quantity(value.bin_edges, self.units)
+            value.bin_edges = pint.Quantity(value.bin_edges, self.binsunit)
         if not isinstance(value.hist.m, AsymmetricUncertainty):
             value.hist = pint.Quantity(AsymmetricUncertainty(value.hist.m, 0),
                                        value.hist.u)
         if self.convert:
             value.hist.ito(self.units)
-            value.bin_edges.ito(self.binsunit)
+            if self.binsunit is not None:
+                value.bin_edges.ito(self.binsunit)
         return value
 
     def to_mongo(self, value):
@@ -308,15 +309,17 @@ class HistogramField(UncertainQuantityField):
         return compress(result)
 
     def validate(self, value):
+        if value is None and self.allownone:
+            return
         if not isinstance(value, Histogram):
             self.error("Value must be a Histogram object")
-        super(QuantityField, self).validate(value.hist)
+        super().validate(value.hist)
         if len(value.hist) != len(value.bin_edges)-1:
             self.error("Histogram and bin lengths do not match")
         if self.binsunit is not None:
             try:
                 if not value.bin_edges.is_compatible_with(self.binsunit):
                     self.error(f"Bins units {value.bin_edges.u} not compatible"
-                               " with {self.binsunit}")
+                               f" with {self.binsunit}")
             except AttributeError:
                 pass

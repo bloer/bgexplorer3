@@ -63,9 +63,8 @@ class SourceTerm(VersionedDocument):
             return None
         rate = self.source.rate
         # convert ppb-like units to specific activity
-        if (self.source.multiplier is Multiplier.mass and
-                rate.u in ('ppt', 'ppb', 'ppq', 'percent')):
-            rate = concentration_to_rate(rate, self.source.name)
+        if self.source.multiplier is Multiplier.mass and rate.dimensionless:
+            rate = concentration_to_rate(self.source.name, rate)
         return rate * self.weight * self.rate_multiplier
 
 
@@ -232,16 +231,6 @@ class CalculatedResults(Document):
     sources = SortedListField(ReferenceField(SourceTerm,
                                              reverse_delete_rule=CASCADE))
     meta = {'indexes': ['sources']}
-
-    @classmethod
-    def for_object(cls, obj, relativeto: Optional[Assembly] = None,
-                   active_version: Optional[str] = None,
-                   save: bool = False, save_intermediate: bool = False,
-                   ) -> 'CalculatedResults':
-        return cls.from_sourceterms(find_sourceterms(obj, relativeto,
-                                                     active_version),
-                                    save=save,
-                                    save_intermediate=save_intermediate)
 
     @classmethod
     def for_object(cls, obj, relativeto: Optional[Assembly] = None,

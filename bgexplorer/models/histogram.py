@@ -3,12 +3,12 @@ import numpy as np
 
 
 class Histogram(object):
-    # check only bins size when combining or total equality
-    __strictchecking = False
-
     """2-tuple mimicking np.histogram structure, with operator overloads
     so that bins are not added/scaled etc
     """
+    # check only bins size when combining or total equality
+    __strictchecking = False
+
     def __init__(self, hist, bin_edges=None):
         self.hist = hist
         self.bin_edges = bin_edges
@@ -40,7 +40,7 @@ class Histogram(object):
             val (float): value of bin where x is, None if x is outside bins
         """
         bin = self.find_bin(x)
-        if x < 0 or x >= len(self.hist):
+        if bin < 0 or bin >= len(self.hist):
             return None
         val = self.hist[bin]
         if interp and bin < len(self.hist)-1:
@@ -153,7 +153,7 @@ class Histogram(object):
         return self._combine(other, operator.add)
 
     def __sub__(self, other):
-        return self._combine(other, operator.subtract)
+        return self._combine(other, operator.sub)
 
     def __mul__(self, other):
         return self._combine(other, operator.mul)
@@ -168,7 +168,7 @@ class Histogram(object):
         return self._combine(other, operator.mod)
 
     def __pow__(self, other):
-        return self._combine(other, operator.power)
+        return self._combine(other, operator.pow)
 
     # do we need logical/bitwise operators??
 
@@ -177,10 +177,10 @@ class Histogram(object):
         return self._combine(other, operator.add, inplace=True)
 
     def __isub__(self, other):
-        return self._combine(other, operator.subtract, inplace=True)
+        return self._combine(other, operator.sub, inplace=True)
 
     def __imul__(self, other):
-        return self._combine(other, operator.multiply, inplace=True)
+        return self._combine(other, operator.mul, inplace=True)
 
     def __ifloordiv__(self, other):
         return self._combine(other, operator.floordiv, inplace=True)
@@ -192,7 +192,7 @@ class Histogram(object):
         return self._combine(other, operator.mod, inplace=True)
 
     def __ipow__(self, other):
-        return self._combine(other, operator.power, inplace=True)
+        return self._combine(other, operator.pow, inplace=True)
 
     # reverse binary operators
     # these should only ever be called if type(other) != type(self)

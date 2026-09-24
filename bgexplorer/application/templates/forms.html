@@ -214,7 +214,8 @@ input{% if open %} type="{{ type }}"{% endif -%}
     add and remove rows
 #}
 {%- set subdoc = obj._fields[fieldname].field.document_type -%}
-
+{# tell update_object this list is in the form, even if it has no rows #}
+<input type="hidden" name="_listfields" value="{{ fieldname }}">
 <table class="table embeddeddocumentlist" id="{{ fieldname }}">
     <thead>
         <tr>{%- if plainref -%}

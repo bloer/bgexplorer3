@@ -161,7 +161,7 @@ class HitEfficiency(DynamicVersionedDocument):
 
     @property
     def key(self):
-        getattr(self, '_id', (self.source, self.location))
+        return self.id or (self.source, self.location)
 
     def get_result_unit(self, val):
         """ Determine the output unit for a value from scalars or spectra
@@ -206,6 +206,6 @@ class HitEfficiency(DynamicVersionedDocument):
             # nprimaries not provided
             pass
         except Exception:
-            log.error("Error calculating livetime for HitEfficiency %s",
-                      self.key)
+            log.error("Error calculating livetime for HitEfficiency %s "
+                      "(%s, %s)", self.key, self.source, self.location)
         return None

@@ -7,6 +7,7 @@ from bgexplorer.models.sourceterm import SourceTerm, CalculatedResults
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
+from bgexplorer.models.isotope import concentration_to_rate
 import numpy as np
 
 class TestSourceTerm(unittest.TestCase):
@@ -72,6 +73,18 @@ class TestSourceTerm(unittest.TestCase):
         e1.delete()
         self.assertEqual(SourceTerm.objects.count(), 1)
 
+
+    def test1_concentration(self):
+        """ Sources given as concentrations are converted to activities """
+        c1 = Component(name="c1", mass="2 kg",
+                       sources=[EmissionSource(name="U238", rate="81 ppb"),
+                                EmissionSource(name="K40", rate="32.3 ppm")],
+                       ).save()
+        for name, conc in (('U238', 81*units.ppb), ('K40', 32.3*units.ppm)):
+            st = SourceTerm.objects.get(source__name=name)
+            expected = (2 * units.kg * concentration_to_rate(name, conc))
+            self.assertAlmostEqual(st.emissionrate.to('Bq').mode,
+                                   expected.to('Bq').m)
 
     def test2_saveassembly(self):
         e1 = EmissionSpec(name="e1", sources=[EmissionSource(name="Th232", rate="10 +- 1 mBq/kg"),

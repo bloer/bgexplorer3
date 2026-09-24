@@ -30,6 +30,11 @@ class TestHitEFficiency(unittest.TestCase):
     def tearDown(self):
         pass
 
+    def test0_key(self):
+        h = HitEfficiency(source='U238', location='c1')
+        self.assertIsNotNone(h.key)
+        self.assertEqual(h.key, h.id)
+
     def test_ids(self):
         """ ensure that scalars and spectra are assigned an ID """
         h = HitEfficiency(source="h", location="h",

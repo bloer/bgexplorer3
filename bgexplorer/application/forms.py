@@ -26,9 +26,17 @@ def input_type(field):
         return 'checkbox'
     return 'text'
 
+LISTFIELDS_KEY = '_listfields'
+
+
 def update_object(obj, form, prefix=None, index=0):
     """ Update the fields of the document object from the values in the form
+
+    Fields not present in the form are left unchanged. Since an empty list
+    submits no values, list fields are only updated if they have values or
+    are named in the form's `LISTFIELDS_KEY` entries
     """
+    listfields = form.getlist(LISTFIELDS_KEY)
     for fieldname in obj._fields_ordered:
         field = obj._fields[fieldname]
         fullfieldname = '.'.join([prefix, fieldname]) if prefix else fieldname
@@ -46,13 +54,17 @@ def update_object(obj, form, prefix=None, index=0):
             # use the first subfield to determine the list length
             doctype = field.field.document_type
             firstfield = '.'.join([fullfieldname, doctype._fields_ordered[0]])
+            if firstfield not in form and fullfieldname not in listfields:
+                continue
             value = [update_object(doctype(), form, prefix=fullfieldname,
                                    index=index)
                      for index in range(len(form.getlist(firstfield)))]
+        elif isinstance(field, me.ListField):
+            if fullfieldname not in form and fullfieldname not in listfields:
+                continue
+            value = form.getlist(fullfieldname, type=field.field.to_python)
         elif fullfieldname not in form:
             continue
-        elif isinstance(field, me.ListField):
-            value = form.getlist(fullfieldname, type=field.field.to_python)
         else:
             try:
                 value = form.getlist(fullfieldname, type=field.to_python)[index]

@@ -17,6 +17,10 @@ class TestDoc(Document):
     hval = HistogramField()
 
 
+class HistUnitsDoc(Document):
+    hist = HistogramField(units='1/keV', binsunit='keV', allownone=True)
+
+
 class TestFields(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -122,6 +126,25 @@ class TestFields(unittest.TestCase):
         self.assertIsInstance(self.test.hval.hist, pint.Quantity)
         self.assertIsInstance(self.test.hval.hist.m, AsymmetricUncertainty)
         self.assertIsInstance(self.test.hval.hist.mode, np.ndarray)
+
+    def test4_hist_units(self):
+        doc = HistUnitsDoc()
+        # None is allowed
+        doc.validate()
+        doc.hist = Histogram(np.arange(3.), np.arange(4.))
+        self.assertEqual(doc.hist.bin_edges.u, units.keV)
+        self.assertEqual(doc.hist.hist.u, units('1/keV'))
+        doc.validate()
+        # histogram values are checked
+        doc.hist.hist = units.Quantity(AsymmetricUncertainty(np.arange(3.), 0), 'kg')
+        with self.assertRaises(ValidationError):
+            doc.validate()
+        # bins are checked
+        doc.hist = Histogram(np.arange(3.) / units.keV,
+                             units.Quantity(np.arange(4.), 'kg'))
+        with self.assertRaises(ValidationError) as cm:
+            doc.validate()
+        self.assertIn('keV', str(cm.exception.errors))
 
     def test5_json(self):
         test = TestDoc(val=1, qval=2, uval=AsymmetricUncertainty(3,1),
