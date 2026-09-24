@@ -65,6 +65,8 @@ class HitEfficiency(DynamicVersionedDocument):
        primary_particle: name of primary particle
        primary_yield: when simulating e.g. neutrons or equilibrium gammas, the
               average neutrons or gammas emitted per parent isotope decay
+       material: only match components made of this material, e.g. for
+                 (alpha,n) neutron yields
        biasweight: any biasing applied to the simulation
        livetime: In rare cases the simulation or spectrum is absolutely
                  normalized, e.g. coherent neutrino backgrounds or dark current
@@ -77,9 +79,9 @@ class HitEfficiency(DynamicVersionedDocument):
     If nprimaries is provided, the simulation livetime will be displayed where
     appropriate as (nprimaries*biasweight / (emissionrate*yield))
 
-    Queries against the database are made against (source, location, distr.).
+    Queries against the database are made against (source, location,
+    material). A HitEfficiency with no material matches any material.
     Multiple responses are grouped by (primary_particle, primary_spectrum).
-    So e.g.
     """
     # required metadata and results
     source = StringField(required=True)
