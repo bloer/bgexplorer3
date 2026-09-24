@@ -235,21 +235,37 @@ class VersionSettings(Document):
                     continue
                 # get a list of all unique combinations of unit and norm type
                 # for HitEfficiencies in the db
+                # values are stored either as a string, or as a dict with
+                # 'units'
+                value = f'${type_}.{k}'
+                isstr = {'$eq': [{'$type': value}, 'string']}
                 unitlist = hiteff.HitEfficiency\
                     .select_version(self.version_tag)\
-                    .aggregate([{'$group': {'_id': [f'${type_}.{k}.units',
-                                                    '$norm']}}])
+                    .aggregate([
+                        {'$project': {'norm': 1, 'isstr': isstr,
+                                      'units': {'$cond': [isstr, value,
+                                                          f'{value}.units']}}},
+                        {'$group': {'_id': ['$units', '$norm', '$isstr']}}])
                 for entry in unitlist:
-                    ustr, normstr = entry['_id']
-                    val = 1 * units(ustr)
+                    ustr, normstr, isstr = entry['_id']
+                    if isstr:
+                        val = hiteff.HitEfficiency.scalars.field\
+                            .to_python(ustr)
+                        ustr = str(val.u)
+                    elif ustr is None:
+                        # this hiteff doesn't have this key
+                        continue
+                    else:
+                        val = 1 * units(ustr)
                     testhe = hiteff.HitEfficiency(norm=normstr)
                     if not testhe.check_result_unit(val, v.display_unit):
                         errmsg = (f"display_{type_}: {k} the unit "
                                   f"{v.display_unit} conflicts with at least "
                                   f"one HitEfficiency document, which has "
                                   f"units of {ustr}")
-                        raise ValidationError(errmsg,
-                                              field_name=f"display_{type_}")
+                        raise ValidationError(
+                            errmsg,
+                            field_name=f"hiteffdbconfig.display_{type_}")
         # TODO: need to also check rois display_units based on spectra
 
     @classmethod

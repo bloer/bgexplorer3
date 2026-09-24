@@ -154,7 +154,7 @@ class TestVersionedDocument(unittest.TestCase):
 
     def test9_delete_protected(self):
         create_version('main')
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ProtectedVersionError):
             delete_version('main')
         self.assertTrue(version_exists('main'))
         with self.assertRaises(KeyError):

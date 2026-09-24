@@ -4,7 +4,7 @@ from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, CalculatedResults
 from .settings import VersionSettings, get_settings, touch
-from .verdoc import VersionedDocument
+from .verdoc import VersionedDocument, ReadOnlyVersionError
 from typing import Optional, Dict
 from enum import Enum
 import datetime
@@ -13,6 +13,10 @@ log = logging.getLogger(__name__)
 
 
 _versioned_classes = [Component, EmissionSpec, HitEfficiency, SourceTerm]
+
+class ProtectedVersionError(PermissionError):
+    """ Raised when trying to delete the default version """
+
 
 # first path segments used by application routes, which can't start a version
 RESERVED_NAMES = ('api', 'versions', 'settings')
@@ -115,11 +119,11 @@ def create_branch(version_tag: str, fromtag: Optional[str] = None,
 
 def delete_version(version_tag: str) -> None:
     """ delete the selected tag. Read-only versions (tags) can be deleted.
-    Raises KeyError if version_tag doesn't exist and ValueError if it is the
-    default version
+    Raises KeyError if version_tag doesn't exist and ProtectedVersionError
+    if it is the default version
     """
     if version_tag == VersionedDocument.get_default_tag():
-        raise ValueError(f"The default version '{version_tag}' "
+        raise ProtectedVersionError(f"The default version '{version_tag}' "
                          "can't be deleted")
     _delete_version(version_tag)
 

@@ -16,6 +16,8 @@ jobs:
         image: mongo:8
         ports:
           - 27017:27017
+        # the tests churn through many collections
+        options: --ulimit nofile=64000:64000
     env:
       BGEXPLORER_TEST_MONGODB_URI: mongodb://127.0.0.1:27017/bgexplorer3_unittest
       # fail rather than skip if the mongodb service isn't reachable

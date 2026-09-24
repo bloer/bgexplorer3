@@ -13,6 +13,7 @@ from ..models.sourceterm import CalculatedResults
 from ..models.fields import get_fromstr
 from .common import pretty_date
 from .blueprints import CollectionViews
+from .api import create_api, API_VERSION
 from .forms import input_type, input_value
 from . import examples
 
@@ -48,6 +49,7 @@ def create_app(config_file=None, config=None):
     get_settings()
 
     # blueprints
+    app.register_blueprint(create_api(), url_prefix=f'/api/{API_VERSION}')
     app.register_blueprint(CollectionViews(Component),
                            url_prefix='/<path:active_version>/component')
     app.register_blueprint(CollectionViews(EmissionSpec),

@@ -6,6 +6,10 @@ BGEXPLORER_TEST_MONGODB_URI to choose the server and database (all
 collections in it will be dropped!). If the server can't be reached, tests
 that need it are skipped, unless BGEXPLORER_TEST_REQUIRE_DB is set, in which
 case they fail.
+
+The tests create and drop many collections. Give mongod enough file
+descriptors or it will crash with "Too many open files", e.g.
+    docker run -d --ulimit nofile=64000:64000 -p 127.0.0.1:27017:27017 mongo
 """
 import os
 import unittest
