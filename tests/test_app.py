@@ -6,11 +6,14 @@ import unittest
 import flask
 import mongoengine
 from io import BytesIO
+from html import unescape
 from bgexplorer.application.app import create_app
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.verdoc import VersionedDocument
+from bgexplorer.models.settings import get_settings
+from bgexplorer.models import versioncontrol as vc
 from tests.dbutil import TEST_MONGODB_URI, connect_test_db
 
 # populating the full examples takes a few minutes, so is opt-in
@@ -48,7 +51,8 @@ class AppSmokeTest:
     def setUpClass(cls):
         reset_database()
         cls.app = create_app(config={'MONGODB_URI': TEST_MONGODB_URI,
-                                     'TESTING': True})
+                                     'TESTING': True,
+                                     'WTF_CSRF_ENABLED': False})
         cls.populate()
 
     @classmethod
@@ -104,7 +108,9 @@ class AppSmokeTest:
         # make sure the url discovery found everything
         for endpoint in ('index', 'overview', 'component.view',
                          'component.get_attachment',
-                         'emissionspec.sourceterms', 'hitefficiency.view'):
+                         'emissionspec.sourceterms', 'hitefficiency.view',
+                         'versions.new', 'versions.delete',
+                         'api.list_versions', 'api.get_version'):
             self.assertIn(endpoint, tested)
 
     @unittest.expectedFailure
@@ -157,6 +163,156 @@ class TestAppSmall(AppSmokeTest, unittest.TestCase):
             fupload=(BytesIO(b'hello'), 'hello.txt'),
             description='test attachment'))
         assert response.status_code == 302, response.status_code
+
+
+class TestAppVersions(unittest.TestCase):
+    """ Pages to manage versions """
+    @classmethod
+    def setUpClass(cls):
+        reset_database()
+        cls.app = create_app(config={'MONGODB_URI': TEST_MONGODB_URI,
+                                     'TESTING': True,
+                                     'WTF_CSRF_ENABLED': False})
+
+    @classmethod
+    def tearDownClass(cls):
+        mongoengine.disconnect()
+
+    def setUp(self):
+        for version in vc.list_versions():
+            if version.version_tag != 'main':
+                vc.delete_version(version.version_tag)
+        Component.drop_collection()
+        self.c1 = Component(name='c1').save()
+        vc.create_tag('v1', 'main', description='first tag')
+        self.client = self.app.test_client()
+
+    def url(self, endpoint, **values):
+        with self.app.test_request_context():
+            return flask.url_for(endpoint, **values)
+
+    def test_index(self):
+        html = self.client.get('/').get_data(as_text=True)
+        self.assertIn('first tag', html)
+        self.assertIn(self.url('overview', active_version='v1'), html)
+        self.assertIn(self.url('overview', active_version='main'), html)
+        self.assertIn(self.url('versions.delete', active_version='v1'), html)
+        self.assertNotIn(self.url('versions.delete', active_version='main'),
+                         html)
+
+    def test_new(self):
+        url = self.url('versions.new')
+        response = self.client.get(url, query_string={'from': 'v1',
+                                                      'type': 'tag'})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('<option value="v1" selected>',
+                      response.get_data(as_text=True))
+        response = self.client.post(url, data={'version_tag': 'b1',
+                                               'from': 'v1', 'type': 'branch',
+                                               'description': 'a branch'})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location,
+                         self.url('overview', active_version='b1'))
+        settings = get_settings('b1', create=False)
+        self.assertTrue(settings.editable)
+        self.assertEqual(settings.description, 'a branch')
+        self.assertEqual(Component.select_version('b1').count(), 1)
+        # the flash message is shown
+        html = self.client.get(response.location).get_data(as_text=True)
+        self.assertIn("Created branch 'b1' from 'v1'", unescape(html))
+
+        response = self.client.post(url, data={'version_tag': 'b1'})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('already exists', response.get_data(as_text=True))
+        response = self.client.post(url, data={'version_tag': 't2',
+                                               'type': 'tag'})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(vc.version_exists('t2'))
+
+    def test_delete(self):
+        url = self.url('versions.delete', active_version='v1')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('id="deleteversion"', response.get_data(as_text=True))
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(vc.version_exists('v1'))
+        self.assertEqual(Component.select_version('main').count(), 1)
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+        url = self.url('versions.delete', active_version='main')
+        html = self.client.get(url).get_data(as_text=True)
+        self.assertNotIn('id="deleteversion"', html)
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.assertTrue(vc.version_exists('main'))
+
+    def test_unknown_version(self):
+        response = self.client.get('/explore/nope')
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("Version 'nope' does not exist",
+                      unescape(response.get_data(as_text=True)))
+        self.assertEqual(self.client.get('/nope/component/').status_code,
+                         404)
+        self.assertFalse(vc.version_exists('nope'))
+        response = self.client.get('/api/v1/nothing')
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('error', response.get_json())
+
+    def test_readonly(self):
+        c1 = Component.select_version('v1').get()
+        edit = self.url('component.edit', active_version='v1', object=c1)
+        view = self.url('component.view', active_version='v1', object=c1)
+        html = self.client.get(view).get_data(as_text=True)
+        self.assertIn('tag: read-only', html)
+        self.assertNotIn(edit, html)
+        self.assertEqual(self.client.get(edit).status_code, 403)
+        response = self.client.post(edit, data={'name': 'changed'})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('read-only', response.get_data(as_text=True))
+        attach = self.url('component.add_attachments', active_version='v1',
+                          object=c1)
+        response = self.client.post(attach, data=dict(
+            fupload=(BytesIO(b'hello'), 'hello.txt'), description='x'))
+        self.assertEqual(response.status_code, 403)
+        c1.reload()
+        self.assertEqual(c1.name, 'c1')
+        self.assertEqual(len(c1.attachments), 0)
+        # the branch can be edited
+        edit = self.url('component.edit', active_version='main',
+                        object=self.c1)
+        self.assertIn(edit, self.client.get(self.url(
+            'component.view', active_version='main', object=self.c1))
+            .get_data(as_text=True))
+        self.assertEqual(self.client.get(edit).status_code, 200)
+
+
+class TestCSRF(unittest.TestCase):
+    """ Forms need a CSRF token; the JSON API doesn't """
+    @classmethod
+    def setUpClass(cls):
+        reset_database()
+        cls.app = create_app(config={'MONGODB_URI': TEST_MONGODB_URI,
+                                     'TESTING': True})
+
+    @classmethod
+    def tearDownClass(cls):
+        mongoengine.disconnect()
+
+    def test_csrf(self):
+        client = self.app.test_client()
+        response = client.post('/versions/new', data={'version_tag': 'b1'})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(vc.version_exists('b1'))
+        # with the token from the form
+        html = client.get('/versions/new').get_data(as_text=True)
+        token = html.split('name="csrf_token" value="')[1].split('"')[0]
+        response = client.post('/versions/new', data={'version_tag': 'b1',
+                                                      'csrf_token': token})
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(vc.version_exists('b1'))
+        response = client.post('/api/v1/versions',
+                               json={'version_tag': 'b2'})
+        self.assertEqual(response.status_code, 201)
 
 
 @unittest.skipUnless(RUN_EXAMPLES, "set BGEXPLORER_TEST_EXAMPLES=1 to run")

@@ -33,7 +33,9 @@
     </tbody>
 </table>
 
+{% if settings.editable %}
 <form id="uploadform" action="{{ url_for('.add_attachments', object=g.object) }}" method="POST" class="form" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div id="droptarget" class="droptarget">
     <h5>Upload a new attachment</h5>
     <div class="form-field">
@@ -49,6 +51,7 @@
     </div>
   </div>
 </form>
+{% endif %}
 {% endblock %}
 
 {% block pagestyle %}

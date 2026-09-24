@@ -165,6 +165,35 @@ def update_settings(settings: VersionSettings, body: dict) -> None:
     settings.reload()
 
 
+def validate_new_version(tag, fromtag=None, type_='branch',
+                         description=None):
+    """ Check the arguments to create a new version. Returns
+    (tag, fromtag, type_, description) or raises APIError
+    """
+    fromtag = fromtag or None
+    description = description or None
+    if type_ not in ('branch', 'tag'):
+        raise APIError("type must be 'branch' or 'tag'",
+                       fields={'type': "must be 'branch' or 'tag'"})
+    if type_ == 'tag' and not fromtag:
+        raise APIError("A tag must be created from another version",
+                       fields={'from': "required for a tag"})
+    if description is not None and not isinstance(description, str):
+        raise APIError("description must be a string",
+                       fields={'description': "must be a string"})
+    try:
+        vc.validate_version_name(tag)
+    except ValueError as e:
+        raise APIError(str(e), fields={'version_tag': str(e)}) from e
+    if vc.version_exists(tag):
+        raise APIError(f"Version '{tag}' already exists", 409,
+                       fields={'version_tag': "already exists"})
+    if fromtag is not None and not vc.version_exists(fromtag):
+        raise APIError(f"Version '{fromtag}' not found",
+                       fields={'from': "not found"})
+    return tag, fromtag, type_, description
+
+
 def create_api() -> flask.Blueprint:
     api = flask.Blueprint('api', __name__)
 
@@ -201,29 +230,9 @@ def create_api() -> flask.Blueprint:
         if unknown := set(body) - allowed:
             raise APIError(f"Unknown fields: {', '.join(sorted(unknown))}",
                            fields={name: "unknown field" for name in unknown})
-        tag = body.get('version_tag')
-        fromtag = body.get('from') or None
-        type_ = body.get('type', 'branch')
-        description = body.get('description')
-        if type_ not in ('branch', 'tag'):
-            raise APIError("type must be 'branch' or 'tag'",
-                           fields={'type': "must be 'branch' or 'tag'"})
-        if type_ == 'tag' and not fromtag:
-            raise APIError("A tag must be created from another version",
-                           fields={'from': "required for a tag"})
-        if description is not None and not isinstance(description, str):
-            raise APIError("description must be a string",
-                           fields={'description': "must be a string"})
-        try:
-            vc.validate_version_name(tag)
-        except ValueError as e:
-            raise APIError(str(e), fields={'version_tag': str(e)}) from e
-        if vc.version_exists(tag):
-            raise APIError(f"Version '{tag}' already exists", 409,
-                           fields={'version_tag': "already exists"})
-        if fromtag is not None and not vc.version_exists(fromtag):
-            raise APIError(f"Version '{fromtag}' not found",
-                           fields={'from': "not found"})
+        tag, fromtag, type_, description = validate_new_version(
+            body.get('version_tag'), body.get('from'),
+            body.get('type', 'branch'), body.get('description'))
         settings = vc.create_version(tag, fromtag, editable=type_ == 'branch',
                                      description=description)
         response = flask.jsonify(settings_to_json(settings))

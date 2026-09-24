@@ -5,6 +5,7 @@ from io import BytesIO
 from ..models.sourceterm import find_sourceterms
 from ..models.component import Component
 from ..models.fields import InlineAttachment
+from ..models.verdoc import check_writable
 from .forms import update_object
 
 
@@ -112,6 +113,7 @@ class CollectionViews(flask.Blueprint):
         @self.route('/new', methods=['GET', 'POST'])
         @self.route('/<objid>/edit', methods=['GET', 'POST'])
         def edit():
+            check_writable(flask.g.active_version)
             req = flask.request
             errors = {}
             if 'object' not in flask.g:
@@ -152,6 +154,7 @@ class CollectionViews(flask.Blueprint):
 
             @self.post('<objid>/attachments/add')
             def add_attachments():
+                check_writable(flask.g.active_version)
                 _file = flask.request.files['fupload']
                 description = flask.request.form['description']
                 attachment = InlineAttachment(data=_file.read(),

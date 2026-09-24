@@ -1,35 +1,35 @@
 {% extends "base.html" %}
 
-{% block pageheader %}<h1>Background Explorer</h1>{% endblock %}
-{% block pagecontent %} This is a placeholder
-<div class="row">
-    {% if branches %}
-    <div class="col-6">
-        <h2>Branches</h2>
-        <ul class="versionlist">{% for version in branches if version.editable %}
-            <li class="version">
-                <a href="{{ url_for('.overview', active_version=version.version_tag) }}">
-                    {{ version.version_tag }}
-                </a> (modified {{ pretty_date(version.modified) }})
-            </li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
-    {% if tags %}
-    <div class="col-6">
-        <h2>Branches</h2>
-        <ul class="versionlist">{% for version in tags if version.editable %}
-            <li class="version">
-                <a href="{{ url_for('.overview', active_version=version.version_tag) }}">
-                    {{ version.version_tag }}
-                </a>   (modified {{ pretty_date(version.modified) }})
-            </li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
-
+{% block pageheader %}
+<div class="col-8"><h1>Background Explorer</h1></div>
+<div class="col-4 d-flex justify-content-end align-items-center">
+    <a class="btn btn-success" href="{{ url_for('versions.new') }}">New version</a>
 </div>
 {% endblock %}
-
+{% block pagecontent %}
+<table id="versions" class="table table-hover align-middle">
+    <thead>
+        <tr><th>Version</th><th>Type</th><th>Description</th><th>Modified</th><th></th></tr>
+    </thead>
+    <tbody>
+        {% for version in versions %}
+        <tr class="version">
+            <td><a href="{{ url_for('overview', active_version=version.version_tag) }}">{{ version.version_tag }}</a></td>
+            <td>{% if version.editable %}<span class="badge text-bg-primary">branch</span>
+                {%- else %}<span class="badge text-bg-secondary">tag</span>{% endif %}</td>
+            <td>{{ version.description or '' }}</td>
+            <td>{{ pretty_date(version.modified) }}</td>
+            <td class="text-end text-nowrap">
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('versions.new', **{'from': version.version_tag}) }}">Branch</a>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('versions.new', type='tag', **{'from': version.version_tag}) }}">Tag</a>
+                {% if version.version_tag != default_version %}
+                <a class="btn btn-sm btn-outline-danger" href="{{ url_for('versions.delete', active_version=version.version_tag) }}">Delete</a>
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">No versions yet</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

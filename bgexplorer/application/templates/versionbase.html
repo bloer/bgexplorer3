@@ -1,7 +1,14 @@
 {% extends "base.html" %}
 {% block pagenav %}
-<li class="nav-item">
-    <a class="nav-link text-primary" href="{{ url_for('overview') }}">{{ g.active_version }}</a>
+<li class="nav-item dropdown">
+    <a class="nav-link dropdown-toggle text-primary" href="#" id="versionswitcher" role="button" data-bs-toggle="dropdown" aria-expanded="false">{{ g.active_version }}</a>
+    <ul class="dropdown-menu" aria-labelledby="versionswitcher">
+        <li><a class="dropdown-item" href="{{ url_for('overview') }}">Overview</a></li>
+        <li><hr class="dropdown-divider"></li>
+        {%- for version in all_versions() %}
+        <li><a class="dropdown-item {% if version.version_tag == g.active_version %}active{% endif %}" href="{{ url_for('overview', active_version=version.version_tag) }}">{{ version.version_tag }}{% if not version.editable %} <span class="badge text-bg-secondary">tag</span>{% endif %}</a></li>
+        {%- endfor %}
+    </ul>
 </li>
 <li class="nav-item">
     <a class="nav-link" href="{{ url_for('component.overview') }}">Components</a>
@@ -14,8 +21,12 @@
 </li>
 {% endblock %}
 
-{#
 {% block extranav %}
-<span class="nav-text">{%- if settings.editable -%} branch {%- else -%} tag {%- endif -%}: {{ g.active_version }}</span>
+{%- if settings is defined %}
+{%- if settings.editable %}
+<span id="versionbadge" class="badge text-bg-primary">branch</span>
+{%- else %}
+<span id="versionbadge" class="badge text-bg-secondary" title="Tags are read-only snapshots">tag: read-only</span>
+{%- endif %}
+{%- endif %}
 {% endblock %}
-#}

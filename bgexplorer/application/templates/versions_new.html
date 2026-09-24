@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% set fromtag = form.get('from', '') %}
+{% set type_ = form.get('type', 'branch') %}
+{% block title %}New version - Background Explorer{% endblock %}
+{% block pageheader %}<h1>New version</h1>{% endblock %}
+
+{% macro fielderror(name) -%}
+{% if errors[name] %}<div class="invalid-feedback d-block">{{ errors[name] }}</div>{% endif %}
+{%- endmacro %}
+
+{% block pagecontent %}
+{% if errors.__all__ %}<div class="alert alert-danger">{{ errors.__all__ }}</div>{% endif %}
+<form method="POST" id="newversion" class="col-md-8">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+        <label class="form-label" for="version_tag">Name</label>
+        <input type="text" class="form-control {% if errors.version_tag %}is-invalid{% endif %}" id="version_tag" name="version_tag" value="{{ form.get('version_tag', '') }}" required>
+        <small class="form-text text-muted">May contain '/', e.g. <code>releases/v1</code></small>
+        {{ fielderror('version_tag') }}
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="description">Description</label>
+        <input type="text" class="form-control" id="description" name="description" value="{{ form.get('description', '') }}">
+        {{ fielderror('description') }}
+    </div>
+    <div class="mb-3">
+        <label class="form-label d-block">Type</label>
+        <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="type" id="type_branch" value="branch" {% if type_ != 'tag' %}checked{% endif %}>
+            <label class="form-check-label" for="type_branch">Branch (editable)</label>
+        </div>
+        <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="type" id="type_tag" value="tag" {% if type_ == 'tag' %}checked{% endif %}>
+            <label class="form-check-label" for="type_tag">Tag (read-only snapshot)</label>
+        </div>
+        {{ fielderror('type') }}
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="from">Copy from</label>
+        <select class="form-select {% if errors['from'] %}is-invalid{% endif %}" id="from" name="from">
+            <option value="" {% if not fromtag %}selected{% endif %}>Nothing (empty branch)</option>
+            {% for version in versions %}
+            <option value="{{ version.version_tag }}" {% if version.version_tag == fromtag %}selected{% endif %}>{{ version.version_tag }}{% if not version.editable %} (tag){% endif %}</option>
+            {% endfor %}
+        </select>
+        {{ fielderror('from') }}
+    </div>
+    <button type="submit" class="btn btn-success">Create</button>
+    <a class="btn btn-secondary" href="{{ url_for('index') }}">Cancel</a>
+</form>
+{% endblock %}

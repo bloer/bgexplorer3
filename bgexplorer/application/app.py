@@ -1,11 +1,12 @@
 import flask
 from flask_bootstrap import Bootstrap5
+from flask_wtf.csrf import CSRFProtect
+from werkzeug.exceptions import HTTPException
 import mongoengine
 import secrets
 import enum
 import importlib
-from ..models.settings import (get_settings, get_application_settings,
-                               VersionSettings)
+from ..models.settings import get_settings, get_application_settings
 from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
@@ -14,6 +15,9 @@ from ..models.fields import get_fromstr
 from .common import pretty_date
 from .blueprints import CollectionViews
 from .api import create_api, API_VERSION
+from .versions import create_versions_blueprint
+from ..models.versioncontrol import list_versions, version_exists
+from ..models.verdoc import VersionedDocument
 from .forms import input_type, input_value
 from . import examples
 
@@ -42,6 +46,7 @@ def create_app(config_file=None, config=None):
 
     # app extensions
     Bootstrap5(app)
+    csrf = CSRFProtect(app)
     app.db = mongoengine.connect(host=app.config.get('MONGODB_URI'))
 
     # make sure application settings and default version exist
@@ -49,7 +54,13 @@ def create_app(config_file=None, config=None):
     get_settings()
 
     # blueprints
-    app.register_blueprint(create_api(), url_prefix=f'/api/{API_VERSION}')
+    # the API only accepts JSON bodies, which can't be sent cross-site
+    # without CORS, so doesn't need CSRF tokens
+    api = create_api()
+    csrf.exempt(api)
+    app.register_blueprint(api, url_prefix=f'/api/{API_VERSION}')
+    app.register_blueprint(create_versions_blueprint(),
+                           url_prefix='/versions')
     app.register_blueprint(CollectionViews(Component),
                            url_prefix='/<path:active_version>/component')
     app.register_blueprint(CollectionViews(EmissionSpec),
@@ -68,6 +79,33 @@ def create_app(config_file=None, config=None):
     def pull_active_version(endpoint, values):
         if values:
             flask.g.active_version = values.pop('active_version', None)
+
+    @app.before_request
+    def check_active_version():
+        # the API reports missing versions itself
+        if flask.request.blueprint == 'api':
+            return
+        tag = flask.g.get('active_version')
+        if tag is not None and not version_exists(tag):
+            flask.abort(404, f"Version '{tag}' does not exist")
+
+    def wants_json():
+        return flask.request.path.startswith('/api/')
+
+    @app.errorhandler(HTTPException)
+    def http_error(e):
+        if wants_json():
+            return flask.jsonify(error=dict(message=e.description)), e.code
+        return flask.render_template('error.html', title=f"{e.code} {e.name}",
+                                     message=e.description), e.code
+
+    @app.errorhandler(PermissionError)
+    def permission_error(e):
+        """ e.g. trying to edit a read-only version """
+        if wants_json():
+            return flask.jsonify(error=dict(message=str(e))), 403
+        return flask.render_template('error.html', title="Not allowed",
+                                     message=str(e)), 403
 
     @app.template_global()
     def bgexplorer_version():
@@ -120,11 +158,18 @@ def create_app(config_file=None, config=None):
             return str(val.value)
         return str(val)
 
+    @app.template_global()
+    def all_versions():
+        return list_versions().only('version_tag', 'editable')
+
     @app.context_processor
     def inject_settings():
+        tag = flask.g.get('active_version')
+        if tag is None:
+            return dict()
         try:
-            return dict(settings=get_settings(flask.g.active_version))
-        except AttributeError:
+            return dict(settings=get_settings(tag, create=False))
+        except KeyError:
             return dict()
 
     app.add_template_global(pretty_date, 'pretty_date')
@@ -132,14 +177,13 @@ def create_app(config_file=None, config=None):
     app.add_template_global(input_type, 'input_type')
     app.add_template_global(input_value, 'input_value')
     app.add_template_global(get_fromstr, 'get_fromstr')
+    app.add_template_global(VersionedDocument.get_default_tag(),
+                            'default_version')
 
     # app endpoints
     @app.get('/')
     def index():
-        branches = VersionSettings.objects(editable=True)
-        tags = VersionSettings.objects(editable=False)
-        return flask.render_template("index.html", branches=branches,
-                                     tags=tags)
+        return flask.render_template("index.html", versions=list_versions())
 
     @app.get('/favicon.ico')
     def favicon():

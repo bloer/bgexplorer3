@@ -23,7 +23,7 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
             <span class="badge text-bg-secondary">{{ g.object.attachments|length }}</span>
         </a>
         <a class="nav-link" href="{{ url_for('.get_json', object=g.object) }}">Export</a>
-        <a class=" btn btn-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a>
+        {% if settings.editable %}<a class=" btn btn-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a>{% endif %}
     </div>
 </div>
 {% endblock %}

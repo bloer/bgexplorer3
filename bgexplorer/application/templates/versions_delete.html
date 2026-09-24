@@ -1,0 +1,26 @@
+{% extends "versionbase.html" %}
+{% block title %}Delete {{ g.active_version }} - Background Explorer{% endblock %}
+{% block pageheader %}<h1>Delete version {{ g.active_version }}</h1>{% endblock %}
+{% block pagecontent %}
+{% if protected %}
+<div class="alert alert-warning">The default version can't be deleted.</div>
+{% else %}
+<p>Documents that belong only to this version will be removed from the
+database. Documents shared with other versions are kept there.</p>
+{% endif %}
+<table id="summary" class="table w-auto">
+    <thead><tr><th>Collection</th><th>Documents</th><th>Only in this version</th></tr></thead>
+    <tbody>
+        {% for name, counts in summary.items() %}
+        <tr><td>{{ name }}</td><td>{{ counts.total }}</td><td>{{ counts.unique }}</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% if not protected %}
+<form method="POST" id="deleteversion">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger">Delete {{ g.active_version }}</button>
+    <a class="btn btn-secondary" href="{{ url_for('index') }}">Cancel</a>
+</form>
+{% endif %}
+{% endblock %}
