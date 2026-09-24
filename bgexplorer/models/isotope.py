@@ -1,19 +1,20 @@
 import re
 import mendeleev
+from mendeleev.models import Isotope
 import math
 from typing import Union, Optional
 from .common import units
 
 _ln2 = math.log(2)
 
-IsotopeType = Union[str, mendeleev.Isotope]
+IsotopeType = Union[str, Isotope]
 
 _isotopestr = re.compile(r'(\d{1,3})?([A-Z][a-z]?[a-z]?)-?(\d{1,3})?')
 
 
-def get_isotope(source: IsotopeType) -> Optional[mendeleev.Isotope]:
+def get_isotope(source: IsotopeType) -> Optional[Isotope]:
     """ If string represents an isotope, look it up """
-    if isinstance(source, mendeleev.Isotope):
+    if isinstance(source, Isotope):
         return source
     match = _isotopestr.match(source)
     if match:
@@ -39,7 +40,9 @@ def compare_source_names(source1: IsotopeType, source2: IsotopeType) -> bool:
 def get_halflife(source: IsotopeType) -> Optional[units.Quantity]:
     isotope = get_isotope(source)
     if isotope and isotope.half_life:
-        unitstr = isotope.half_life_unit.replace('y', 'year')
+        # older mendeleev abbreviates years as e.g. 'y' or 'Gy' (which pint
+        # would read as gray); newer versions spell out 'year' or 'Gyear'
+        unitstr = re.sub(r'^([a-zA-Z]?)y$', r'\1year', isotope.half_life_unit)
         return isotope.half_life * units(unitstr)
     return None
 

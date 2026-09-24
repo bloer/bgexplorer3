@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "bgexplorer"
@@ -39,5 +39,8 @@ dev = ["mongomock", "flake8"]
 "Homepage" = "https://github.com/bloer/bgexplorer3"
 "Bug Tracker" = "https://github.com/bloer/bgexplorer3/issues"
 
-[tool.setuptools.packge-data]
-"bgexplorer.application.examples.qis_hiteffs" = ["*.json", "*.gz"]
+# hatchling includes all non-gitignored files in the package (templates,
+# static, example data) by default
+[tool.hatch.build.targets.wheel]
+packages = ["bgexplorer"]
+exclude = ["*.bak"]
