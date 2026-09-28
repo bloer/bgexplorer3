@@ -1,15 +1,6 @@
 {% extends "versionbase.html" %}
 {%- import "utils.html" as utils -%}
 
-{% block pagestyle %}
-<style>
-{% for depth in range(10) %}
-tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
-{% endfor %}
-</style>
-{% endblock %}
-
-
 {% set activepage = activepage | default("summary") %}
 {% block pageheader %}
 <div class="col-5">
@@ -19,7 +10,7 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
     <div class="nav nav-tabs justify-content-end">
         <a class="nav-link {% if activepage == 'summary' %}active{% endif %}" href="{{ url_for('.view', object=g.object) }}">Summary</a>
         <a class="nav-link {% if activepage == 'sourceterms' %}active{% endif %}" href="{{ url_for('.sourceterms', object=g.object) }}">Source Terms</a>
-        <a class="nav-link {% if activepage == 'budget' %}active{% endif %}" href="{{ url_for('.budget', object=g.object, relativeto=g.get('relativeto')) }}">Budget</a>
+        <a class="nav-link {% if activepage == 'results' %}active{% endif %}" href="{{ url_for('.results', object=g.object, relativeto=g.get('relativeto')) }}">Results</a>
         <a class="nav-link {% if activepage == 'attachments' %}active{% endif %}" href="{{ url_for('.attachments', object=g.object) }}">Attachments
             <span class="badge text-bg-secondary">{{ g.object.attachments|length }}</span>
         </a>
@@ -136,43 +127,6 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 
 
 </div>
-<h3>Background Contributions</h3>
-
-{% macro printscalar(calcresult, key, cfg) %}
-{% set val = calcresult.scalars[key] %}
-{% if val is not none %}
-{{ '\({:LS}\)'.format(val.to(cfg.display_unit).m) }}
-{% endif %}
-{% endmacro %}
-
-
-{% set scalarscfg = settings.hiteffdbconfig.display_scalars.items() %}
-
-<table class="table table-sm table-hover">
-    <thead>
-        <tr><th>Component</th>{% for key, entry in scalarscfg %}<th>{{ entry.display_name or key }} [{{ entry.display_unit or '' }}]</th>{% endfor %}</tr>
-    </thead>
-    <tbody>
-        {% set calcresults = get_tree_calculations(g.object) %}
-        {% for placement in [{'component': g.object, 'weight': 1, 'name': g.object.name}] recursive %}
-        {% set calcresult = calcresults.get(placement.component.original_id) %}
-        <tr class="component depth{{ loop.depth0 }}">
-            <td>{{ placement.name }}</td>
-            {% for key, entry in scalarscfg if calcresult %}
-            <td>{{ printscalar(calcresult, key, entry) }}</td>
-            {% endfor %}
-        </tr>
-        {{ loop(placement.component.children) }}
-        {% endfor %}
-    </tbody>
-</table>
-
-<div class="row mb-3">
-    <div class="col">
-        <h3>Spectra</h3>
-        <div id="spectrumplot" class="plotcontainer"></div>
-    </div>
-</div>
 
 <div class="row mb-3">
     <div class="col">
@@ -182,11 +136,3 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 </div>
 {% endblock %}
 
-{% block scripts %}
-{{ super() }}
-{%- if activepage == 'summary' %}
-{{ utils.plotscripts() }}
-<script>bgplots.spectrum('spectrumplot', {{ url_for('.spectra_json', object=g.object, relativeto=g.get('relativeto')) | tojson }});</script>
-{%- endif %}
-<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-{% endblock %}

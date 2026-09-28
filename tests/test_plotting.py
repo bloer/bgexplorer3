@@ -189,16 +189,29 @@ class TestPlots(AppTestCase):
             'component.spectra_json', object=self.c2)).get_json(), {})
 
     def test_pages(self):
-        page = self.html(self.client.get(self.url('component.budget',
+        page = self.html(self.client.get(self.url('component.results',
                                                   object=self.a1)))
-        self.assertIn('id="budgetplot"', page)
+        self.assertIn('>Results</a>', page)
+        # contributions table, then budget, then spectra
+        order = [page.index(text) for text in (
+            'Background Contributions', 'id="budgetplot"',
+            'id="spectrumplot"')]
+        self.assertEqual(order, sorted(order))
+        self.assertIn('<tr class="component depth1">', page)
         self.assertIn('bgplots.budget(', page)
+        self.assertIn('bgplots.spectrum(', page)
         self.assertIn('plotly-basic.min.js', page)
+        # relative to a parent assembly
+        response = self.client.get(self.url('component.results',
+                                            object=self.a1, relativeto=self.a2))
+        self.assertIn('as placed in a2', self.html(response))
+        # the summary has neither
         page = self.html(self.client.get(self.url('component.view',
                                                   object=self.a1)))
-        self.assertIn('id="spectrumplot"', page)
-        self.assertIn('bgplots.spectrum(', page)
-        self.assertNotIn('Bill of Materials', page)
+        for text in ('Background Contributions', 'spectrumplot', 'budgetplot',
+                     'plotly-basic.min.js', 'Bill of Materials', '>Budget<'):
+            self.assertNotIn(text, page)
+        self.assertIn('id="otherversions"', page)
         hiteff = HitEfficiency.select_version('main').get(source='K40')
         page = self.html(self.client.get(self.url('hitefficiency.view',
                                                   object=hiteff)))

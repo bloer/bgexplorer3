@@ -116,6 +116,14 @@ class TestPlotsInBrowser(BrowserTestCase):
         self.assertGreaterEqual(box['y'], top['y'] + top['height'] - 1,
                                 f"{below} overlaps {above}")
 
+    def check_contains(self, page, outer, inner):
+        """ `inner` is drawn within `outer`'s box, i.e. in the page flow """
+        box = page.locator(outer).bounding_box()
+        drawn = page.locator(inner).bounding_box()
+        self.assertLessEqual(drawn['y'] + drawn['height'],
+                             box['y'] + box['height'] + 1,
+                             f"{inner} overflows {outer}")
+
     def switch_spectra(self, page):
         """ Change the selection and scales, checking the layout each time """
         options = page.locator('#spectrumplot select option')
@@ -135,11 +143,12 @@ class TestPlotsInBrowser(BrowserTestCase):
         self.check_below(page, SPECTRUM_SVG, '#otherversions')
         for step in self.switch_spectra(page):
             with self.subTest(step=step):
+                self.check_contains(page, '#spectrumplot', SPECTRUM_SVG)
                 self.check_below(page, SPECTRUM_SVG, '#otherversions')
 
     def test_component_spectra_layout(self):
-        page = self.open(self.url('component.view', object=self.c1))
+        page = self.open(self.url('component.results', object=self.c1))
         self.wait_plot(page, '#spectrumplot')
         for step in self.switch_spectra(page):
             with self.subTest(step=step):
-                self.check_below(page, SPECTRUM_SVG, '#otherversions')
+                self.check_contains(page, '#spectrumplot', SPECTRUM_SVG)

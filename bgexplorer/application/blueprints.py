@@ -302,10 +302,10 @@ class CollectionViews(flask.Blueprint):
                                  groupby=budget['groupby'],
                                  units=unit_str(budget['units']), rows=rows)
 
-        @self.get('/<objid>/budget')
-        def budget():
+        @self.get('/<objid>/results')
+        def results():
             return flask.render_template(
-                'budget_component.html', activepage='budget', groupby=GROUPBY,
+                'results_component.html', groupby=GROUPBY,
                 scalars=available_scalars(flask.g.active_version))
 
     def _create_spectra_endpoints(self):
