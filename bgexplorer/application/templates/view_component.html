@@ -188,6 +188,5 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 {{ utils.plotscripts() }}
 <script>bgplots.spectrum('spectrumplot', {{ url_for('.spectra_json', object=g.object, relativeto=g.get('relativeto')) | tojson }});</script>
 {%- endif %}
-<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 {% endblock %}

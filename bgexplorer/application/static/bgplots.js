@@ -8,7 +8,10 @@ const bgplots = (function(){
                     '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
     const MEASURED_COLOR = '#d62728';
     const LIMIT_COLOR = '#1f4fd6';
+    // responsive plots fill their div's height, so layouts must set one or
+    // the div collapses after the first redraw and the plot overflows it
     const CONFIG = {responsive: true, displaylogo: false};
+    const SPECTRUM_HEIGHT = 450;
 
     function el(tag, attrs, children){
         const node = document.createElement(tag);
@@ -128,6 +131,7 @@ const bgplots = (function(){
                 ...spectrumTraces(name, data[name], COLORS[i % COLORS.length], logy.checked)));
             const first = data[selected[0]] || {};
             const layout = {
+                height: SPECTRUM_HEIGHT,
                 margin: {t: 20, r: 10},
                 xaxis: {title: {text: 'Energy' + unitLabel(first.binsunit)},
                         type: logx.checked ? 'log' : 'linear'},
