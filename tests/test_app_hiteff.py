@@ -5,7 +5,8 @@ import json
 import re
 import numpy as np
 from werkzeug.datastructures import MultiDict
-from bgexplorer.models.hiteff import HitEfficiency
+from bgexplorer.models.hiteff import HitEfficiency, NormMultiplier
+from bgexplorer.models.emissionspec import EmissionSource, Multiplier
 from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.settings import get_settings, SpectrumROI
@@ -86,6 +87,38 @@ class TestHitEffPages(AppTestCase):
         self.assertEqual(h.spectra_keys, ['s1'])
         self.assertEqual(str(h.rois), str(orig.rois))
         self.assertEqual(orig.location, 'c1')
+
+    def test_enum_select(self):
+        html = self.html(self.client.get(self.url('hitefficiency.edit', 'b',
+                                                  object=self.h1)))
+        self.assertIn('<option value="rate" selected>rate</option>', html)
+        self.assertNotIn('NormMultiplier.', html)
+        url = self.url('hitefficiency.edit', 'b', object=self.h1)
+        # the selected option round trips
+        form = self.edit_form()
+        form['norm'] = 'rate'
+        form['location'] = 'c1b'
+        response = self.client.post(url, data=form)
+        self.assertEqual(response.status_code, 302, self.html(response))
+        self.assertEqual(self.get().location, 'c1b')
+        self.assertEqual(self.get().norm, NormMultiplier.rate)
+        # another option is parsed, then refused since the scalars are
+        # normalized per rate, not per flux
+        form['norm'] = 'flux'
+        html = self.html(self.client.post(url, data=form))
+        self.assertIn('has incorrect units', html)
+        form['norm'] = 'NormMultiplier.flux'
+        self.assertEqual(self.client.post(url, data=form).status_code, 400)
+        self.assertEqual(self.get().norm, NormMultiplier.rate)
+        # enums submit the value EnumField parses, and show the name
+        with self.app.test_request_context():
+            html = self.app.jinja_env.from_string(
+                '{% from "forms.html" import formfield with context %}'
+                '{{ formfield(obj, "multiplier") }}').render(
+                    obj=EmissionSource(name='x', multiplier=Multiplier.surface),
+                    errors={})
+        self.assertIn('<option value="surface_area" selected>surface</option>',
+                      html)
 
     def test_edit_errors(self):
         form = self.edit_form()

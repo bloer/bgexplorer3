@@ -105,7 +105,7 @@ input{% if open %} type="{{ type }}"{% endif -%}
 
     <{{ tag(type, true) }} class="{{ inputclass }} {%- if errmsg %} is-invalid {%- endif -%}" name="{{ name }}"
         {%- if type == "checkbox" %} value="true"{% if value %} checked{% endif %}
-        {%- else %} value="{{ input_value(value) }}"{% endif -%}
+        {%- elif type != "select" %} value="{{ input_value(value) }}"{% endif -%}
         {%- if id %} id="{{ id }}"{%- endif -%}
         {%- if title %} title="{{ title }}"{%- endif -%}
         {%- if field.required %} required{% endif -%}
@@ -123,7 +123,9 @@ input{% if open %} type="{{ type }}"{% endif -%}
         <option value="">--</option>
         {% endif -%}
         {%- for option in field.choices %}
-        <option value="{{ option }}" {% if value == option %}selected{% endif %}>{{ option }}</option>
+        {#- enums submit their value, which EnumField parses, and show their name #}
+        {%- set optval = option.value if option.value is defined else option %}
+        <option value="{{ optval }}" {%- if value == option or value == optval %} selected{% endif %}>{{ option.name if option.name is defined else option }}</option>
         {%- endfor %}
         </select>
     {%- elif type == "reference" -%}
