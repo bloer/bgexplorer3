@@ -68,7 +68,11 @@ class TestAdmin(AppTestCase):
         # the navbar shows the org brand instead of the default
         page = self.html(self.client.get(self.url('index')))
         self.assertIn('id="orgbrand" href="https://example.org"', page)
-        self.assertNotIn('logopnnl.png', page)
+        self.assertNotIn('max-height', page)
+        # PNNL stays, in the footer
+        footer = page[page.index('<footer'):page.index('</footer>')]
+        self.assertIn('logopnnl.png', footer)
+        self.assertEqual(page.count('logopnnl.png'), 1)
 
         # a bad url is reported and nothing is saved
         response = self.client.post(url, data=dict(org_url='not a url'))

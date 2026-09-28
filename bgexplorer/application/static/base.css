@@ -5,7 +5,8 @@ nav a.navbar-brand {padding-top: 0px; padding-bottom: 0px}
 nav img { max-height: 50px; }
 #content {background-color: white; overflow:auto; height: calc(100vh - 78px);}
 /* #pagecontent{ height: calc(100vh - 133px); overflow: auto; } */
-#pagefooter {text-align:center; height:21px}
+#pagefooter {text-align:center; height:21px; line-height:21px}
+#pagefooter img {height:16px; vertical-align:text-bottom}
 
 div.required-field label::after, th.required-field::after {content: " *"; color: red; font-weight:bold;}
 
