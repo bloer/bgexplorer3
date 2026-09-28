@@ -41,15 +41,18 @@ def create_versions_blueprint() -> flask.Blueprint:
     @bp.route('/<active_version>/delete', methods=['GET', 'POST'])
     def delete():
         tag = flask.g.active_version
-        protected = tag == VersionedDocument.get_default_tag()
+        settings = get_settings(tag)
+        protected = (tag == VersionedDocument.get_default_tag()
+                     or not settings.editable)
         if flask.request.method == 'POST':
-            # the model refuses to delete the default version
-            vc.delete_version(tag)
+            # the model refuses to delete the default version and tags
+            vc.delete_version(tag, allow_tags=False)
             flask.flash(f"Deleted version '{tag}'", 'success')
             return flask.redirect(flask.url_for('index'))
         return flask.render_template('versions_delete.html',
                                      summary=vc.version_summary(tag),
-                                     protected=protected)
+                                     protected=protected,
+                                     istag=not settings.editable)
 
     return bp
 

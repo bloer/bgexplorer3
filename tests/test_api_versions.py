@@ -194,11 +194,14 @@ class TestAPIVersions(unittest.TestCase):
 
     def test_delete(self):
         create_tag('v1', 'main')
-        response = self.client.delete(f'{API}/versions/v1')
+        self.assertError(self.client.delete(f'{API}/versions/v1'), 403)
+        self.assertTrue(version_exists('v1'))
+        self.create(version_tag='b1', **{'from': 'main'})
+        response = self.client.delete(f'{API}/versions/b1')
         self.assertEqual(response.status_code, 204)
-        self.assertFalse(version_exists('v1'))
+        self.assertFalse(version_exists('b1'))
         self.assertEqual(Component.objects.count(), 1)
-        self.assertError(self.client.delete(f'{API}/versions/v1'), 404)
+        self.assertError(self.client.delete(f'{API}/versions/b1'), 404)
         self.assertError(self.client.delete(f'{API}/versions/main'), 403)
         self.assertTrue(version_exists('main'))
 

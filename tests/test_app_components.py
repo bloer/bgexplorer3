@@ -168,3 +168,20 @@ class TestComponentPages(AppTestCase):
         html = self.html(self.client.get(self.url('component.overview',
                                                   'b')))
         self.assertIn('id="newcomponent"', html)
+
+    def test_other_versions(self):
+        c1b = Component.select_version('b').get(name='c1')
+        c1b.description = 'edited'
+        c1b.save()
+        html = self.html(self.client.get(self.url('component.view', 'b',
+                                                  object=self.c1)))
+        self.assertIn('id="otherversions"', html)
+        for tag in ('main', 't'):
+            url = self.url('component.view', tag, object=self.c1)
+            self.assertIn(f'href="{url}"', html)
+            self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertIn('text-bg-secondary">tag', html)
+        for endpoint, obj in (('emissionspec.view', self.e1),):
+            html = self.html(self.client.get(self.url(endpoint, 'b',
+                                                      object=obj)))
+            self.assertIn(self.url(endpoint, 't', object=obj), html)

@@ -7,7 +7,7 @@
 <div class="col-5 d-flex justify-content-end align-items-center">
     <a class="btn btn-outline-primary me-1" href="{{ url_for('versions.new', **{'from': g.active_version}) }}">Branch</a>
     <a class="btn btn-outline-secondary me-1" href="{{ url_for('versions.new', type='tag', **{'from': g.active_version}) }}">Tag</a>
-    {% if g.active_version != default_version %}
+    {% if settings.editable and g.active_version != default_version %}
     <a class="btn btn-outline-danger" href="{{ url_for('versions.delete') }}">Delete</a>
     {% endif %}
 </div>

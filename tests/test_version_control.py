@@ -1,6 +1,7 @@
 import unittest
 from mongoengine import *
 from bgexplorer.models.versioncontrol import *
+from bgexplorer.models.versioncontrol import _versioned_classes
 from bgexplorer.models.component import Component
 from bgexplorer.models.assay import Assay
 from tests.dbutil import connect_test_db
@@ -19,8 +20,9 @@ class TestVersionedDocument(unittest.TestCase):
 
     def setUp(self):
         VersionSettings.drop_collection()
-        Component.drop_collection()
-        Assay.drop_collection()
+        # every versioned collection, so tags left by other tests don't clash
+        for cls in _versioned_classes:
+            cls.drop_collection()
 
     def tearDown(self):
         if DROPONTEARDOWN:
@@ -162,10 +164,37 @@ class TestVersionedDocument(unittest.TestCase):
             delete_version('missing')
         c1 = Component(name='c1', version_tag='main').save()
         create_tag('v1', 'main')
+        with self.assertRaises(ProtectedVersionError):
+            delete_version('v1', allow_tags=False)
+        self.assertTrue(version_exists('v1'))
+        with self.assertRaises(KeyError):
+            delete_version('missing', allow_tags=False)
+        create_version('b', 'main')
+        delete_version('b', allow_tags=False)
+        self.assertFalse(version_exists('b'))
+        # the model still allows deleting tags by default
         delete_version('v1')
         self.assertFalse(version_exists('v1'))
         c1.reload()
         self.assertEqual(c1.version_tags, ['main'])
+
+    def test9_other_versions(self):
+        create_version('main')
+        c1 = Component(name='c1', version_tag='main').save()
+        create_tag('v1', 'main')
+        create_version('b', 'main')
+        c1b = Component.select_version('b').get(name='c1')
+        c1b.description = 'edited'
+        c1b.save()
+        rows = c1b.other_versions()
+        self.assertEqual([r['version'] for r in rows], ['b', 'main', 'v1'])
+        self.assertEqual([r['current'] for r in rows], [True, False, False])
+        self.assertEqual([r['same_copy'] for r in rows], [True, False, False])
+        self.assertEqual(rows[0]['revision'], c1b.revision)
+        self.assertNotEqual(rows[0]['revision'], rows[1]['revision'])
+        rows = Component.select_version('v1').get(name='c1').other_versions()
+        self.assertEqual([r['same_copy'] for r in rows], [False, True, True])
+        self.assertEqual(Component(name='new').other_versions(), [])
 
     def test9_summary(self):
         create_version('test')

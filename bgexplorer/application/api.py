@@ -248,7 +248,7 @@ def create_api() -> flask.Blueprint:
     @api.delete('/versions/<active_version>')
     def delete_version():
         get_version_settings(flask.g.active_version)
-        vc.delete_version(flask.g.active_version)
+        vc.delete_version(flask.g.active_version, allow_tags=False)
         return '', 204
 
     return api

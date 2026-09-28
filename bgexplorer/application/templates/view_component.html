@@ -1,4 +1,5 @@
 {% extends "versionbase.html" %}
+{%- import "utils.html" as utils -%}
 
 {% block pagestyle %}
 <style>
@@ -165,6 +166,13 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
         {% endfor %}
     </tbody>
 </table>
+
+<div class="row mb-3">
+    <div class="col">
+        <h4>Other versions</h4>
+        {{ utils.other_versions(g.object) }}
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

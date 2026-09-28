@@ -3,7 +3,7 @@
 {% block pageheader %}<h1>Delete version {{ g.active_version }}</h1>{% endblock %}
 {% block pagecontent %}
 {% if protected %}
-<div class="alert alert-warning">The default version can't be deleted.</div>
+<div class="alert alert-warning">{% if istag %}Tags are permanent and can't be deleted.{% else %}The default version can't be deleted.{% endif %}</div>
 {% else %}
 <p>Documents that belong only to this version will be removed from the
 database. Documents shared with other versions are kept there.</p>

@@ -22,7 +22,7 @@
             <td class="text-end text-nowrap">
                 <a class="btn btn-sm btn-outline-primary" href="{{ url_for('versions.new', **{'from': version.version_tag}) }}">Branch</a>
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('versions.new', type='tag', **{'from': version.version_tag}) }}">Tag</a>
-                {% if version.version_tag != default_version %}
+                {% if version.editable and version.version_tag != default_version %}
                 <a class="btn btn-sm btn-outline-danger" href="{{ url_for('versions.delete', active_version=version.version_tag) }}">Delete</a>
                 {% endif %}
             </td>

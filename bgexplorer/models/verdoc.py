@@ -295,6 +295,22 @@ class VersionedDocument(Document):
         return not any(f == name or f.startswith(name + '.')
                        for f in fields.fields)
 
+    def other_versions(self) -> List[dict]:
+        """ One row per version containing this item (any copy with the same
+        original_id), sorted by version name. Each row has `version`,
+        `revision`, `modified`, `current` (the active version) and `same_copy`
+        (the version shares this physical copy)
+        """
+        if self.original_id is None:
+            return []
+        copies = (type(self).objects(original_id=self.original_id)
+                  .only('version_tags', 'revision', 'modified'))
+        rows = [dict(version=tag, revision=copy.revision,
+                     modified=copy.modified, current=tag == self.active_version,
+                     same_copy=copy.id == self.id)
+                for copy in copies for tag in copy.version_tags]
+        return sorted(rows, key=lambda row: row['version'])
+
     def clone(self, **overrides) -> 'VersionedDocument':
         """ An unsaved copy of this document in its active version, as a new
         item with new ids for embedded documents. References are kept, so the

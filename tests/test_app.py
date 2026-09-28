@@ -228,9 +228,16 @@ class TestAppVersions(unittest.TestCase):
         self.assertIn('first tag', html)
         self.assertIn(self.url('overview', active_version='v1'), html)
         self.assertIn(self.url('overview', active_version='main'), html)
-        self.assertIn(self.url('versions.delete', active_version='v1'), html)
-        self.assertNotIn(self.url('versions.delete', active_version='main'),
-                         html)
+        vc.create_branch('b1', 'main')
+        html = self.client.get('/').get_data(as_text=True)
+        self.assertIn(self.url('versions.delete', active_version='b1'), html)
+        # neither tags nor the default version can be deleted
+        for tag in ('v1', 'main'):
+            self.assertNotIn(self.url('versions.delete', active_version=tag),
+                             html)
+            html2 = self.client.get(self.url('overview', active_version=tag))
+            self.assertNotIn(self.url('versions.delete', active_version=tag),
+                             html2.get_data(as_text=True))
 
     def test_new(self):
         url = self.url('versions.new')
@@ -262,15 +269,23 @@ class TestAppVersions(unittest.TestCase):
         self.assertFalse(vc.version_exists('t2'))
 
     def test_delete(self):
-        url = self.url('versions.delete', active_version='v1')
+        vc.create_branch('b1', 'main')
+        url = self.url('versions.delete', active_version='b1')
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertIn('id="deleteversion"', response.get_data(as_text=True))
         response = self.client.post(url)
         self.assertEqual(response.status_code, 302)
-        self.assertFalse(vc.version_exists('v1'))
+        self.assertFalse(vc.version_exists('b1'))
         self.assertEqual(Component.select_version('main').count(), 1)
         self.assertEqual(self.client.get(url).status_code, 404)
+
+        url = self.url('versions.delete', active_version='v1')
+        html = self.client.get(url).get_data(as_text=True)
+        self.assertNotIn('id="deleteversion"', html)
+        self.assertIn('Tags are permanent', unescape(html))
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.assertTrue(vc.version_exists('v1'))
 
         url = self.url('versions.delete', active_version='main')
         html = self.client.get(url).get_data(as_text=True)
