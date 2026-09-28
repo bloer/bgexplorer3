@@ -77,6 +77,9 @@ class Component(VersionedDocument):
             kwargs['outer_surface_area'] = surface_area
         super().__init__(*args, **kwargs)
 
+    def __str__(self):
+        return self.name or f"new {type(self).__name__}"
+
     @property
     def surface_area(self):
         return self.inner_surface_area + self.outer_surface_area

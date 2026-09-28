@@ -5,7 +5,9 @@ from io import BytesIO
 from ..models.sourceterm import find_sourceterms
 from ..models.component import Component
 from ..models.fields import InlineAttachment
+from ..models.importexport import iter_json_documents, import_documents
 from ..models.verdoc import check_writable
+from .api import validation_fields
 from .forms import update_object
 
 
@@ -16,15 +18,22 @@ def get_or_404(queryset, objid):
         flask.abort(404, f"No {queryset._document._class_name} with id {objid}")
 
 
-def _drill_down(obj, name, value, delimiter='__'):
-    names = name.split(delimiter)
-    sub_obj = obj
-    for subname in names[:-1]:
-        if isinstance(sub_obj, list):
-            index = int(subname)
-            sub_obj = sub_obj[index]
-        else:
-            sub_obj = getattr(sub_obj, subname)
+def flash_import_report(report) -> None:
+    """ Flash a summary of an ImportReport """
+    if report.created:
+        flask.flash(f"Imported {len(report.created)} documents", 'success')
+    if report.dropped_refs:
+        flask.flash(flask.render_template_string(
+            "Dropped references to documents not in this version:"
+            "<ul>{% for label, ref in refs %}<li>{{ label }}: {{ ref }}</li>"
+            "{% endfor %}</ul>", refs=report.dropped_refs), 'warning')
+    if report.errors:
+        flask.flash(flask.render_template_string(
+            "Not imported:<ul>{% for label, error in errors %}"
+            "<li>{{ label }}: {{ error }}</li>{% endfor %}</ul>",
+            errors=report.errors), 'danger')
+    if not (report.created or report.errors):
+        flask.flash("Nothing to import", 'warning')
 
 
 class CollectionViews(flask.Blueprint):
@@ -64,6 +73,19 @@ class CollectionViews(flask.Blueprint):
         if skip := [f for f in self.deferred_fields if f not in needed]:
             qs = qs.exclude(*skip)
         return qs
+
+    def new_document(self, type_: str = None):
+        """ A new, unsaved document in the active version. `type_` selects
+        a subclass by lowercase name, e.g. 'assembly'
+        """
+        cls = self.doc_cls
+        if type_:
+            classes = {name.rsplit('.', 1)[-1].lower(): name
+                       for name in self.doc_cls._subclasses}
+            if type_.lower() not in classes:
+                flask.abort(400, f"Unknown type '{type_}'")
+            cls = me.base.get_document(classes[type_.lower()])
+        return cls(version_tag=flask.g.active_version)
 
     def get_mtime(self, objid):
         obj = self.queryset.only('version_tags', 'original_id', 'modified')\
@@ -135,17 +157,55 @@ class CollectionViews(flask.Blueprint):
             req = flask.request
             errors = {}
             if 'object' not in flask.g:
-                flask.g.object = self.doc_cls()
-            if req.form and req.method == 'POST':
-                obj = update_object(flask.g.object, req.form)
-                try:
-                    obj.save()
-                    flask.flash(f"Successfully saved {obj.name}", 'success')
-                except me.ValidationError as e:
-                    errors = e.to_dict()
+                flask.g.object = self.new_document(req.args.get('type'))
+            if req.method == 'POST':
+                obj = update_object(flask.g.object, req.form, errors=errors)
+                if not errors:
+                    try:
+                        obj.save()
+                    except me.ValidationError as e:
+                        errors = validation_fields(e)
+                    else:
+                        flask.flash(f"Successfully saved {obj}", 'success')
+                        return flask.redirect(flask.url_for('.view',
+                                                            object=obj))
             return flask.render_template(f'edit_{self.clsname}.html',
                                          form=flask.request.form,
-                                         errors=errors)
+                                         errors=errors), \
+                400 if errors else 200
+
+        @self.post('/<objid>/clone')
+        @self.loads(*self.deferred_fields)
+        def clone():
+            check_writable(flask.g.active_version)
+            original = flask.g.object
+            copy = original.clone()
+            if hasattr(copy, 'name'):
+                copy.name = f"{original.name} (copy)"
+            copy.save()
+            flask.flash(f"Created {copy} as a copy of {original}", 'success')
+            return flask.redirect(flask.url_for('.edit', object=copy))
+
+        @self.route('/import', methods=['GET', 'POST'])
+        def import_():
+            check_writable(flask.g.active_version)
+            if flask.request.method == 'POST':
+                upload = flask.request.files.get('file')
+                if not upload or not upload.filename:
+                    flask.flash("Choose a file to import", 'danger')
+                    return flask.render_template('import.html'), 400
+                try:
+                    docs = list(iter_json_documents(upload.stream,
+                                                    upload.filename))
+                except (ValueError, OSError) as e:
+                    flask.flash(f"Can't read {upload.filename}: {e}",
+                                'danger')
+                    return flask.render_template('import.html'), 400
+                report = import_documents(self.doc_cls, docs,
+                                          flask.g.active_version)
+                flash_import_report(report)
+                return flask.redirect(flask.url_for('.overview'))
+            return flask.render_template('import.html')
 
         if self.has_attachments:
             @self.route('/<objid>/attachments', methods=['GET', 'POST'])

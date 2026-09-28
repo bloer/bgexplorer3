@@ -6,26 +6,41 @@
 {{ datatable.styles() }}
 {%- endblock pagestyle -%}
 
-{% block pageheader %}
-<div class="col-5">
-    <h2>Editing component</h2>
-</div>
-<div class="col-7">
+{%- set isnew = g.object.original_id is none -%}
+{%- set isassembly = 'children' in g.object._fields -%}
+{%- macro buttons() -%}
     <div class="d-flex justify-content-end">
         <button class="btn btn-success me-1" type="submit" form="mainform">Save</button>
+        {%- if isnew %}
+        <a class="btn btn-warning me-1" href="{{ request.url }}">Reset</a>
+        <a class="btn btn-danger" href="{{ url_for('.overview') }}">Cancel</a>
+        {%- else %}
         <a class="btn btn-warning me-1" href="{{ url_for('.edit', object=g.object) }}">Reload</a>
         <a class="btn btn-danger" href="{{ url_for('.view', object=g.object) }}">Cancel</a>
+        {%- endif %}
     </div>
+{%- endmacro -%}
+
+{% block pageheader %}
+<div class="col-5">
+    <h2>{% if isnew %}New {{ 'assembly' if isassembly else 'component' }}{% else %}Editing {{ 'assembly' if isassembly else 'component' }} <span class="text-primary">{{ g.object.name }}</span>{% endif %}</h2>
+</div>
+<div class="col-7">
+    {{ buttons() }}
 </div>
 {% endblock pageheader %}
 
 {% block pagecontent %}
-{%- set isassembly = g.object.children is defined -%}
 <p>Branch: {{ g.object.active_version }}</p>
+{%- if not isnew %}
 <p>Current revision: {{g.object.revision }}</p>
 <p>Last modified: {{ pretty_date(g.object.modified) }}</p>
+{%- endif %}
 {%- if errors -%}
-<div id="toperror" class="border border-danger text-danger m-3" style="font-weight:bold">Errors found in form; please correct and resubmit. {{ errors.__all__ | default('') }}</div>
+<div id="toperror" class="alert alert-danger">
+    Errors found in form; please correct and resubmit.
+    <ul class="mb-0">{% for name, message in errors.items() %}<li><strong>{{ name }}</strong>: {{ message }}</li>{% endfor %}</ul>
+</div>
 {%- endif -%}
 <form method="POST" id="mainform">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -73,15 +88,8 @@
         <legend>Component History</legend>
         {{ dynamictable(g.object, 'history') }}
     </fieldset>
-    <div class="d-flex justify-content-end">
-        <button class="btn btn-success me-1" type="submit" form="mainform">Save</button>
-        <a class="btn btn-warning me-1" href="{{ url_for('.edit', object=g.object) }}">Reload</a>
-        <a class="btn btn-danger" href="{{ url_for('.view', object=g.object) }}">Cancel</a>
-    </div>
+    {{ buttons() }}
 </form>
-<br>
-{{ errors or '' }}
-<br>
 {{ modal() }}
 {% endblock pagecontent %}
 

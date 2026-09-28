@@ -11,7 +11,16 @@
 {{ datatable.scripts() }}
 {% endblock %}
 
-{% block pageheader %}<h1>Components</h1>{% endblock %}
+{% block pageheader %}
+<div class="col-5"><h1>Components</h1></div>
+<div class="col-7 d-flex justify-content-end align-items-center">
+    {%- if settings.editable %}
+    <a class="btn btn-success me-1" id="newcomponent" href="{{ url_for('.edit') }}">New Component</a>
+    <a class="btn btn-success me-1" id="newassembly" href="{{ url_for('.edit', type='assembly') }}">New Assembly</a>
+    <a class="btn btn-outline-primary" id="import" href="{{ url_for('.import_') }}">Import</a>
+    {%- endif %}
+</div>
+{% endblock %}
 {%- endif -%}
 
 {% macro part(component) %}

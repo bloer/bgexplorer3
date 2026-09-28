@@ -295,6 +295,23 @@ class VersionedDocument(Document):
         return not any(f == name or f.startswith(name + '.')
                        for f in fields.fields)
 
+    def clone(self, **overrides) -> 'VersionedDocument':
+        """ An unsaved copy of this document in its active version, as a new
+        item with new ids for embedded documents. References are kept, so the
+        copy of an Assembly shares its children. Attributes are set from
+        `overrides`.
+        """
+        if self._query_fields:
+            raise ValueError("Can't clone a partly loaded document")
+        son = strip_identity(self.to_mongo().to_dict())
+        renew_embedded_ids(son)
+        copy = type(self)._from_son(son, created=True)
+        copy.version_tags = [self.active_version]
+        copy.active_version = self.active_version
+        for key, value in overrides.items():
+            setattr(copy, key, value)
+        return copy
+
     def reload(self, *fields, **kwargs):
         result = super().reload(*fields, **kwargs)
         if not fields:
@@ -409,6 +426,32 @@ class VersionedDocument(Document):
             select_dict['original_id'] = self.original_id
             select_dict['version_tags'] = self._active_version
         return select_dict
+
+
+# fields that identify a stored copy of a document, not its content
+IDENTITY_FIELDS = ('_id', 'original_id', 'version_tags', 'revision',
+                   'modified')
+
+
+def strip_identity(son: dict) -> dict:
+    """ Remove IDENTITY_FIELDS from the raw document `son` in place """
+    for key in IDENTITY_FIELDS:
+        son.pop(key, None)
+    return son
+
+
+def renew_embedded_ids(son) -> None:
+    """ Give every embedded document in the raw document `son` a new 'id'
+    in place
+    """
+    children = son.values() if isinstance(son, dict) else son
+    for child in children:
+        if isinstance(child, dict):
+            if isinstance(child.get('id'), ObjectId):
+                child['id'] = ObjectId()
+            renew_embedded_ids(child)
+        elif isinstance(child, list):
+            renew_embedded_ids(child)
 
 
 class DynamicVersionedDocument(VersionedDocument):

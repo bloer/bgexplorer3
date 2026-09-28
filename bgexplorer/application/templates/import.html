@@ -1,0 +1,22 @@
+{% extends "versionbase.html" %}
+{% set title = doc_cls.__name__ | replace('HitEfficiency', 'Hit Efficiency') %}
+{% block title %}Import {{ title }} - Background Explorer{% endblock %}
+{% block pageheader %}<h1>Import {{ title }} documents</h1>{% endblock %}
+{% block pagecontent %}
+<p>Upload the JSON exported from a {{ title }} page, a JSON list of such
+documents, or a <code>.tar.gz</code> or <code>.zip</code> archive of JSON
+files. Each document is added to <strong>{{ g.active_version }}</strong> as a
+new item.</p>
+<p>References to other documents imported in the same file are linked to the
+new copies. References to documents that aren't in
+{{ g.active_version }} are dropped, and listed after the import.</p>
+<form method="POST" id="importform" enctype="multipart/form-data" class="col-md-8">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+        <label class="form-label" for="file">File</label>
+        <input class="form-control" type="file" id="file" name="file" accept=".json,.tar,.gz,.tgz,.zip" required>
+    </div>
+    <button type="submit" class="btn btn-success">Import</button>
+    <a class="btn btn-secondary" href="{{ url_for('.overview') }}">Cancel</a>
+</form>
+{% endblock %}

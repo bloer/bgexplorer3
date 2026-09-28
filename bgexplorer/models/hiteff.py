@@ -168,6 +168,9 @@ class HitEfficiency(DynamicVersionedDocument):
         if self.is_loaded('spectra'):
             self.spectra_keys = list(self.spectra)
 
+    def __str__(self):
+        return f"{self.source} - {self.location}"
+
     @property
     def key(self):
         return self.id or (self.source, self.location)

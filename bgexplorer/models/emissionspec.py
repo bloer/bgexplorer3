@@ -149,6 +149,9 @@ class EmissionSpec(VersionedDocument):
         super().__init__(*args, **kwargs)
         self.sourcemap = {s.name: s for s in self.sources}
 
+    def __str__(self):
+        return self.name or f"new {type(self).__name__}"
+
     def get_sources(self, component):
         return self.sources
 
