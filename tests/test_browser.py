@@ -152,3 +152,45 @@ class TestPlotsInBrowser(BrowserTestCase):
         for step in self.switch_spectra(page):
             with self.subTest(step=step):
                 self.check_contains(page, '#spectrumplot', SPECTRUM_SVG)
+
+    def ranges(self, page):
+        """ The x range of each budget panel, None for ones without a plot """
+        return page.evaluate("""() => document.getElementById('budgetplot')
+            .panels.map(p => p._fullLayout ? p._fullLayout.xaxis.range : null)""")
+
+    def test_budget_shared_axis(self):
+        page = self.open(self.url('component.results', object=self.a1))
+        page.locator('#budgetplot').scroll_into_view_if_needed()
+        page.wait_for_function("""() => {
+            const div = document.getElementById('budgetplot');
+            return div.panels && div.panels.every(p => p._fullLayout);}""",
+            timeout=10000)
+        full = self.ranges(page)
+        self.assertEqual(len(full), 3)
+        for r in full[1:]:
+            self.assertEqual(r, full[0])
+        # covers every row: 2 kg x 2 x 10 mBq/kg x 0.1 dru/mBq = 4 +- 0.6 dru
+        # from c1's Th232, and c2's K40 limit, 1 kg x 25 mBq/kg x 0.3 dru/mBq
+        low, high = full[0]
+        self.assertLess(low, np.log10(3.4))
+        self.assertGreater(high, np.log10(7.5))
+
+        # hiding rows keeps the range
+        page.fill('#budgetplot_threshold', '50')
+        page.dispatch_event('#budgetplot_threshold', 'change')
+        page.wait_for_timeout(500)
+        rows = page.evaluate("""() => document.getElementById('budgetplot')
+            .panels.map(p => p._fullLayout ? p.data[2].y.length : 0)""")
+        self.assertLess(min(rows), 2)
+        for r in self.ranges(page):
+            if r is not None:
+                self.assertEqual(r, full[0])
+
+        # zooming one panel zooms the others
+        page.evaluate("""() => Plotly.relayout(
+            document.getElementById('budgetplot').panels[0],
+            {'xaxis.range[0]': 0, 'xaxis.range[1]': 0.5})""")
+        page.wait_for_timeout(500)
+        for r in self.ranges(page):
+            if r is not None:
+                self.assertEqual(r, [0, 0.5])

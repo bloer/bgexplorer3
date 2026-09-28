@@ -186,7 +186,27 @@ const bgplots = (function(){
                         row.limit ? row.limit.upper_limit : 0);
     }
 
-    function drawBudget(plot, data, threshold, title){
+    /* log10 x range covering everything drawn for `rows`, padded */
+    function budgetRange(rows){
+        const points = [];
+        rows.forEach(r => {
+            if(r.measured && r.measured.value > 0){
+                const m = r.measured;
+                points.push(m.value, m.value + m.err_plus);
+                if(m.value - m.err_minus > 0)
+                    points.push(m.value - m.err_minus);
+            }
+            if(r.limit && r.limit.upper_limit > 0)
+                points.push(r.limit.upper_limit, r.limit.upper_limit / 4);
+        });
+        if(!points.length)
+            return null;
+        const pad = 0.2;
+        return [Math.log10(Math.min(...points)) - pad,
+                Math.log10(Math.max(...points)) + pad];
+    }
+
+    function drawBudget(plot, data, threshold, title, range){
         const total = data.rows.reduce((sum, r) => sum + rowSize(r), 0);
         const rows = data.rows.filter(r => rowSize(r) > 0
                                       && rowSize(r) >= threshold * total);
@@ -195,24 +215,27 @@ const bgplots = (function(){
         plot.replaceChildren();
         if(!rows.length){
             plot.appendChild(el('p', {'class': 'text-secondary', text: 'No contributions'}));
-            return;
+            return false;
         }
         const layout = {
             title: {text: title, font: {size: 14}},
             margin: {t: 30, r: 10, l: 10},
             height: 120 + 22 * rows.length,
             xaxis: {type: 'log', title: {text: data.scalar + unitLabel(data.units)},
-                    exponentformat: 'power', gridcolor: '#ddd'},
+                    exponentformat: 'power', gridcolor: '#ddd', range: range},
             yaxis: {type: 'category', automargin: true, autorange: 'reversed',
                     categoryorder: 'array', categoryarray: rows.map(r => r.label)},
             legend: {orientation: 'h', y: -0.15},
             showlegend: false,
         };
         Plotly.react(plot, budgetTraces(rows), layout, CONFIG);
+        return true;
     }
 
     /* Budget breakdowns of one component, one panel per groupby. `url` is
-     * the budget.json endpoint, `scalars` the result names to choose from
+     * the budget.json endpoint, `scalars` the result names to choose from.
+     * All panels share one x range, covering every row before the
+     * threshold hides any, and zoom and pan together.
      */
     function budget(div, url, groupbys, scalars){
         if(typeof div === 'string')
@@ -231,24 +254,56 @@ const bgplots = (function(){
         const panels = groupbys.map(groupby => el('div', {'class': 'col-lg-4 bgplot',
                                                           'data-groupby': groupby}));
         div.replaceChildren(controls, el('div', {'class': 'row'}, panels));
+        div.panels = panels;
         const cache = {};
+        // the shared range: the full extent of the current scalar, or a zoom
+        let fullRange = null, range = null, syncing = false;
 
-        function draw(){
-            const scalar = select.value;
-            panels.forEach(panel => {
-                const groupby = panel.dataset.groupby;
-                const key = scalar + '|' + groupby;
+        function load(scalar){
+            if(!cache[scalar]){
                 const sep = url.includes('?') ? '&' : '?';
-                const params = new URLSearchParams({scalar: scalar, groupby: groupby});
-                cache[key] = cache[key] || getJSON(url + sep + params);
-                cache[key].then(data => drawBudget(panel, data, threshold.value / 100,
-                                                   'By ' + groupby))
-                          .catch(error => showError(panel, error));
-            });
+                cache[scalar] = Promise.all(groupbys.map(groupby => getJSON(
+                    url + sep + new URLSearchParams({scalar: scalar, groupby: groupby}))));
+            }
+            return cache[scalar];
         }
-        select.addEventListener('change', draw);
-        threshold.addEventListener('change', draw);
-        whenVisible(div, draw);
+
+        // apply one panel's zoom to the others
+        function sync(source, event){
+            if(syncing)
+                return;
+            let next = null;
+            if('xaxis.range[0]' in event && 'xaxis.range[1]' in event)
+                next = [event['xaxis.range[0]'], event['xaxis.range[1]']];
+            else if(Array.isArray(event['xaxis.range']))
+                next = event['xaxis.range'].slice();
+            else if(event['xaxis.autorange'])
+                next = fullRange;
+            if(!next)
+                return;
+            range = next;
+            syncing = true;
+            Promise.all(panels.filter(p => p !== source && p._fullLayout)
+                              .map(p => Plotly.relayout(p, {'xaxis.range': range.slice()})))
+                   .finally(() => { syncing = false; });
+        }
+
+        function draw(rescale){
+            load(select.value).then(results => {
+                if(rescale){
+                    fullRange = budgetRange([].concat(...results.map(data => data.rows)));
+                    range = fullRange;
+                }
+                panels.forEach((panel, i) => {
+                    if(drawBudget(panel, results[i], threshold.value / 100,
+                                  'By ' + groupbys[i], range && range.slice()))
+                        panel.on('plotly_relayout', event => sync(panel, event));
+                });
+            }).catch(error => panels.forEach(panel => showError(panel, error)));
+        }
+        select.addEventListener('change', () => draw(true));
+        threshold.addEventListener('change', () => draw(false));
+        whenVisible(div, () => draw(true));
     }
 
     return {spectrum: spectrum, budget: budget};
