@@ -32,6 +32,19 @@ class TestSerialize(unittest.TestCase):
         h = histogram_json(spectrum(), units('dru/Bq').u)
         self.assertEqual(h['value'], [1000., 2000., 3000., 4000.])
         self.assertEqual(h['units'], 'dru/Bq')
+        self.assertEqual(h['is_limit'], [False] * 4)
+        # empty bins are upper limits
+        h = histogram_json(Histogram(
+            AsymmetricUncertainty.fromcounts(np.array([0., 3., 0.]))
+            * units('dru/mBq'), np.arange(4.) * units.keV))
+        self.assertEqual(h['is_limit'], [True, False, True])
+        self.assertGreater(h['upper_limit'][0], 0)
+        self.assertEqual(h['upper_limit'][0], h['upper_limit'][2])
+        self.assertEqual(h['value'][0], 0)
+        # plain values have no limits
+        h = histogram_json(Histogram(np.array([0., 1.]), np.arange(3.)))
+        self.assertEqual(h['is_limit'], [False, False])
+        self.assertEqual(h['upper_limit'], [0., 1.])
 
     def test_scalar(self):
         q = units.Quantity(AsymmetricUncertainty(2, 0.5, 1), 'mBq')

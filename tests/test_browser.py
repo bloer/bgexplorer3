@@ -194,3 +194,19 @@ class TestPlotsInBrowser(BrowserTestCase):
         for r in self.ranges(page):
             if r is not None:
                 self.assertEqual(r, [0, 0.5])
+
+    def test_limit_bins(self):
+        page = self.open(self.url('hitefficiency.view', object=self.hiteff))
+        self.wait_plot(page, '#spectrumplot')
+        traces = page.evaluate("""() => document.querySelector(
+            '#spectrumplot .js-plotly-plot').data.map(t => ({
+                name: t.name, x: t.x, y: t.y,
+                symbol: t.marker && t.marker.symbol}))""")
+        # s1 = [1, 2, 0, 4, 5, 0]: bins 2 and 5 are limits
+        (markers,) = [t for t in traces if t['symbol'] == 'triangle-down']
+        self.assertEqual(markers['x'], [2.5, 5.5])
+        self.assertTrue(all(y > 0 for y in markers['y']))
+        (line,) = [t for t in traces if t['name'] == 's1']
+        # each measured bin is a full step, broken at the limits
+        self.assertEqual(line['x'], [0, 1, 1, 2, None, 3, 4, 4, 5, None])
+        self.assertEqual(line['y'][:4], [1, 1, 2, 2])

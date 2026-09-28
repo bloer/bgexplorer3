@@ -66,28 +66,73 @@ const bgplots = (function(){
         return units ? ` [${units}]` : '';
     }
 
-    /* Step-line traces with a shaded error band for one histogram */
+    /* Step coordinates over the bins where `keep(i)`: each bin is drawn
+     * from its low to high edge at `yval(i)`, with a gap for other bins
+     */
+    function steps(h, keep, yval){
+        const x = [], y = [];
+        h.value.forEach((v, i) => {
+            if(!keep(i)){
+                if(x.length && x[x.length-1] !== null){
+                    x.push(null);
+                    y.push(null);
+                }
+                return;
+            }
+            x.push(h.bins[i], h.bins[i+1]);
+            y.push(yval(i), yval(i));
+        });
+        return [x, y];
+    }
+
+    /* Traces for one histogram: a step line with a shaded error band for
+     * measured bins, and a dashed step at the 90% upper limit with a
+     * down-pointing marker for upper limit bins
+     */
     function spectrumTraces(name, h, color, logy){
-        // repeat the last value so the final bin is drawn to its high edge
-        const x = h.bins;
-        const pad = arr => arr.concat(arr.length ? [arr[arr.length-1]] : []);
-        const y = pad(h.value);
+        const limit = i => h.is_limit && h.is_limit[i];
+        const measured = i => !limit(i);
         const smallest = Math.min(...h.value.filter(v => v > 0));
         const floor = (logy && isFinite(smallest)) ? smallest / 100 : null;
-        const low = pad(h.value.map((v, i) => {
-            const lo = v - h.err_minus[i];
+        const [x, y] = steps(h, measured, i => h.value[i]);
+        const [, low] = steps(h, measured, i => {
+            const lo = h.value[i] - h.err_minus[i];
             return (logy && !(lo > 0)) ? floor : lo;
-        }));
-        const high = pad(h.value.map((v, i) => v + h.err_plus[i]));
-        const common = {x: x, mode: 'lines', line: {shape: 'hv', width: 0},
-                        legendgroup: name, showlegend: false, hoverinfo: 'skip'};
-        return [
-            Object.assign({}, common, {y: low}),
-            Object.assign({}, common, {y: high, fill: 'tonexty',
-                                       fillcolor: color + '40'}),
-            {x: x, y: y, name: name, legendgroup: name, mode: 'lines',
-             line: {shape: 'hv', color: color, width: 1.5}},
+        });
+        const [, high] = steps(h, measured, i => h.value[i] + h.err_plus[i]);
+        // the band: each run of bins as a closed polygon, high then low
+        const bandx = [], bandy = [];
+        let start = 0;
+        for(let j = 0; j <= x.length; ++j){
+            if(j < x.length && x[j] !== null)
+                continue;
+            if(j > start){
+                bandx.push(...x.slice(start, j), ...x.slice(start, j).reverse(), null);
+                bandy.push(...high.slice(start, j), ...low.slice(start, j).reverse(), null);
+            }
+            start = j + 1;
+        }
+        const traces = [
+            {x: bandx, y: bandy, mode: 'lines', fill: 'toself', fillcolor: color + '40',
+             line: {width: 0}, legendgroup: name, showlegend: false, hoverinfo: 'skip'},
+            {x: x, y: y, name: name, legendgroup: name, mode: 'lines', connectgaps: false,
+             line: {color: color, width: 1.5}},
         ];
+        const limits = h.value.map((v, i) => i).filter(limit);
+        if(limits.length){
+            const [ulx, uly] = steps(h, limit, i => h.upper_limit[i]);
+            traces.push(
+                {x: ulx, y: uly, mode: 'lines', connectgaps: false, legendgroup: name,
+                 showlegend: false, hoverinfo: 'skip',
+                 line: {color: color, width: 1, dash: 'dash'}},
+                {x: limits.map(i => (h.bins[i] + h.bins[i+1]) / 2),
+                 y: limits.map(i => h.upper_limit[i]),
+                 mode: 'markers', legendgroup: name, showlegend: false,
+                 name: name + ' upper limits',
+                 hovertemplate: '%{x}: < %{y:.3g} (90% UL)<extra>' + name + '</extra>',
+                 marker: {symbol: 'triangle-down', size: 9, color: color}});
+        }
+        return traces;
     }
 
     /* Plot the spectra served as {name: histogram_json} by `url` into
