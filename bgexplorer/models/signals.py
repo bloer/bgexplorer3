@@ -4,6 +4,8 @@ from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, CalculatedResults, find_sourceterms
 from . import settings
+import logging
+log = logging.getLogger(__name__)
 
 """
 signals that refer to multiple classes are here to prevent circular imports
@@ -31,7 +33,7 @@ def delete_component(sender, document, **kwargs):
 
 def update_component(sender, document, **kwargs):
     component = document
-    print("update_component for", component.name)
+    log.debug("update_component for", component.name)
     # first, generate the list of all source terms for this component
     sourceterms = []
     for spec in list(component.specs) + [component]:

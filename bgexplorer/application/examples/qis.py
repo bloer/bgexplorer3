@@ -254,13 +254,7 @@ def populate_example(version_tag='examples/qis', clean: bool = False,
 if __name__ == '__main__':
     import sys
     import mongoengine
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     uri = sys.argv[1] if len(sys.argv) > 1 else None
     mongoengine.connect(host=uri)
     populate_example(clean=True, print_results=True)
-
-
-
-
-
-
