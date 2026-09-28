@@ -14,7 +14,11 @@ from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.verdoc import VersionedDocument
 from bgexplorer.models.settings import get_settings
 from bgexplorer.models import versioncontrol as vc
+from bgexplorer.models.histogram import Histogram
+from bgexplorer.models.asymmetric import AsymmetricUncertainty
+from bgexplorer.models.common import units
 from tests.dbutil import TEST_MONGODB_URI, connect_test_db
+import numpy as np
 
 # populating the full examples takes a few minutes, so is opt-in
 RUN_EXAMPLES = bool(os.environ.get('BGEXPLORER_TEST_EXAMPLES'))
@@ -133,10 +137,38 @@ class AppSmokeTest:
 
 class TestAppSmall(AppSmokeTest, unittest.TestCase):
     """ A small model covering every collection """
+    def loaded(self, endpoint, obj, field):
+        """ Is `field` loaded for `obj` at `endpoint`? """
+        blueprint = self.app.blueprints[endpoint.split('.')[0]]
+        with self.app.test_request_context():
+            flask.g.active_version = self.version
+            url = flask.url_for(endpoint, object=obj)
+        with self.app.test_request_context(url):
+            self.app.preprocess_request()
+            return flask.g.object.is_loaded(field)
+
+    def test4_deferred_fields(self):
+        """ Large fields are only loaded by endpoints that need them """
+        hiteff = HitEfficiency.select_version(self.version).get(source='Th232')
+        c1 = Component.select_version(self.version).get(name='c1')
+        self.assertFalse(self.loaded('hitefficiency.view', hiteff, 'spectra'))
+        self.assertTrue(self.loaded('hitefficiency.get_json', hiteff,
+                                    'spectra'))
+        self.assertFalse(self.loaded('component.view', c1, 'attachments'))
+        self.assertTrue(self.loaded('component.get_json', c1, 'attachments'))
+        with self.app.test_request_context():
+            flask.g.active_version = self.version
+            url = flask.url_for('hitefficiency.get_json', object=hiteff)
+        self.assertIn('s1', self.client.get(url).get_json()['spectra'])
+
     @classmethod
     def populate(cls):
         HitEfficiency(source='Th232', location='c1',
-                      scalars=dict(v1='0.1 +- 0.01 dru/mBq')).save()
+                      scalars=dict(v1='0.1 +- 0.01 dru/mBq'),
+                      spectra=dict(s1=Histogram(
+                          AsymmetricUncertainty.fromcounts(np.arange(5.))
+                          * units('dru/mBq'), np.arange(6.) * units.keV)),
+                      ).save()
         HitEfficiency(source='K40', location='a1',
                       scalars=dict(v1='<0.2 dru/mBq')).save()
         e1 = EmissionSpec(name='e1', sources=[
@@ -246,12 +278,25 @@ class TestAppVersions(unittest.TestCase):
         self.assertEqual(self.client.post(url).status_code, 403)
         self.assertTrue(vc.version_exists('main'))
 
+    def test_route_names_as_versions(self):
+        """ versions named like top-level routes don't collide with them """
+        for tag in ('api', 'versions', 'component'):
+            vc.create_version(tag, 'main')
+            url = self.url('component.view', active_version=tag,
+                           objid=str(self.c1.original_id))
+            self.assertEqual(url, f'/explore/{tag}/component/'
+                                  f'{self.c1.original_id}')
+            self.assertEqual(self.client.get(url).status_code, 200)
+            self.assertEqual(self.client.get(f'/explore/{tag}').status_code,
+                             200)
+        self.assertEqual(self.client.get('/api/v1/versions').status_code, 200)
+
     def test_unknown_version(self):
         response = self.client.get('/explore/nope')
         self.assertEqual(response.status_code, 404)
         self.assertIn("Version 'nope' does not exist",
                       unescape(response.get_data(as_text=True)))
-        self.assertEqual(self.client.get('/nope/component/').status_code,
+        self.assertEqual(self.client.get('/explore/nope/component/').status_code,
                          404)
         self.assertFalse(vc.version_exists('nope'))
         response = self.client.get('/api/v1/nothing')
@@ -432,7 +477,7 @@ class TestCSRF(unittest.TestCase):
 @unittest.skipUnless(RUN_EXAMPLES, "set BGEXPLORER_TEST_EXAMPLES=1 to run")
 class TestAppExamples(AppSmokeTest, unittest.TestCase):
     """ The full examples models """
-    version = 'examples/qis'
+    version = 'examples-qis'
     maxobjects = 5
 
     @classmethod

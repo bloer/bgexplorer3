@@ -38,7 +38,7 @@ def create_versions_blueprint() -> flask.Blueprint:
                                      versions=vc.list_versions()), \
             400 if errors else 200
 
-    @bp.route('/<path:active_version>/delete', methods=['GET', 'POST'])
+    @bp.route('/<active_version>/delete', methods=['GET', 'POST'])
     def delete():
         tag = flask.g.active_version
         protected = tag == VersionedDocument.get_default_tag()

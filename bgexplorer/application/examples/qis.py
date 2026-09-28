@@ -11,7 +11,7 @@ import logging
 import tarfile
 log = logging.getLogger(__name__)
 
-def populate_example(version_tag='examples/qis', clean: bool = False,
+def populate_example(version_tag='examples-qis', clean: bool = False,
                      print_results: bool = False):
     # TODO: add cosmics and environmental gammas
     log.info(f"Populating 'qis' example on branch '{version_tag}'")

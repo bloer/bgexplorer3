@@ -14,8 +14,8 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
         <label class="form-label" for="version_tag">Name</label>
-        <input type="text" class="form-control {% if errors.version_tag %}is-invalid{% endif %}" id="version_tag" name="version_tag" value="{{ form.get('version_tag', '') }}" required>
-        <small class="form-text text-muted">May contain '/', e.g. <code>releases/v1</code></small>
+        <input type="text" class="form-control {% if errors.version_tag %}is-invalid{% endif %}" id="version_tag" name="version_tag" value="{{ form.get('version_tag', '') }}" pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" required>
+        <small class="form-text text-muted">Letters, digits, <code>.</code>, <code>_</code> and <code>-</code>, e.g. <code>release-1.0</code></small>
         {{ fielderror('version_tag') }}
     </div>
     <div class="mb-3">

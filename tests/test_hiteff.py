@@ -107,3 +107,61 @@ class TestHitEFficiency(unittest.TestCase):
         self.assertAlmostEqual(result.s1, np.sqrt(12)/7)
 
 
+
+
+class TestPartialLoad(unittest.TestCase):
+    """ Saving a hit efficiency loaded without its spectra keeps them """
+    @classmethod
+    def setUpClass(cls):
+        connect_test_db()
+
+    @classmethod
+    def tearDownClass(cls):
+        disconnect()
+
+    def setUp(self):
+        from bgexplorer.models.versioncontrol import create_version
+        HitEfficiency.drop_collection()
+        VersionSettings.drop_collection()
+        config = get_settings('main')
+        config.hiteffdbconfig.rois = [
+            SpectrumROI(spectrum='v1', start=0*units.keV, stop=5*units.keV,
+                        mode='integrate')]
+        config.save()
+        self.h = HitEfficiency(
+            source='h', location='h', scalars=dict(v1='10 +- 1 dru/mBq'),
+            spectra=dict(v1=Histogram(
+                AsymmetricUncertainty.fromcounts(np.arange(10))
+                * units('dru/mBq'), np.arange(11) * units.keV))).save()
+        self.roi = self.h.rois[config.hiteffdbconfig.rois[0].key]
+        create_version('b', 'main')
+
+    def check_intact(self, tag):
+        h = HitEfficiency.select_version(tag).get()
+        self.assertEqual(list(h.spectra), ['v1'])
+        self.assertEqual(h.spectra_keys, ['v1'])
+        (roi,) = h.rois.values()
+        self.assertEqual(str(roi), str(self.roi))
+        return h
+
+    def test_is_loaded(self):
+        h = HitEfficiency.select_version('main').exclude('spectra').get()
+        self.assertFalse(h.is_loaded('spectra'))
+        self.assertTrue(h.is_loaded('scalars'))
+        h = HitEfficiency.select_version('main').only('source').get()
+        self.assertTrue(h.is_loaded('source'))
+        self.assertFalse(h.is_loaded('scalars'))
+        h = HitEfficiency.select_version('main').first()
+        self.assertTrue(h.is_loaded('spectra'))
+        h = HitEfficiency.select_version('main').exclude('spectra').get()
+        h.reload()
+        self.assertTrue(h.is_loaded('spectra'))
+
+    def test_save_without_spectra(self):
+        for tag in ('main', 'b'):  # 'b' shares the document: copy on write
+            with self.subTest(tag=tag):
+                h = HitEfficiency.select_version(tag).exclude('spectra').get()
+                h.scalars['v2'] = AsymmetricUncertainty(3, 1) * units('dru/mBq')
+                h.save()
+                h = self.check_intact(tag)
+                self.assertEqual(sorted(h.scalars_keys), ['v1', 'v2'])

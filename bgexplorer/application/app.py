@@ -62,11 +62,11 @@ def create_app(config_file=None, config=None):
     app.register_blueprint(create_versions_blueprint(),
                            url_prefix='/versions')
     app.register_blueprint(CollectionViews(Component),
-                           url_prefix='/<path:active_version>/component')
+                           url_prefix='/explore/<active_version>/component')
     app.register_blueprint(CollectionViews(EmissionSpec),
-                           url_prefix='/<path:active_version>/emission')
+                           url_prefix='/explore/<active_version>/emission')
     app.register_blueprint(CollectionViews(HitEfficiency),
-                           url_prefix='/<path:active_version>/hiteff')
+                           url_prefix='/explore/<active_version>/hiteff')
     # app preprocessing
     @app.url_defaults
     def add_active_version(endpoint, values):
@@ -189,14 +189,14 @@ def create_app(config_file=None, config=None):
     def favicon():
         return app.send_static_file('favicon.ico')
 
-    @app.get('/explore/<path:active_version>')
+    @app.get('/explore/<active_version>')
     def overview():
         return flask.render_template('overview.html')
 
-    app.add_url_rule('/explore/<path:active_version>/settings',
+    app.add_url_rule('/explore/<active_version>/settings',
                      'edit_settings', edit_settings, methods=['GET', 'POST'])
 
-    @app.get('/explore/<path:active_version>/hitefflocations')
+    @app.get('/explore/<active_version>/hitefflocations')
     def hitefflocations():
         """ Return a list of all 'location' keys in the HitEfficiency DB """
         return flask.jsonify(HitEfficiency.select_version(flask.g.active_version)

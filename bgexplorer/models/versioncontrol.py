@@ -8,6 +8,7 @@ from .verdoc import VersionedDocument, ReadOnlyVersionError
 from typing import Optional, Dict
 from enum import Enum
 import datetime
+import re
 import logging
 log = logging.getLogger(__name__)
 
@@ -18,23 +19,17 @@ class ProtectedVersionError(PermissionError):
     """ Raised when trying to delete the default version """
 
 
-# first path segments used by application routes, which can't start a version
-RESERVED_NAMES = ('api', 'versions', 'settings')
+# version names appear as a single URL path segment
+VERSION_NAME_PATTERN = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*')
 
 
 def validate_version_name(version_tag: str) -> None:
     """ Raise ValueError if `version_tag` can't be used as a version name """
-    if not isinstance(version_tag, str) or not version_tag.strip():
+    if not isinstance(version_tag, str) or not version_tag:
         raise ValueError("Version name must not be empty")
-    if version_tag != version_tag.strip():
-        raise ValueError("Version name must not start or end with whitespace")
-    parts = version_tag.split('/')
-    if any(not part for part in parts):
-        raise ValueError("Version name must not start or end with '/' "
-                         "or contain '//'")
-    if parts[0] in RESERVED_NAMES or version_tag in RESERVED_NAMES:
-        raise ValueError(f"Version name must not start with "
-                         f"{', '.join(RESERVED_NAMES)}")
+    if not VERSION_NAME_PATTERN.fullmatch(version_tag):
+        raise ValueError("Version name must start with a letter or digit and "
+                         "contain only letters, digits, '.', '_' and '-'")
 
 
 def list_versions():

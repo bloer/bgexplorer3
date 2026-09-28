@@ -16,7 +16,7 @@ import time
 import flask
 import mongoengine
 
-VERSION = 'examples/qis'
+VERSION = 'examples-qis'
 
 
 def timeit(label, func, profile=None):

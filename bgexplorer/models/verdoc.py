@@ -4,6 +4,7 @@ from mongoengine import (Document, ReferenceField, ObjectIdField,
                          signals, ValidationError, ListField,
                          EmbeddedDocumentListField)
 from mongoengine.dereference import DeReference
+from mongoengine.queryset.field_list import QueryFieldList
 
 from mongoengine import CASCADE, NULLIFY, PULL
 from bson import ObjectId, DBRef
@@ -45,10 +46,26 @@ class VersionedQuerySet(QuerySet):
         self.active_version = active_version
         super().__init__(*args, **kwargs)
 
+    def _loaded(self, doc):
+        """ Set active_version on `doc` and remember which fields it was
+        loaded with, see VersionedDocument.is_loaded
+        """
+        if isinstance(doc, VersionedDocument):
+            doc.active_version = self.active_version
+            if self._loaded_fields:
+                doc._query_fields = self._loaded_fields
+        return doc
+
     def __next__(self):
         result = super().__next__()
         if not self._scalar:
-            result.active_version = self.active_version
+            self._loaded(result)
+        return result
+
+    def __getitem__(self, key):
+        result = super().__getitem__(key)
+        if isinstance(key, int) and not self._scalar:
+            self._loaded(result)
         return result
 
     def _clone_into(self, *args, **kwargs):
@@ -235,7 +252,7 @@ class VersionedDocument(Document):
     version from that collection.
     """
 
-    __slots__ = ['_active_version']
+    __slots__ = ['_active_version', '_query_fields']
     _DEFAULT_TAG = 'main'
 
     id = ObjectIdField(primary_key=True, default=ObjectId)
@@ -261,7 +278,28 @@ class VersionedDocument(Document):
             if active_version is None:
                 active_version = version_tag
         self._active_version = active_version
+        # set by VersionedQuerySet if only() or exclude() was used
+        self._query_fields = None
         super().__init__(*args, **kwargs)
+
+    def is_loaded(self, field: str) -> bool:
+        """ False if `field` was left out, entirely or in part, by only()
+        or exclude() in the query that loaded this document
+        """
+        fields = self._query_fields
+        if not fields or not fields.fields:
+            return True
+        name = self._fields[field].db_field if field in self._fields else field
+        if fields.value == QueryFieldList.ONLY:
+            return name in fields.fields
+        return not any(f == name or f.startswith(name + '.')
+                       for f in fields.fields)
+
+    def reload(self, *fields, **kwargs):
+        result = super().reload(*fields, **kwargs)
+        if not fields:
+            self._query_fields = None
+        return result
 
     @property
     def created(self) -> datetime.datetime:

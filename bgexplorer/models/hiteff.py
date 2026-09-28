@@ -133,10 +133,13 @@ class HitEfficiency(DynamicVersionedDocument):
 
     def check_dbconfig(self, dbconfig):
         """ Make sure we are compatible with the HitEffDBconfig
-        Raise ValidationError if not
+        Raise ValidationError if not. Scalars or spectra that weren't loaded
+        from the database are left alone.
         """
         # make sure units match the desired output
         for type_ in ('scalars', 'spectra'):
+            if not self.is_loaded(type_):
+                continue
             register = getattr(self, type_)
             for key, val in register.items():
                 display_register = getattr(dbconfig, f'display_{type_}')
@@ -150,6 +153,8 @@ class HitEfficiency(DynamicVersionedDocument):
                     raise ValidationError(msg)
 
         # evaluate all ROIs
+        if not self.is_loaded('spectra'):
+            return
         self.rois = dict()
         for roi in dbconfig.rois:
             roi.evaluate(self, store=True)
@@ -158,8 +163,10 @@ class HitEfficiency(DynamicVersionedDocument):
         super().clean()
         dbconfig = settings.get_settings(self.active_version).hiteffdbconfig
         self.check_dbconfig(dbconfig)
-        self.scalars_keys = list(self.scalars)
-        self.spectra_keys = list(self.spectra)
+        if self.is_loaded('scalars'):
+            self.scalars_keys = list(self.scalars)
+        if self.is_loaded('spectra'):
+            self.spectra_keys = list(self.spectra)
 
     @property
     def key(self):

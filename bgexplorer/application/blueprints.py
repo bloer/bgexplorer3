@@ -28,24 +28,41 @@ def _drill_down(obj, name, value, delimiter='__'):
 
 
 class CollectionViews(flask.Blueprint):
+    # large fields that are left out of queries unless an endpoint asks for
+    # them with `loads`
+    DEFERRED_FIELDS = ('attachments__data', 'spectra')
+
     def __init__(self, doc_cls, **kwargs):
         self.doc_cls = doc_cls
         self.clsname = doc_cls.__name__.lower()
         self.has_attachments = hasattr(self.doc_cls, 'attachments')
-        self.has_spectra = hasattr(self.doc_cls, 'spectra')
+        self.deferred_fields = [f for f in self.DEFERRED_FIELDS
+                                if f.split('__')[0] in doc_cls._fields]
+        # endpoint name: deferred fields it needs
+        self._endpoint_fields = {}
         super().__init__(f'{self.clsname}', __name__, **kwargs)
         self.doc_cls.objects.__class__.get_or_404 = get_or_404
         self._setup_processing()
         self._create_endpoints()
 
+    def loads(self, *fields):
+        """ Decorator: the endpoint needs the given DEFERRED_FIELDS. Apply it
+        below the route decorator.
+        """
+        def decorator(func):
+            self._endpoint_fields[f'{self.name}.{func.__name__}'] = set(fields)
+            return func
+        return decorator
+
     @property
     def queryset(self):
+        """ The active version, without the deferred fields that the
+        current endpoint doesn't need
+        """
         qs = self.doc_cls.select_version(flask.g.active_version)
-        # exclude large attributes unless specifically requested
-        if self.has_attachments:
-            qs = qs.exclude('attachments__data')
-        if self.has_spectra and 'spectr' not in flask.request.base_url:
-            qs = qs.exclude('spectra')
+        needed = self._endpoint_fields.get(flask.request.endpoint, ())
+        if skip := [f for f in self.deferred_fields if f not in needed]:
+            qs = qs.exclude(*skip)
         return qs
 
     def get_mtime(self, objid):
@@ -99,6 +116,7 @@ class CollectionViews(flask.Blueprint):
                                          cls=self.doc_cls, data=self.queryset)
 
         @self.get('/api/<objid>')
+        @self.loads(*self.deferred_fields)
         def get_json():
             return flask.Response(flask.g.object.to_json(),
                                   mimetype='application/json')

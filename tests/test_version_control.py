@@ -142,15 +142,16 @@ class TestVersionedDocument(unittest.TestCase):
             create_version('v1', 'test')
 
     def test8_names(self):
-        for name in ('', ' ', ' a', 'a/', '/a', 'a//b', 'api', 'versions',
-                     'settings', 'api/x', None):
+        for name in ('', ' ', ' a', 'a/', '/a', 'a/b', 'my api', '.a', '-a',
+                     'a?', None):
             with self.subTest(name=name):
                 with self.assertRaises(ValueError):
                     create_version(name)
-        for name in ('a/b', 'v1.0', 'my api', 'apis'):
+        # names of top-level routes are fine: versions live under /explore
+        for name in ('v1.0', 'api', 'versions', 'admin', 'a_b-c'):
             create_version(name)
         self.assertEqual([v.version_tag for v in list_versions()],
-                         ['a/b', 'apis', 'my api', 'v1.0'])
+                         ['a_b-c', 'admin', 'api', 'v1.0', 'versions'])
 
     def test9_delete_protected(self):
         create_version('main')

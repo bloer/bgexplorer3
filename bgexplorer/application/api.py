@@ -234,18 +234,18 @@ def create_api() -> flask.Blueprint:
             'api.get_version', active_version=tag)
         return response
 
-    @api.get('/versions/<path:active_version>')
+    @api.get('/versions/<active_version>')
     def get_version():
         return flask.jsonify(settings_to_json(
             get_version_settings(flask.g.active_version)))
 
-    @api.patch('/versions/<path:active_version>')
+    @api.patch('/versions/<active_version>')
     def update_version():
         settings = get_version_settings(flask.g.active_version)
         update_settings(settings, get_json_object())
         return flask.jsonify(settings_to_json(settings))
 
-    @api.delete('/versions/<path:active_version>')
+    @api.delete('/versions/<active_version>')
     def delete_version():
         get_version_settings(flask.g.active_version)
         vc.delete_version(flask.g.active_version)

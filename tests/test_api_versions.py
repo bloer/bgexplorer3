@@ -64,14 +64,14 @@ class TestAPIVersions(unittest.TestCase):
         self.assertEqual(data['description'], 'nothing')
         self.assertEqual(Component.select_version('empty').count(), 0)
 
-        response = self.create(version_tag='a/branch', **{'from': 'main'})
+        response = self.create(version_tag='a-branch', **{'from': 'main'})
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(Component.select_version('a/branch').count(), 1)
+        self.assertEqual(Component.select_version('a-branch').count(), 1)
         self.assertEqual(response.headers['Location'],
-                         f'{API}/versions/a/branch')
+                         f'{API}/versions/a-branch')
 
         response = self.create(version_tag='v1', type='tag',
-                               **{'from': 'a/branch'})
+                               **{'from': 'a-branch'})
         self.assertEqual(response.status_code, 201)
         self.assertFalse(response.get_json()['editable'])
         self.assertFalse(get_settings('v1', create=False).editable)
