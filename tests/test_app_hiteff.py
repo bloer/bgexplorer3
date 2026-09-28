@@ -40,6 +40,9 @@ class TestHitEffPages(AppTestCase):
         html = self.html(self.client.get(self.url('hitefficiency.edit',
                                                   version, object=self.h1)))
         html = re.sub(r'<template.*?</template>', '', html, flags=re.S)
+        # only #mainform, not the spectra forms after it
+        html = re.search(r'<form method="POST" id="mainform">(.*?)</form>',
+                         html, flags=re.S).group(1)
         form = MultiDict()
         for tag in re.findall(r'<input[^>]*>', html):
             name = re.search(r'name="([^"]*)"', tag)
@@ -114,14 +117,32 @@ class TestHitEffPages(AppTestCase):
                                 follow_redirects=follow)
 
     def test_spectra(self):
+        # managed on the edit page only
+        html = self.html(self.client.get(self.url('hitefficiency.edit', 'b',
+                                                  object=self.h1)))
+        spectra = html[html.index('id="spectra"'):]
+        self.assertIn('id="importspectrum"', spectra)
+        self.assertIn('renamespectrum', spectra)
+        self.assertIn('deletespectrum', spectra)
+        self.assertLess(html.index('</form>'), html.index('id="spectra"'))
         html = self.html(self.client.get(self.url('hitefficiency.view', 'b',
                                                   object=self.h1)))
-        self.assertIn('id="importspectrum"', html)
+        for text in ('importspectrum', 'renamespectrum', 'deletespectrum'):
+            self.assertNotIn(text, html)
+        self.assertIn('<li class="spectrum">s1</li>', html)
+        # not on the new page
+        html = self.html(self.client.get(self.url('hitefficiency.edit', 'b')))
+        self.assertNotIn('id="spectra"', html)
+
         csv = b"low,high,value\n0,1,2\n1,2,2\n2,10,2\n"
         response = self.post_spectrum(
-            'import_spectrum', file=(io.BytesIO(csv), 'mine.csv'),
+            'import_spectrum', follow=False,
+            file=(io.BytesIO(csv), 'mine.csv'),
             units='dru/mBq/keV', binsunit='keV')
-        self.assertIn("Imported spectrum 'mine'", self.html(response))
+        self.assertEqual(response.location, self.url(
+            'hitefficiency.edit', 'b', object=self.h1) + '#spectra')
+        self.assertIn("Imported spectrum 'mine'",
+                      self.html(self.client.get(response.location)))
         self.assertEqual(sorted(self.get().spectra_keys), ['mine', 's1'])
         js = json.dumps(dict(value=[3, 3], bins=[0, 5, 10])).encode()
         response = self.post_spectrum(
@@ -158,6 +179,7 @@ class TestHitEffPages(AppTestCase):
                                                   object=self.h1)))
         self.assertNotIn('id="importspectrum"', html)
         self.assertNotIn('deletespectrum', html)
+        self.assertNotIn('Import, rename or delete', html)
         self.assertEqual(self.client.post(self.url('hitefficiency.edit', 't',
                                                    object=self.h1))
                          .status_code, 403)

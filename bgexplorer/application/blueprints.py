@@ -310,7 +310,7 @@ class CollectionViews(flask.Blueprint):
 
     def _create_spectra_endpoints(self):
         """ Import, rename and delete the spectra of a HitEfficiency. Each
-        redirects to the view page with a flashed result
+        redirects to the edit page with a flashed result
         """
         errors = (KeyError, ValueError, me.ValidationError, PintError)
 
@@ -328,7 +328,7 @@ class CollectionViews(flask.Blueprint):
                 flask.flash(str(message), 'danger')
             else:
                 flask.flash(message, 'success')
-            return flask.redirect(flask.url_for('.view', object=flask.g.object,
+            return flask.redirect(flask.url_for('.edit', object=flask.g.object,
                                                 _anchor='spectra'))
 
         @self.post('/<objid>/spectra/import')

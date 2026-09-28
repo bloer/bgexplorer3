@@ -63,19 +63,65 @@
             {{ maptable(g.object, 'extra_metadata') }}
         </fieldset>
     </div>
-    {%- if not isnew %}
-    <div class="row mb-3">
-        <div class="col">
-            <h4>Spectra and ROIs</h4>
-            <p class="text-secondary">Spectra are managed on the
-                <a href="{{ url_for('.view', object=g.object) }}#spectra">summary page</a>;
-                ROIs are calculated from them.</p>
-            <p id="spectrakeys">{{ g.object.spectra_keys | join(', ') or 'No spectra' }}</p>
-        </div>
-    </div>
-    {%- endif %}
     {{ buttons() }}
 </form>
+
+{%- if not isnew %}
+<div class="row mb-3" id="spectra">
+    <div class="col-md-6">
+        <h4>Spectra</h4>
+        <p class="text-secondary">Changes to spectra are saved immediately.
+            ROIs are calculated from them.</p>
+        <table class="table table-sm">
+            <tbody>
+            {%- for name in g.object.spectra_keys %}
+            <tr class="spectrum">
+                <td>{{ name }}</td>
+                <td class="text-end text-nowrap">
+                    <form method="POST" action="{{ url_for('.rename_spectrum', object=g.object) }}" class="d-inline-flex renamespectrum">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="name" value="{{ name }}">
+                        <input class="form-control form-control-sm me-1" name="newname" value="{{ name }}" required aria-label="New name">
+                        <button class="btn btn-sm btn-outline-primary me-1" type="submit">Rename</button>
+                    </form>
+                    <form method="POST" action="{{ url_for('.delete_spectrum', object=g.object) }}" class="d-inline deletespectrum"
+                          onsubmit="return confirm('Delete spectrum {{ name | e }}?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="name" value="{{ name }}">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {%- else %}
+            <tr><td class="text-secondary">No spectra</td></tr>
+            {%- endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="col-md-6">
+        <h4>Import spectrum</h4>
+        <form method="POST" enctype="multipart/form-data" id="importspectrum"
+              action="{{ url_for('.import_spectrum', object=g.object) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input class="form-control mb-1" type="file" name="file" accept=".csv,.txt,.dat,.json" required>
+            <div class="form-text mb-2">CSV or whitespace-separated columns
+                <code>low, high, value[, sigma[, sigmaup]]</code>, or histogram JSON
+                with <code>value</code>, <code>bins</code> and optional
+                <code>sigma</code>, <code>sigmaup</code>, <code>units</code>, <code>binsunit</code>.</div>
+            <div class="row g-1 mb-1">
+                <div class="col"><input class="form-control" name="name" placeholder="name (default: file name)"></div>
+                <div class="col"><input class="form-control" name="units" placeholder="units, e.g. dru/mBq"></div>
+                <div class="col"><input class="form-control" name="binsunit" placeholder="bins unit, e.g. keV"></div>
+            </div>
+            <div class="form-check mb-1">
+                <input class="form-check-input" type="checkbox" name="overwrite" id="overwrite">
+                <label class="form-check-label" for="overwrite">Replace an existing spectrum with the same name</label>
+            </div>
+            <button class="btn btn-primary" type="submit">Import</button>
+        </form>
+    </div>
+</div>
+{%- endif %}
 {% endblock pagecontent %}
 
 {% block pagescripts %}
