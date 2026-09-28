@@ -33,7 +33,7 @@ def delete_component(sender, document, **kwargs):
 
 def update_component(sender, document, **kwargs):
     component = document
-    log.debug("update_component for", component.name)
+    log.debug("update_component for %s", component.name)
     # first, generate the list of all source terms for this component
     sourceterms = []
     for spec in list(component.specs) + [component]:
@@ -81,7 +81,6 @@ def update_parent(assembly, component, child_sourceterms, scope=()):
         __raw__={f'placement_ids.{i}': {'$in': list(ids)}
                  for i, ids in enumerate(scope)},
         ).delete()
-    print("update_parent", assembly.name, component.name, len(sourceterms))
     for parent in assembly.find_parents():
         update_parent(parent, assembly, sourceterms, scope)
     return sourceterms

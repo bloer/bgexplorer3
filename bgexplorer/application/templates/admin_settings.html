@@ -1,0 +1,32 @@
+{% extends "adminbase.html" %}
+{% from "forms.html" import formfield with context %}
+{% block title %}Site settings - Background Explorer{% endblock %}
+{% block pageheader %}<h1>Site settings</h1>{% endblock %}
+{% block pagecontent %}
+{% if errors %}
+<ul id="toperror" class="alert alert-danger">
+    {% for name, message in errors.items() %}<li>{{ name }}: {{ message }}</li>{% endfor %}
+</ul>
+{% endif %}
+<form method="POST" id="settingsform" enctype="multipart/form-data" class="col-md-8">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {{ formfield(app_settings, 'org_name') }}
+    {{ formfield(app_settings, 'org_url') }}
+    <div class="form-field mb-3">
+        <label class="form-label" for="org_logo">Org logo</label>
+        {% if app_settings.org_logo %}
+        <div class="mb-2"><img id="currentlogo" src="{{ url_for('admin.logo') }}" alt="current logo" style="max-height:40px"></div>
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="remove_logo" id="remove_logo" value="true">
+            <label class="form-check-label" for="remove_logo">Remove the logo</label>
+        </div>
+        {% endif %}
+        <input class="form-control {%- if errors.org_logo %} is-invalid{% endif %}" type="file" id="org_logo" name="org_logo" accept="image/*">
+        {% if errors.org_logo %}<div class="invalid-feedback">{{ errors.org_logo }}</div>{% endif %}
+        <div class="form-text">Shown at the right of the navigation bar, linked to the org URL. At most 1 MB.</div>
+    </div>
+    {{ formfield(app_settings, 'allow_anon_view') }}
+    <button type="submit" class="btn btn-success">Save</button>
+    <a class="btn btn-secondary" href="{{ url_for('admin.index') }}">Cancel</a>
+</form>
+{% endblock %}

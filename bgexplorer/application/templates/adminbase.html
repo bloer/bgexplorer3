@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Admin - Background Explorer{% endblock %}
+{% block pagenav %}
+<li class="nav-item">
+    <a class="nav-link" href="{{ url_for('admin.settings') }}">Site settings</a>
+</li>
+<li class="nav-item">
+    <a class="nav-link" href="{{ url_for('admin.maintenance_page') }}">Maintenance</a>
+</li>
+{% endblock %}
+{% block extranav %}
+<span class="badge text-bg-warning" title="Admin pages have no access control yet">admin</span>
+{% endblock %}

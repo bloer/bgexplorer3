@@ -6,7 +6,8 @@ import mongoengine
 import secrets
 import enum
 import importlib
-from ..models.settings import get_settings, get_application_settings
+from ..models.settings import (get_settings, get_application_settings,
+                               ApplicationSettings)
 from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
@@ -16,6 +17,7 @@ from .common import pretty_date
 from .blueprints import CollectionViews
 from .api import create_api, API_VERSION
 from .versions import create_versions_blueprint, edit_settings
+from .admin import create_admin_blueprint
 from ..models.versioncontrol import list_versions, version_exists
 from ..models.verdoc import VersionedDocument
 from .forms import input_type, input_value
@@ -61,6 +63,7 @@ def create_app(config_file=None, config=None):
     app.register_blueprint(api, url_prefix=f'/api/{API_VERSION}')
     app.register_blueprint(create_versions_blueprint(),
                            url_prefix='/versions')
+    app.register_blueprint(create_admin_blueprint(), url_prefix='/admin')
     app.register_blueprint(CollectionViews(Component),
                            url_prefix='/explore/<active_version>/component')
     app.register_blueprint(CollectionViews(EmissionSpec),
@@ -157,6 +160,18 @@ def create_app(config_file=None, config=None):
         if isinstance(val, enum.Enum):
             return str(val.value)
         return str(val)
+
+    @app.template_global()
+    def org_branding():
+        """ Organization name, url and whether a logo is set, without
+        loading the logo itself
+        """
+        doc = ApplicationSettings._get_collection().find_one(
+            {}, {'org_name': 1, 'org_url': 1,
+                 'has_logo': {'$gt': ['$org_logo', None]}})
+        doc = doc or {}
+        return dict(name=doc.get('org_name'), url=doc.get('org_url'),
+                    has_logo=bool(doc.get('has_logo')))
 
     @app.template_global()
     def all_versions():

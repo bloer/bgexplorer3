@@ -42,9 +42,20 @@
         {% block extranav %}
         {% endblock extranav %}
         {%- endfilter %}
+        <ul class="navbar-nav ms-3">
+            <li class="nav-item"><a class="nav-link" id="adminlink" href="{{ url_for('admin.index') }}">Admin</a></li>
+        </ul>
+        {%- set org = org_branding() %}
+        {%- if org.name or org.has_logo %}
+        <a class="navbar-brand me-0 ms-3" id="orgbrand" {%- if org.url %} href="{{ org.url }}"{% endif %}>
+            {%- if org.has_logo %}<img src="{{ url_for('admin.logo') }}" alt="{{ org.name or 'logo' }}" style="max-height:40px">
+            {%- else %}{{ org.name }}{% endif -%}
+        </a>
+        {%- else %}
         <a class="navbar-brand me-0 ms-3" href="https://pnnl.gov">
             <img src="{{ url_for('static', filename='logopnnl.png') }}" alt="PNNL">
         </a>
+        {%- endif %}
     </div>
 </nav>
 {% endblock navbar %}

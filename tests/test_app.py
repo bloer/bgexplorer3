@@ -30,6 +30,8 @@ SKIP_ENDPOINTS = {'static', 'test'}
 # is noticed.
 # TODO: add edit templates for emissionspecs and hiteffs
 KNOWN_BROKEN = {'emissionspec.edit'}
+# endpoints whose GET doesn't return 200 with the test fixtures
+EXPECTED_STATUS = {'admin.logo': 404}  # no logo is set
 
 
 def reset_database():
@@ -97,7 +99,8 @@ class AppSmokeTest:
 
     def check_get(self, endpoint, url):
         response = self.client.get(url)
-        self.assertEqual(response.status_code, 200,
+        self.assertEqual(response.status_code,
+                         EXPECTED_STATUS.get(endpoint, 200),
                          f"{endpoint}: GET {url}")
         return response
 

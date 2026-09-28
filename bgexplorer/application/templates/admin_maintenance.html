@@ -1,0 +1,71 @@
+{% extends "adminbase.html" %}
+{% block title %}Maintenance - Background Explorer{% endblock %}
+{% block pageheader %}<h1>Database maintenance</h1>{% endblock %}
+{% block pagecontent %}
+<h2>Collections</h2>
+<table id="collections" class="table w-auto">
+    <thead><tr><th>Collection</th><th>Documents</th><th>Size</th></tr></thead>
+    <tbody>
+        {% for name, info in stats.collections.items() %}
+        <tr><td>{{ name }}</td><td>{{ info.count }}</td>
+            <td>{% if info.size is not none %}{{ (info.size / 1024) | round(1) }} kB{% else %}?{% endif %}</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+<form method="POST" id="clearcache" action="{{ url_for('admin.clear_cache') }}" class="mb-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-warning">Clear calculation cache</button>
+    <span class="form-text">Stored results are recalculated when next viewed.</span>
+</form>
+
+<h2>Versions</h2>
+{% set classes = (stats.versions.values() | first).counts.keys() if stats.versions else [] %}
+<table id="versions" class="table w-auto">
+    <thead><tr><th>Version</th>
+        {% for name in classes %}<th title="total (only in this version)">{{ name }}</th>{% endfor %}
+    </tr></thead>
+    <tbody>
+        {% for tag, info in stats.versions.items() %}
+        <tr><td><a href="{{ url_for('overview', active_version=tag) }}">{{ tag }}</a>
+            {%- if not info.editable %} <span class="badge text-bg-secondary">tag</span>{% endif %}</td>
+            {% for name in classes %}<td>{{ info.counts[name].total }} ({{ info.counts[name].unique }})</td>{% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<form method="POST" id="rebuild" action="{{ url_for('admin.rebuild') }}" class="row g-2 align-items-center mb-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="col-auto">
+        <select class="form-select" name="version" aria-label="version to rebuild">
+            {% for version in versions if version.editable %}
+            <option value="{{ version.version_tag }}">{{ version.version_tag }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto"><button type="submit" class="btn btn-warning">Rebuild source terms</button></div>
+    <div class="col-auto form-text">Regenerates the version's source terms from its components. Tags can't be rebuilt.</div>
+</form>
+
+<h2>Orphaned documents</h2>
+<div id="orphans">
+{% if orphans %}
+<ul>
+    {% for name, ids in orphans.untagged.items() %}
+    <li>{{ ids | length }} {{ name }} document(s) belong to no version</li>
+    {% endfor %}
+    {% for version, ids in orphans.sourceterms.items() %}
+    <li>{{ ids | length }} source term(s) in {{ version }} refer to a missing component or emission spec</li>
+    {% endfor %}
+    {% if orphans.unknown_tags %}
+    <li>Documents are tagged with unknown versions: {{ orphans.unknown_tags | join(', ') }}</li>
+    {% endif %}
+</ul>
+<form method="POST" id="deleteorphans" action="{{ url_for('admin.delete_orphans') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger" onclick="return confirm('Remove these orphaned documents?');">Delete orphans</button>
+</form>
+{% else %}
+<p>No orphaned documents found.</p>
+{% endif %}
+</div>
+{% endblock %}
