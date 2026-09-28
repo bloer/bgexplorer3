@@ -250,6 +250,40 @@ input{% if open %} type="{{ type }}"{% endif -%}
 {%- endmacro -%}
 
 
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{%- macro maptablerow(fieldname, key='', value='', errmsg=none) -%}
+    <tr>
+        <td><input class="form-control" name="{{ fieldname }}.__key__" value="{{ key }}"></td>
+        <td><input class="form-control {%- if errmsg %} is-invalid{% endif %}" name="{{ fieldname }}.__value__" value="{{ value }}">
+            {%- if errmsg -%}<div class="invalid-feedback">{{ errmsg }}</div>{%- endif -%}</td>
+        <td style="text-align:right"><a href="#" onclick="removeDynamicTableRow(this);" class="btn btn-danger" style="font-weight:bold">x</a></td>
+    </tr>
+{%- endmacro -%}
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{%- macro maptable(obj, fieldname, valuelabel='Value') -%}
+{# Render a MapField of plain values as a table of editable names and values #}
+{# tell update_object this map is in the form, even if it has no rows #}
+<input type="hidden" name="_listfields" value="{{ fieldname }}">
+<table class="table maptable" id="{{ fieldname }}">
+    <thead><tr><th>Name</th><th>{{ valuelabel }}</th><th></th></tr></thead>
+    <tbody>
+        {%- for key, value in obj[fieldname].items() -%}
+        {{ maptablerow(fieldname, key, '' if value is none else input_value(value),
+                       errmsg=finderrmsg([fieldname, key])) }}
+        {%- endfor -%}
+    </tbody>
+</table>
+<template id="{{ fieldname }}_template">
+    {{ maptablerow(fieldname) }}
+</template>
+<div class="d-flex justify-content-end">
+    <button class="btn btn-primary" type="button" data-tableid="{{ fieldname }}" data-templateid="{{ fieldname }}_template" onClick="addDynamicTableRow(this);">Add</button>
+</div>
+{%- endmacro -%}
+
+
 {# ~~~~~~~~~~~~~~~~~~~~~~~ #}
 {# TODO:
     - Macros to add a modal target to each edit form that takes references (probably all of them)

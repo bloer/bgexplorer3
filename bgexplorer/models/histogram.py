@@ -15,6 +15,72 @@ class Histogram(object):
         if bin_edges is None:
             self.bin_edges = np.arange(len(self.hist)+1)
 
+    @classmethod
+    def from_columns(cls, text: str, units=None, binsunit=None
+                     ) -> 'Histogram':
+        """ Parse a table with columns `low, high, value[, sigma[, sigmaup]]`
+        separated by commas or whitespace. `sigma` is the (lower) uncertainty
+        and `sigmaup` the upper one if asymmetric. Blank lines, `#` comments
+        and a header line are skipped. Bins must be contiguous and increasing.
+        Returns a Histogram of AsymmetricUncertainty quantities.
+        """
+        import pint
+        from .asymmetric import AsymmetricUncertainty
+        rows = []
+        for lineno, line in enumerate(text.splitlines(), 1):
+            line = line.split('#', 1)[0].strip()
+            if not line:
+                continue
+            fields = [f for f in line.replace(',', ' ').split()]
+            try:
+                row = [float(f) for f in fields]
+            except ValueError:
+                if not rows:
+                    # header
+                    continue
+                raise ValueError(f"Line {lineno}: can't parse '{line}'")
+            if not 3 <= len(row) <= 5:
+                raise ValueError(f"Line {lineno}: expected 3 to 5 columns "
+                                 f"(low, high, value[, sigma[, sigmaup]]), "
+                                 f"got {len(row)}")
+            if rows and len(row) != len(rows[0]):
+                raise ValueError(f"Line {lineno}: expected {len(rows[0])} "
+                                 f"columns, got {len(row)}")
+            rows.append(row)
+        if not rows:
+            raise ValueError("No data found")
+        data = np.array(rows).T
+        low, high, value = data[:3]
+        if np.any(high <= low):
+            raise ValueError("Each bin's high edge must be above its low edge")
+        if not np.allclose(high[:-1], low[1:]):
+            raise ValueError("Bins must be contiguous: each bin's low edge "
+                             "must equal the previous bin's high edge")
+        edges = np.append(low, high[-1])
+        sigma = data[3] if len(data) > 3 else np.zeros_like(value)
+        sigmaup = data[4] if len(data) > 4 else None
+        hist = pint.Quantity(AsymmetricUncertainty(value, sigma, sigmaup),
+                             units)
+        return cls(hist, pint.Quantity(edges, binsunit))
+
+    @classmethod
+    def from_dict(cls, d: dict, units=None, binsunit=None) -> 'Histogram':
+        """ Read the HistogramField JSON shape: `value`, `bins` and optional
+        `sigma`, `sigmaup`, `units`, `binsunit`. `units` and `binsunit`
+        are defaults if not given in `d`
+        """
+        from .fields import HistogramField
+        if not isinstance(d, dict) or 'value' not in d or 'bins' not in d:
+            raise ValueError("Histogram JSON needs 'value' and 'bins' keys")
+        d = {k: np.asarray(v, dtype=float) if isinstance(v, list) else v
+             for k, v in d.items()}
+        if 'sigma' not in d:
+            d['sigma'] = np.zeros_like(d['value'])
+        hist = HistogramField(units=units, binsunit=binsunit).to_python(d)
+        if len(hist.hist) != len(hist.bin_edges) - 1:
+            raise ValueError("Histogram needs one more bin edge than values")
+        return hist
+
     @property
     def binwidths(self):
         return self.bin_edges[1:] - self.bin_edges[:-1]

@@ -1,0 +1,83 @@
+{% extends "versionbase.html" %}
+{% from "forms.html" import formfield, formscripts, maptable with context %}
+
+{%- set isnew = g.object.original_id is none -%}
+{%- macro buttons() -%}
+    <div class="d-flex justify-content-end">
+        <button class="btn btn-success me-1" type="submit" form="mainform">Save</button>
+        {%- if isnew %}
+        <a class="btn btn-warning me-1" href="{{ request.url }}">Reset</a>
+        <a class="btn btn-danger" href="{{ url_for('.overview') }}">Cancel</a>
+        {%- else %}
+        <a class="btn btn-warning me-1" href="{{ url_for('.edit', object=g.object) }}">Reload</a>
+        <a class="btn btn-danger" href="{{ url_for('.view', object=g.object) }}">Cancel</a>
+        {%- endif %}
+    </div>
+{%- endmacro -%}
+
+{% block pageheader %}
+<div class="col-5">
+    <h2>{% if isnew %}New hit efficiency{% else %}Editing hit efficiency <span class="text-primary">{{ g.object }}</span>{% endif %}</h2>
+</div>
+<div class="col-7">
+    {{ buttons() }}
+</div>
+{% endblock pageheader %}
+
+{% block pagecontent %}
+<p>Branch: {{ g.object.active_version }}</p>
+{%- if not isnew %}
+<p>Current revision: {{ g.object.revision }}</p>
+<p>Last modified: {{ pretty_date(g.object.modified) }}</p>
+{%- endif %}
+{%- if errors -%}
+<div id="toperror" class="alert alert-danger">
+    Errors found in form; please correct and resubmit.
+    <ul class="mb-0">{% for name, message in errors.items() %}<li><strong>{{ name }}</strong>: {{ message }}</li>{% endfor %}</ul>
+</div>
+{%- endif -%}
+<form method="POST" id="mainform">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row mb-3">
+        <fieldset class="col-sm-12 col-md-6">
+            <legend>Source and location</legend>
+            <div class="row">
+            {%- for fieldname in ['source', 'location', 'material', 'norm'] -%}
+            {{ formfield(g.object, fieldname, outerclass='col-sm-6') }}
+            {%- endfor -%}
+            </div>
+            <legend>Simulation</legend>
+            <div class="row">
+            {%- for fieldname in ['nprimaries', 'biasweight', 'primary_particle',
+                                  'primary_spectrum', 'primary_yield',
+                                  'primary_area', 'primary_volume', 'livetime',
+                                  'version', 'date'] -%}
+            {{ formfield(g.object, fieldname, outerclass='col-sm-6') }}
+            {%- endfor -%}
+            </div>
+        </fieldset>
+        <fieldset class="col-sm-12 col-md-6">
+            <legend>Scalars</legend>
+            {{ maptable(g.object, 'scalars') }}
+            <legend>Extra metadata</legend>
+            {{ maptable(g.object, 'extra_metadata') }}
+        </fieldset>
+    </div>
+    {%- if not isnew %}
+    <div class="row mb-3">
+        <div class="col">
+            <h4>Spectra and ROIs</h4>
+            <p class="text-secondary">Spectra are managed on the
+                <a href="{{ url_for('.view', object=g.object) }}#spectra">summary page</a>;
+                ROIs are calculated from them.</p>
+            <p id="spectrakeys">{{ g.object.spectra_keys | join(', ') or 'No spectra' }}</p>
+        </div>
+    </div>
+    {%- endif %}
+    {{ buttons() }}
+</form>
+{% endblock pagecontent %}
+
+{% block pagescripts %}
+{{ formscripts() }}
+{% endblock pagescripts %}

@@ -4,7 +4,8 @@ from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.histogram import Histogram
-from bgexplorer.models.settings import VersionSettings, SpectrumROI, get_settings
+from bgexplorer.models.settings import (VersionSettings, SpectrumROI,
+                                        get_settings, HitEffConfig)
 from bgexplorer.models import sourceterm  # need this to get signals registered
 import numpy as np
 from tests.dbutil import connect_test_db
@@ -157,6 +158,22 @@ class TestPartialLoad(unittest.TestCase):
         h.reload()
         self.assertTrue(h.is_loaded('spectra'))
 
+    def test_active_version_not_dynamic(self):
+        """ setting active_version doesn't create a saved dynamic field """
+        coll = HitEfficiency._get_collection()
+        h = HitEfficiency.select_version('b').get()
+        self.assertEqual(h.active_version, 'b')
+        self.assertNotIn('active_version', h._fields_ordered)
+        h.source = 'h2'
+        h.save()
+        for doc in coll.find():
+            self.assertNotIn('active_version', doc)
+        # stale values saved by older versions are ignored
+        coll.update_many({}, {'$set': {'active_version': 'nope'}})
+        h = HitEfficiency.select_version('b').get()
+        self.assertEqual(h.active_version, 'b')
+        self.assertNotIn('active_version', h._dynamic_fields)
+
     def test_save_without_spectra(self):
         for tag in ('main', 'b'):  # 'b' shares the document: copy on write
             with self.subTest(tag=tag):
@@ -165,3 +182,103 @@ class TestPartialLoad(unittest.TestCase):
                 h.save()
                 h = self.check_intact(tag)
                 self.assertEqual(sorted(h.scalars_keys), ['v1', 'v2'])
+
+
+class TestSpectrumParsing(unittest.TestCase):
+    def test_columns(self):
+        text = """# a comment
+        low, high, value, sigma
+        0, 1, 5, 1
+        1, 2, 3, 0.5  # trailing comment
+
+        2, 4, 1, 0.1
+        """
+        h = Histogram.from_columns(text, 'dru/mBq', 'keV')
+        np.testing.assert_allclose(h.bin_edges.m, [0, 1, 2, 4])
+        self.assertEqual(h.bin_edges.u, units.keV)
+        np.testing.assert_allclose(h.hist.m.nominal_value, [5, 3, 1])
+        self.assertTrue(h.hist.u.is_compatible_with('dru/mBq'))
+        # whitespace, asymmetric, no units
+        h = Histogram.from_columns("0 1 5 1 2\n1 2 3 1 2\n")
+        self.assertEqual(len(h.hist), 2)
+        self.assertTrue(h.hist.dimensionless)
+
+    def test_bad_columns(self):
+        for text, msg in (("0 1 5\n2 3 1\n", "contiguous"),
+                          ("0 1\n", "columns"),
+                          ("0 1 5\n1 2 3 4\n", "columns"),
+                          ("1 0 5\n", "high edge"),
+                          ("0 1 5\n1 2 x\n", "Line 2"),
+                          ("# nothing\n", "No data")):
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(ValueError, msg):
+                    Histogram.from_columns(text)
+
+    def test_dict(self):
+        h = Histogram.from_dict(dict(value=[1, 2], sigma=[0.1, 0.2],
+                                     bins=[0, 1, 3], units='dru/mBq',
+                                     binsunit='keV'))
+        np.testing.assert_allclose(h.bin_edges.m, [0, 1, 3])
+        self.assertTrue(h.hist.u.is_compatible_with('dru/mBq'))
+        # units as defaults, no sigma
+        h = Histogram.from_dict(dict(value=[1, 2], bins=[0, 1, 3]),
+                                'dru/mBq', 'keV')
+        self.assertEqual(h.bin_edges.u, units.keV)
+        with self.assertRaises(ValueError):
+            Histogram.from_dict(dict(value=[1, 2]))
+        with self.assertRaises(ValueError):
+            Histogram.from_dict(dict(value=[1, 2], bins=[0, 1]))
+
+
+class TestSpectrumEditing(TestPartialLoad):
+    """ add, rename and remove spectra; ROIs follow """
+    def spectrum(self, value=1, unit='dru/mBq'):
+        return Histogram(AsymmetricUncertainty(np.full(10, value * 1.),
+                                               np.zeros(10)) * units(unit),
+                         np.arange(11) * units.keV)
+
+    def roi_of(self, h):
+        (roi,) = h.rois.values()
+        return roi
+
+    def test_add_rename_remove(self):
+        h = HitEfficiency.select_version('b').get()
+        h.add_spectrum('v2', self.spectrum())
+        h = HitEfficiency.select_version('b').get()
+        self.assertEqual(sorted(h.spectra_keys), ['v1', 'v2'])
+        with self.assertRaises(KeyError):
+            h.add_spectrum('v2', self.spectrum())
+        # the ROI uses spectrum v1; replacing it changes the ROI
+        h.add_spectrum('v1', self.spectrum(2), overwrite=True)
+        h = HitEfficiency.select_version('b').get()
+        self.assertAlmostEqual(self.roi_of(h).m.nominal_value, 10)
+        with self.assertRaises(KeyError):
+            h.rename_spectrum('v1', 'v2')
+        with self.assertRaises(KeyError):
+            h.rename_spectrum('nope', 'x')
+        h.rename_spectrum('v1', 'renamed')
+        h = HitEfficiency.select_version('b').get()
+        self.assertEqual(sorted(h.spectra_keys), ['renamed', 'v2'])
+        self.assertIsNone(self.roi_of(h))
+        h.rename_spectrum('v2', 'v1')
+        h.remove_spectrum('renamed')
+        h = HitEfficiency.select_version('b').get()
+        self.assertEqual(h.spectra_keys, ['v1'])
+        self.assertAlmostEqual(self.roi_of(h).m.nominal_value, 5)
+        with self.assertRaises(KeyError):
+            h.remove_spectrum('renamed')
+        # main is untouched
+        self.check_intact('main')
+
+    def test_units_and_loading(self):
+        config = get_settings('b')
+        config.hiteffdbconfig.display_spectra = dict(
+            v2=HitEffConfig(display_unit='dru/mBq'))
+        config.save()
+        h = HitEfficiency.select_version('b').get()
+        with self.assertRaises(ValidationError):
+            h.add_spectrum('v2', self.spectrum(unit='keV'))
+        h = HitEfficiency.select_version('b').exclude('spectra').get()
+        with self.assertRaises(ValueError):
+            h.add_spectrum('v3', self.spectrum())
+        self.check_intact('b')

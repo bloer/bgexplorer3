@@ -1,7 +1,15 @@
 {% extends "versionbase.html" %}
 {% import "datatable.html" as datatable %}
 
-{% block pageheader %}<h1>Hit Efficiencies</h1>{% endblock %}
+{% block pageheader %}
+<div class="col-5"><h1>Hit Efficiencies</h1></div>
+<div class="col-7 d-flex justify-content-end align-items-center">
+    {%- if settings.editable %}
+    <a class="btn btn-success me-1" id="newhiteff" href="{{ url_for('.edit') }}">New Hit Efficiency</a>
+    <a class="btn btn-outline-primary" id="import" href="{{ url_for('.import_') }}">Import</a>
+    {%- endif %}
+</div>
+{% endblock %}
 
 {% block pagecontent %}
 {% set headers = ['Source', 'Location', 'Nprimaries', 'Primary',

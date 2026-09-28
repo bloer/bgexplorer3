@@ -38,6 +38,9 @@ def input_value(value):
 
 
 LISTFIELDS_KEY = '_listfields'
+# suffixes for MapFields submitted as parallel lists of keys and values
+MAP_KEY = '__key__'
+MAP_VALUE = '__value__'
 
 
 FALSE_STRINGS = ('', 'false', 'off', 'no', '0')
@@ -83,6 +86,38 @@ def _map_keys(form, fullfieldname):
     return list(keys)
 
 
+def _keyed_map(subfield, form, fullfieldname, errors, errorkey):
+    """ Build a MapField value from parallel `__key__` and `__value__` lists
+    """
+    keys = form.getlist(f"{fullfieldname}.{MAP_KEY}")
+    raws = form.getlist(f"{fullfieldname}.{MAP_VALUE}")
+    value = {}
+    for i, (key, raw) in enumerate(zip(keys, raws)):
+        key = key.strip()
+        message = None
+        if not key:
+            if raw.strip():
+                message = "A name is required"
+            else:
+                continue
+        elif key in value:
+            message = f"Duplicate name '{key}'"
+        if message:
+            if errors is None:
+                raise ValueError(message)
+            errors[f"{errorkey}.{i}"] = message
+            continue
+        if subfield is None:
+            # a plain DictField keeps strings
+            converted = raw.strip()
+        else:
+            converted = _convert(subfield, raw.strip(), errors,
+                                 f"{errorkey}.{key}")
+        if converted is not _INVALID:
+            value[key] = None if converted == '' else converted
+    return value
+
+
 def update_object(obj, form, prefix=None, index=0, errors=None, path=None):
     """ Update the fields of the document object from the values in the form
 
@@ -92,7 +127,10 @@ def update_object(obj, form, prefix=None, index=0, errors=None, path=None):
     fields are replaced entirely by the values in the form.
 
     Entries of a MapField are named `field[key]`, or `field[key].subfield`
-    for maps of EmbeddedDocuments.
+    for maps of EmbeddedDocuments. Maps of plain values can instead be
+    submitted as parallel lists `field.__key__` and `field.__value__`, so that
+    keys can be edited; rows with a blank key and value are skipped. Plain
+    DictFields can only be submitted this way, and keep string values.
 
     If `errors` is a dict, values that can't be converted are left
     unchanged, and the messages stored in `errors` keyed by the dotted path
@@ -127,6 +165,10 @@ def update_object(obj, form, prefix=None, index=0, errors=None, path=None):
                                    index=index, errors=errors,
                                    path=path + [fieldname, str(index)])
                      for index in range(len(form.getlist(firstfield)))]
+        elif (isinstance(field, me.DictField)
+              and f"{fullfieldname}.{MAP_KEY}" in form):
+            value = _keyed_map(field.field, form, fullfieldname, errors,
+                               errorkey)
         elif isinstance(field, me.MapField):
             keys = _map_keys(form, fullfieldname)
             if not keys and fullfieldname not in listfields:

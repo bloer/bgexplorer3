@@ -474,6 +474,17 @@ class DynamicVersionedDocument(VersionedDocument):
     _dynamic = True
     meta = {'abstract': True, 'queryset_class': VersionedQuerySet}
 
+    def __setattr__(self, name, value):
+        """ Properties such as active_version are not dynamic fields, which
+        would otherwise be created (and saved) for any public attribute.
+        While loading, stale values saved that way are ignored
+        """
+        if isinstance(getattr(type(self), name, None), property):
+            if getattr(self, '_initialised', False):
+                object.__setattr__(self, name, value)
+        else:
+            super().__setattr__(name, value)
+
     def __delattr__(self, *args, **kwargs):
         """Delete the attribute by setting to None and allowing _delta
         to unset it.

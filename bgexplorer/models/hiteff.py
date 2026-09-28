@@ -171,6 +171,50 @@ class HitEfficiency(DynamicVersionedDocument):
     def __str__(self):
         return f"{self.source} - {self.location}"
 
+    def _check_spectra_loaded(self):
+        if not self.is_loaded('spectra'):
+            raise ValueError("Spectra were not loaded for this document")
+
+    def add_spectrum(self, name: str, hist: Histogram,
+                     overwrite: bool = False) -> None:
+        """ Add spectrum `name` and save. Raises KeyError if it exists and
+        not `overwrite`, ValidationError if units don't match the settings
+        """
+        self._check_spectra_loaded()
+        name = name.strip()
+        if not name:
+            raise ValueError("A spectrum name is required")
+        if name in self.spectra and not overwrite:
+            raise KeyError(f"Spectrum '{name}' already exists")
+        spectra = dict(self.spectra)
+        spectra[name] = hist
+        self.spectra = spectra
+        self.save()
+
+    def rename_spectrum(self, old: str, new: str) -> None:
+        """ Rename spectrum `old` to `new` and save """
+        self._check_spectra_loaded()
+        new = new.strip()
+        if old not in self.spectra:
+            raise KeyError(f"No spectrum '{old}'")
+        if not new:
+            raise ValueError("A spectrum name is required")
+        if new == old:
+            return
+        if new in self.spectra:
+            raise KeyError(f"Spectrum '{new}' already exists")
+        self.spectra = {new if k == old else k: v
+                        for k, v in self.spectra.items()}
+        self.save()
+
+    def remove_spectrum(self, name: str) -> None:
+        """ Delete spectrum `name` and save """
+        self._check_spectra_loaded()
+        if name not in self.spectra:
+            raise KeyError(f"No spectrum '{name}'")
+        self.spectra = {k: v for k, v in self.spectra.items() if k != name}
+        self.save()
+
     @property
     def key(self):
         return self.id or (self.source, self.location)

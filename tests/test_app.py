@@ -29,7 +29,7 @@ SKIP_ENDPOINTS = {'static', 'test'}
 # pages that don't work yet. These are expected to fail so that fixing them
 # is noticed.
 # TODO: add edit templates for emissionspecs and hiteffs
-KNOWN_BROKEN = {'emissionspec.edit', 'hitefficiency.edit'}
+KNOWN_BROKEN = {'emissionspec.edit'}
 
 
 def reset_database():

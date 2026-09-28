@@ -9,6 +9,9 @@ from ..models.importexport import iter_json_documents, import_documents
 from ..models.verdoc import check_writable
 from .api import validation_fields
 from .forms import update_object
+from ..models.histogram import Histogram
+from pint.errors import PintError
+import json
 
 
 def get_or_404(queryset, objid):
@@ -248,8 +251,85 @@ class CollectionViews(flask.Blueprint):
 
 
 
+        if 'spectra' in self.doc_cls._fields:
+            self._create_spectra_endpoints()
+
         @self.get('/<objid>/sourceterms')
         def sourceterms():
             sourceterms = find_sourceterms(flask.g.object)
             return flask.render_template('view_sourceterms.html',
                                          sourceterms=sourceterms)
+
+    def _create_spectra_endpoints(self):
+        """ Import, rename and delete the spectra of a HitEfficiency. Each
+        redirects to the view page with a flashed result
+        """
+        errors = (KeyError, ValueError, me.ValidationError, PintError)
+
+        def done(message=None, error=None):
+            if error is not None:
+                message = error.args[0] if error.args else str(error)
+                flask.flash(str(message), 'danger')
+            else:
+                flask.flash(message, 'success')
+            return flask.redirect(flask.url_for('.view', object=flask.g.object,
+                                                _anchor='spectra'))
+
+        @self.post('/<objid>/spectra/import')
+        @self.loads('spectra')
+        def import_spectrum():
+            check_writable(flask.g.active_version)
+            form = flask.request.form
+            upload = flask.request.files.get('file')
+            name = form.get('name', '').strip()
+            if not upload or not upload.filename:
+                return done(error=ValueError("Choose a file to import"))
+            name = name or upload.filename.rsplit('.', 1)[0]
+            try:
+                hist = parse_spectrum(upload.read(), upload.filename,
+                                      form.get('units') or None,
+                                      form.get('binsunit') or None)
+                flask.g.object.add_spectrum(name, hist,
+                                            overwrite='overwrite' in form)
+            except errors as e:
+                return done(error=e)
+            return done(f"Imported spectrum '{name}'")
+
+        @self.post('/<objid>/spectra/rename')
+        @self.loads('spectra')
+        def rename_spectrum():
+            check_writable(flask.g.active_version)
+            form = flask.request.form
+            try:
+                flask.g.object.rename_spectrum(form.get('name', ''),
+                                               form.get('newname', ''))
+            except errors as e:
+                return done(error=e)
+            return done(f"Renamed spectrum '{form['name']}' to "
+                        f"'{form['newname'].strip()}'")
+
+        @self.post('/<objid>/spectra/delete')
+        @self.loads('spectra')
+        def delete_spectrum():
+            check_writable(flask.g.active_version)
+            name = flask.request.form.get('name', '')
+            try:
+                flask.g.object.remove_spectrum(name)
+            except errors as e:
+                return done(error=e)
+            return done(f"Deleted spectrum '{name}'")
+
+
+def parse_spectrum(data: bytes, filename: str = '', units=None,
+                   binsunit=None) -> Histogram:
+    """ Read a Histogram from histogram JSON or CSV/TXT columns. `units` and
+    `binsunit` are defaults for JSON and required units for columns
+    """
+    text = data.decode('utf-8-sig')
+    if filename.lower().endswith('.json') or text.lstrip().startswith('{'):
+        try:
+            d = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Not valid JSON: {e}")
+        return Histogram.from_dict(d, units, binsunit)
+    return Histogram.from_columns(text, units, binsunit)
