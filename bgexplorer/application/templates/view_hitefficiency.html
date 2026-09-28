@@ -97,6 +97,15 @@
     </div>
 </div>
 
+{%- if g.object.spectra_keys %}
+<div class="row mb-3">
+    <div class="col">
+        <h3>Spectrum plots</h3>
+        <div id="spectrumplot" class="plotcontainer"></div>
+    </div>
+</div>
+{%- endif %}
+
 <div class="row mb-3">
     <div class="col">
         <h4>Other versions</h4>
@@ -106,3 +115,11 @@
 
 {% endblock %}
 
+
+{% block scripts %}
+{{ super() }}
+{%- if g.object.spectra_keys and activepage == 'summary' %}
+{{ utils.plotscripts() }}
+<script>bgplots.spectrum('spectrumplot', {{ url_for('.spectra_json', object=g.object) | tojson }});</script>
+{%- endif %}
+{% endblock %}

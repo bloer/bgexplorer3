@@ -2,15 +2,18 @@ import flask
 import mongoengine as me
 from bson import ObjectId
 from io import BytesIO
-from ..models.sourceterm import find_sourceterms
+from ..models.sourceterm import find_sourceterms, CalculatedResults
+from ..models.budget import budget_breakdown, available_scalars, GROUPBY
 from ..models.component import Component
 from ..models.fields import InlineAttachment
 from ..models.importexport import iter_json_documents, import_documents
 from ..models.verdoc import check_writable
+from ..models.settings import get_settings
 from .api import validation_fields
 from .forms import update_object
 from ..models.histogram import Histogram
 from pint.errors import PintError
+from .plotting import histogram_json, scalar_json, unit_str
 import json
 
 
@@ -253,6 +256,8 @@ class CollectionViews(flask.Blueprint):
 
         if 'spectra' in self.doc_cls._fields:
             self._create_spectra_endpoints()
+        if issubclass(self.doc_cls, Component):
+            self._create_plot_endpoints()
 
         @self.get('/<objid>/sourceterms')
         def sourceterms():
@@ -260,11 +265,62 @@ class CollectionViews(flask.Blueprint):
             return flask.render_template('view_sourceterms.html',
                                          sourceterms=sourceterms)
 
+    def _create_plot_endpoints(self):
+        """ Data for the spectra and budget plots of a Component """
+        @self.get('/<objid>/spectra.json')
+        def spectra_json():
+            results = CalculatedResults.for_object(
+                flask.g.object, flask.g.get('relativeto'))
+            config = get_settings(flask.g.active_version)\
+                .hiteffdbconfig.display_spectra
+            spectra = {}
+            for name, hist in (results.spectra if results else {}).items():
+                cfg = config.get(name)
+                if hist is None or (cfg and cfg.hide):
+                    continue
+                spectra[(cfg and cfg.display_name) or name] = \
+                    histogram_json(hist, cfg and cfg.display_unit)
+            return flask.jsonify(spectra)
+
+        @self.get('/<objid>/budget.json')
+        def budget_json():
+            args = flask.request.args
+            scalars = available_scalars(flask.g.active_version)
+            scalar = args.get('scalar') or (scalars[0] if scalars else '')
+            try:
+                budget = budget_breakdown(
+                    flask.g.object, scalar, args.get('groupby', 'component'),
+                    relativeto=flask.g.get('relativeto'),
+                    unit=args.get('unit') or None)
+            except (ValueError, PintError) as e:
+                return flask.jsonify(error=dict(message=str(e))), 400
+            rows = [dict(label=row['label'],
+                         measured=scalar_json(row['measured']),
+                         limit=scalar_json(row['limit']))
+                    for row in budget['rows']]
+            return flask.jsonify(scalar=scalar, scalars=scalars,
+                                 groupby=budget['groupby'],
+                                 units=unit_str(budget['units']), rows=rows)
+
+        @self.get('/<objid>/budget')
+        def budget():
+            return flask.render_template(
+                'budget_component.html', activepage='budget', groupby=GROUPBY,
+                scalars=available_scalars(flask.g.active_version))
+
     def _create_spectra_endpoints(self):
         """ Import, rename and delete the spectra of a HitEfficiency. Each
         redirects to the view page with a flashed result
         """
         errors = (KeyError, ValueError, me.ValidationError, PintError)
+
+        @self.get('/<objid>/spectra.json')
+        @self.loads('spectra')
+        def spectra_json():
+            return flask.jsonify({
+                name: histogram_json(hist)
+                for name, hist in flask.g.object.spectra.items()
+                if hist is not None})
 
         def done(message=None, error=None):
             if error is not None:

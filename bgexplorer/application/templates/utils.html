@@ -106,3 +106,10 @@
     </tbody>
 </table>
 {%- endmacro -%}
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{%- macro plotscripts() -%}
+<script src="{{ url_for('static', filename='plotly-basic.min.js') }}"></script>
+<script src="{{ url_for('static', filename='bgplots.js') }}"></script>
+{%- endmacro -%}

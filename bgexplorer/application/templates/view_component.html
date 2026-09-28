@@ -19,7 +19,7 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
     <div class="nav nav-tabs justify-content-end">
         <a class="nav-link {% if activepage == 'summary' %}active{% endif %}" href="{{ url_for('.view', object=g.object) }}">Summary</a>
         <a class="nav-link {% if activepage == 'sourceterms' %}active{% endif %}" href="{{ url_for('.sourceterms', object=g.object) }}">Source Terms</a>
-        {% if g.object.children %}<a class="nav-link" href="#">Bill of Materials</a>{% endif %}
+        <a class="nav-link {% if activepage == 'budget' %}active{% endif %}" href="{{ url_for('.budget', object=g.object, relativeto=g.get('relativeto')) }}">Budget</a>
         <a class="nav-link {% if activepage == 'attachments' %}active{% endif %}" href="{{ url_for('.attachments', object=g.object) }}">Attachments
             <span class="badge text-bg-secondary">{{ g.object.attachments|length }}</span>
         </a>
@@ -169,6 +169,13 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 
 <div class="row mb-3">
     <div class="col">
+        <h3>Spectra</h3>
+        <div id="spectrumplot" class="plotcontainer"></div>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <div class="col">
         <h4>Other versions</h4>
         {{ utils.other_versions(g.object) }}
     </div>
@@ -177,6 +184,10 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 
 {% block scripts %}
 {{ super() }}
+{%- if activepage == 'summary' %}
+{{ utils.plotscripts() }}
+<script>bgplots.spectrum('spectrumplot', {{ url_for('.spectra_json', object=g.object, relativeto=g.get('relativeto')) | tojson }});</script>
+{%- endif %}
 <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 {% endblock %}
