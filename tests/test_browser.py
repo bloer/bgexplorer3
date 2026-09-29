@@ -9,6 +9,7 @@ LD_LIBRARY_PATH).
 import os
 import threading
 import unittest
+from unittest import mock
 import numpy as np
 from werkzeug.serving import make_server
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
@@ -21,6 +22,7 @@ from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.users import User, Role
 from bgexplorer.models import versioncontrol as vc
 from tests.test_app_components import AppTestCase
+from tests.test_radiopurity import fixture
 
 try:
     from playwright.sync_api import sync_playwright, Error as PlaywrightError
@@ -281,6 +283,69 @@ class TestReferencePicker(BrowserTestCase):
         page.wait_for_url(self.base + self.url('component.view',
                                                object=self.c1))
         self.assertIsNone(self.material())
+
+
+class TestRadiopuritySpinner(BrowserTestCase):
+    def setUp(self):
+        super().setUp()
+        vc.create_version('main')
+        # hold the search open until the test has seen the spinner
+        self.release = threading.Event()
+        self.addCleanup(self.release.set)
+
+        def post(*args, **kwargs):
+            self.release.wait(10)
+            return mock.Mock(text=fixture('mumetal'))
+        patcher = mock.patch('bgexplorer.models.radiopurity.requests.post',
+                             side_effect=post)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def submit(self, page, button):
+        """ Click `button`, and return the spinner's state as the form is
+        submitted. It's reported from the submit event, since the page may
+        not be readable once it is navigating
+        """
+        states = []
+        name = f'report{id(states)}'
+        page.expose_function(name, lambda state: states.append(state))
+        # added after the page's own listener, so runs after it
+        page.evaluate("""([button, name]) => {
+            document.querySelector(button).form.addEventListener(
+                'submit', () => window[name]({
+                    shown: getComputedStyle(
+                        document.getElementById('searching'))
+                        .display !== 'none',
+                    message: document.getElementById('searchingmessage')
+                        .textContent,
+                    disabled: document.querySelector(button).disabled}));
+        }""", [button, name])
+        page.click(button, no_wait_after=True)
+        while not states:
+            page.wait_for_timeout(50)
+        return states[0]
+
+    def test_spinner(self):
+        page = self.open(self.url('radiopurity.search'))
+        self.assertFalse(page.locator('#searching').is_visible())
+        page.fill('#q', 'mumetal')
+        state = self.submit(page, '#searchform button[type=submit]')
+        self.assertEqual(state, dict(
+            shown=True, disabled=True,
+            message='Searching radiopurity.org\u2026'))
+        self.release.set()
+        page.wait_for_selector('#importform')
+        self.assertFalse(page.locator('#searching').is_visible())
+        self.assertTrue(page.locator('#searchform button[type=submit]')
+                        .is_enabled())
+
+        self.release.clear()
+        state = self.submit(page, '#importselected')
+        self.assertEqual(state['message'],
+                         'Importing from radiopurity.org\u2026')
+        self.assertTrue(state['shown'] and state['disabled'])
+        self.release.set()
+        page.wait_for_url(self.base + self.url('emissionspec.overview'))
 
 
 class TestLoginInBrowser(BrowserTestCase):

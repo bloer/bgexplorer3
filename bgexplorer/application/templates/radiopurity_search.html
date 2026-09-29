@@ -19,6 +19,10 @@ the assay's extra metadata.</p>
         <a class="btn btn-secondary" href="{{ url_for('emissionspec.overview') }}">Cancel</a>
     </div>
 </form>
+<div id="searching" class="d-none align-items-center mb-3">
+    <div class="spinner-border text-primary me-2" role="status" aria-hidden="true"></div>
+    <span id="searchingmessage">Searching radiopurity.org&hellip;</span>
+</div>
 
 {% if term %}
 <p>{{ records | length }} results for <strong>{{ term }}</strong>{% if existing %}, {{ existing | length }} already imported{% endif %}.</p>
@@ -73,6 +77,28 @@ the assay's extra metadata.</p>
 
 {% block pagescripts %}
 <script>
+const searching = document.getElementById('searching');
+function showSpinner(form, message) {
+    document.getElementById('searchingmessage').textContent = message;
+    searching.classList.replace('d-none', 'd-flex');
+    form.querySelectorAll('button[type="submit"]').forEach(
+        button => { button.disabled = true; });
+}
+document.getElementById('searchform').addEventListener('submit', event => {
+    showSpinner(event.target, 'Searching radiopurity.org\u2026');
+});
+const importform = document.getElementById('importform');
+if (importform) {
+    importform.addEventListener('submit', event => {
+        showSpinner(event.target, 'Importing from radiopurity.org\u2026');
+    });
+}
+// going back to this page may show it as it was left, spinner and all
+window.addEventListener('pageshow', () => {
+    searching.classList.replace('d-flex', 'd-none');
+    document.querySelectorAll('button[type="submit"]').forEach(
+        button => { button.disabled = false; });
+});
 const selectall = document.getElementById('selectall');
 if (selectall) {
     selectall.addEventListener('change', () => {
