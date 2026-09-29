@@ -295,6 +295,49 @@ class TestEmissionSpecPages(AppTestCase):
         self.assertEqual(len(Assay.select_version('main').get().attachments),
                          1)
 
+    def test_remove_attachment(self):
+        self.attach(self.e1, 'main')
+        self.attach(self.e1, 'main')
+        # share the copy with the attachments
+        vc.create_version('b2', 'main')
+        vc.create_tag('t2', 'main')
+        e1 = self.get(version='b2')
+        first, second = [a.id for a in e1.attachments]
+        page = self.url('emissionspec.attachments', 'b2', object=e1)
+        remove = self.url('emissionspec.delete_attachment', 'b2', object=e1,
+                          attachmentid=first)
+        html = self.html(self.client.get(page))
+        self.assertEqual(html.count('class="removeform"'), 2)
+        self.assertIn(remove, html)
+        response = self.client.post(remove)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(page, response.headers['Location'])
+        attachments = self.get(version='b2').attachments
+        self.assertEqual([a.id for a in attachments], [second])
+        self.assertEqual(attachments[0].data, b'hello')
+        # main and the tag keep both
+        for version in ('main', 't2'):
+            self.assertEqual([a.id for a in self.get(version=version)
+                              .attachments], [first, second])
+        # it's gone from the branch
+        self.assertEqual(self.client.post(remove).status_code, 404)
+        self.assertEqual(self.client.get(self.url(
+            'emissionspec.get_attachment', 'b2', object=e1,
+            attachmentid=first)).status_code, 404)
+        for bad in ('nope', str(e1.id)):
+            with self.subTest(attachmentid=bad):
+                self.assertEqual(self.client.post(self.url(
+                    'emissionspec.delete_attachment', 'b2', object=e1,
+                    attachmentid=bad)).status_code, 404)
+        # not on the tag
+        html = self.html(self.client.get(
+            self.url('emissionspec.attachments', 't2', object=e1)))
+        self.assertNotIn('class="removeform"', html)
+        self.assertEqual(self.client.post(self.url(
+            'emissionspec.delete_attachment', 't2', object=e1,
+            attachmentid=first)).status_code, 403)
+        self.assertEqual(len(self.get(version='t2').attachments), 2)
+
     def test_readonly(self):
         """ tags have no buttons and refuse changes """
         html = self.html(self.client.get(self.url('emissionspec.overview',

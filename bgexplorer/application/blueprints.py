@@ -264,13 +264,21 @@ class CollectionViews(flask.Blueprint):
                     pass
                 return flask.render_template('attachments.html')
 
+            def attachment_id(attachmentid) -> ObjectId:
+                """ The id of one of the active object's attachments """
+                if (not ObjectId.is_valid(attachmentid) or
+                        ObjectId(attachmentid) not in
+                        [a.id for a in flask.g.object.attachments]):
+                    flask.abort(404)
+                return ObjectId(attachmentid)
+
             @self.get('<objid>/attachments/<attachmentid>')
             def get_attachment(attachmentid):
-                attachment = self.doc_cls.objects(id=flask.g.object.id).aggregate(
+                attachment = next(self.doc_cls.objects(id=flask.g.object.id).aggregate(
                     [{'$unwind': '$attachments'},
                      {'$replaceWith': '$attachments'},
-                     {'$match': {'id': ObjectId(attachmentid)}},
-                     ]).next()
+                     {'$match': {'id': attachment_id(attachmentid)}},
+                     ]), None)
                 if not attachment:
                     flask.abort(404)
                 return flask.send_file(BytesIO(attachment['data']),
@@ -294,6 +302,19 @@ class CollectionViews(flask.Blueprint):
                 flask.g.object.modify(push__attachments=attachment)
                 return flask.redirect(flask.url_for('.attachments',
                                                     object=flask.g.object))
+
+            @self.post('<objid>/attachments/<attachmentid>/delete')
+            def delete_attachment(attachmentid):
+                check_writable(flask.g.active_version)
+                obj = flask.g.object
+                attachment = next(a for a in obj.attachments
+                                  if a.id == attachment_id(attachmentid))
+                # a versioned modify, so other versions keep it
+                obj.modify(pull__attachments__id=attachment.id)
+                flask.flash(f"Removed attachment {attachment.filename}",
+                            'success')
+                return flask.redirect(flask.url_for('.attachments',
+                                                    object=obj))
 
 
 
