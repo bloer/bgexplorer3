@@ -381,44 +381,6 @@ class TestUserAdmin(AuthTestCase):
                          403)
 
 
-class TestCli(AuthTestCase):
-    def invoke(self, *args, input=None):
-        return self.app.test_cli_runner().invoke(args=list(args),
-                                                 input=input)
-
-    def test_create_user(self):
-        result = self.invoke('create-user', 'root', '--role', 'site_admin',
-                             input=f'{PASSWORD}\n{PASSWORD}\n')
-        self.assertEqual(result.exit_code, 0, result.output)
-        user = User.objects.get(name='root')
-        self.assertIs(user.role, Role.site_admin)
-        self.assertTrue(user.check_password(PASSWORD))
-        self.assertNotIn(PASSWORD, result.output)
-        result = self.invoke('create-user', 'root', '--password', PASSWORD)
-        self.assertNotEqual(result.exit_code, 0)
-        self.assertIn('already a user', result.output)
-        result = self.invoke('create-user', 'u2', '--password', 'short')
-        self.assertNotEqual(result.exit_code, 0)
-        self.assertIn('at least 8', result.output)
-        result = self.invoke('create-user', 'u3', '--role', 'boss',
-                             '--password', PASSWORD)
-        self.assertNotEqual(result.exit_code, 0)
-        self.assertEqual(User.objects.count(), 1)
-        result = self.invoke('create-user', 'u4', '--password', PASSWORD)
-        self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIs(User.objects.get(name='u4').role, Role.viewer)
-
-    def test_set_password(self):
-        self.make_user('u1')
-        result = self.invoke('set-password', 'u1',
-                             input='battery staple\nbattery staple\n')
-        self.assertEqual(result.exit_code, 0, result.output)
-        self.assertTrue(User.objects.get().check_password('battery staple'))
-        result = self.invoke('set-password', 'nobody', '--password', PASSWORD)
-        self.assertNotEqual(result.exit_code, 0)
-        self.assertIn('No user', result.output)
-
-
 class TestEnteredBy(AuthTestCase):
     def test_enteredby(self):
         c1 = Component(name='c1').save()

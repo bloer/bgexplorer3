@@ -23,7 +23,6 @@ from ..models.verdoc import VersionedDocument
 from .forms import input_type, input_value, field_kind
 from . import examples
 from . import auth
-from . import cli
 
 from ..models.asymmetric import AsymmetricUncertainty
 import pint
@@ -61,7 +60,6 @@ def create_app(config_file=None, config=None):
     get_application_settings()
     get_settings()
 
-    cli.init_app(app)
     # first, so that logins are checked before anything else
     auth.init_app(app)
 

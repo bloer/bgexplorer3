@@ -1,10 +1,26 @@
-""" Command line tools for the server, run with `flask --app bgexplorer` """
+""" Command line tools for user accounts. These only need the database, not
+the web app or its configuration:
+
+    bgexplorer-users [--uri URI] create NAME --role site_admin
+    python -m bgexplorer.cli [--uri URI] set-password NAME
+"""
 import click
-from flask.cli import with_appcontext
+import mongoengine
 from mongoengine.errors import NotUniqueError
-from ..models.users import User, Role
+from .application.config_default import MONGODB_URI
+from .models.users import User, Role
 
 ROLE_NAMES = [role.name for role in Role]
+
+
+@click.group()
+@click.option('--uri', envvar='FLASK_MONGODB_URI', default=MONGODB_URI,
+              show_default=True,
+              help="MongoDB server and database, as for the server "
+                   "[env var: FLASK_MONGODB_URI]")
+def cli(uri):
+    """ Manage bgexplorer user accounts """
+    mongoengine.connect(host=uri)
 
 
 def _set_password(user: User, password: str) -> None:
@@ -14,13 +30,12 @@ def _set_password(user: User, password: str) -> None:
         raise click.BadParameter(str(e), param_hint='password')
 
 
-@click.command('create-user')
+@cli.command()
 @click.argument('name')
 @click.option('--role', type=click.Choice(ROLE_NAMES), default='viewer',
               show_default=True)
 @click.password_option()
-@with_appcontext
-def create_user(name, role, password):
+def create(name, role, password):
     """ Create a user account, e.g. the first site_admin """
     user = User(name=name.strip(), role=Role[role])
     _set_password(user, password)
@@ -31,10 +46,9 @@ def create_user(name, role, password):
     click.echo(f"Created {role} '{user.name}'")
 
 
-@click.command('set-password')
+@cli.command('set-password')
 @click.argument('name')
 @click.password_option()
-@with_appcontext
 def set_password(name, password):
     """ Set a user's password, logging them out """
     user = User.objects(name=name).first()
@@ -45,6 +59,9 @@ def set_password(name, password):
     click.echo(f"Set the password for '{name}'")
 
 
-def init_app(app) -> None:
-    app.cli.add_command(create_user)
-    app.cli.add_command(set_password)
+def main():
+    cli()
+
+
+if __name__ == '__main__':
+    main()

@@ -18,13 +18,15 @@ The server must have a `SECRET_KEY`, which protects the login sessions, e.g.
 from the `FLASK_SECRET_KEY` environment variable. Keep it secret and the same
 across restarts. Only debug and test servers make a temporary one.
 
-Create the first site admin on the command line, with the same configuration
-as the server; it asks for a password. They can then add other users through
-the web interface.
+Create the first site admin on the command line; it asks for a password.
+They can then add other users through the web interface. The commands only
+connect to the database, given by `--uri` or the `FLASK_MONGODB_URI`
+environment variable (`python -m bgexplorer.cli` also works when the package
+isn't installed):
 
 ```sh
-flask --app bgexplorer create-user NAME --role site_admin
-flask --app bgexplorer set-password NAME  # if a password is forgotten
+bgexplorer-users --uri mongodb://HOST/DATABASE create NAME --role site_admin
+bgexplorer-users set-password NAME  # if a password is forgotten
 ```
 
 Set `LOGIN_DISABLED = True` in the configuration to give everyone every role,
