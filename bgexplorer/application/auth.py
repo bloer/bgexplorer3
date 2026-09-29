@@ -12,6 +12,7 @@ import flask
 from flask_login import LoginManager, current_user, login_user, logout_user
 from ..models.settings import get_application_settings
 from ..models.users import User, Role, check_login
+from ..models.verdoc import set_user_provider
 
 login_manager = LoginManager()
 login_manager.login_view = 'auth.login'
@@ -163,6 +164,13 @@ def create_auth_blueprint() -> flask.Blueprint:
     return bp
 
 
+def _entered_by() -> Optional[str]:
+    """ The name of the logged in user making a change, for `enteredby` """
+    if flask.has_request_context() and current_user.is_authenticated:
+        return current_user.name
+    return None
+
+
 def init_app(app: flask.Flask) -> None:
     """ Set up logins for `app`. Call before registering other
     before_request functions, so that login is checked first
@@ -176,5 +184,6 @@ def init_app(app: flask.Flask) -> None:
             return None
         return require(Role.viewer)
 
+    set_user_provider(_entered_by)
     app.add_template_global(has_role, 'has_role')
     app.add_template_global(login_disabled, 'login_disabled')

@@ -2,6 +2,10 @@
 import unittest
 from mongoengine import disconnect, NotUniqueError
 from bgexplorer.models.users import User, Role
+from bgexplorer.models.component import Component
+from bgexplorer.models.verdoc import set_user_provider
+from bgexplorer.models.settings import VersionSettings
+from bgexplorer.models import versioncontrol as vc
 from tests.dbutil import connect_test_db
 
 
@@ -50,6 +54,24 @@ class TestUsers(unittest.TestCase):
         User(name='u1').save()
         with self.assertRaises(NotUniqueError):
             User(name='u1').save()
+
+    def test_enteredby(self):
+        for cls in (Component, VersionSettings):
+            cls.drop_collection()
+        vc.create_version('main')
+        name = None
+        set_user_provider(lambda: name)
+        try:
+            c1 = Component(name='c1', enteredby='someone').save()
+            self.assertEqual(c1.enteredby, 'someone')
+            name = 'u1'
+            c1.save()
+            self.assertEqual(Component.objects.get().enteredby, 'u1')
+            name = None
+            c1.save()
+            self.assertEqual(Component.objects.get().enteredby, 'u1')
+        finally:
+            set_user_provider(None)
 
 
 if __name__ == '__main__':

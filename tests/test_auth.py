@@ -417,3 +417,22 @@ class TestCli(AuthTestCase):
         result = self.invoke('set-password', 'nobody', '--password', PASSWORD)
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn('No user', result.output)
+
+
+class TestEnteredBy(AuthTestCase):
+    def test_enteredby(self):
+        c1 = Component(name='c1').save()
+        self.assertIsNone(c1.enteredby)
+        self.make_user('u1', Role.editor)
+        self.login('u1')
+        url = self.url('component.edit', object=c1)
+        # a posted value is ignored
+        response = self.client.post(url, data=dict(name='c1',
+                                                   enteredby='someone'))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Component.objects.get().enteredby, 'u1')
+        html = self.html(self.client.get(url))
+        self.assertIn('by <span id="enteredby">u1</span>', html)
+        html = self.html(self.client.get(self.url('component.view',
+                                                  object=c1)))
+        self.assertIn('<td class="enteredby">u1</td>', html)

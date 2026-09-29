@@ -92,7 +92,7 @@
 {%- macro other_versions(obj) -%}
 {%- set tags = all_versions() | rejectattr('editable') | map(attribute='version_tag') | list -%}
 <table id="otherversions" class="table table-sm w-auto">
-    <thead><tr><th>Version</th><th>Revision</th><th>Modified</th><th></th></tr></thead>
+    <thead><tr><th>Version</th><th>Revision</th><th>Modified</th><th>By</th><th></th></tr></thead>
     <tbody>
     {%- for row in obj.other_versions() %}
     <tr class="version{% if row.current %} table-active{% endif %}">
@@ -100,6 +100,7 @@
             {% if row.version in tags %}<span class="badge text-bg-secondary">tag</span>{% endif %}</td>
         <td>{{ row.revision }}</td>
         <td>{{ pretty_date(row.modified) }}</td>
+        <td class="enteredby">{{ row.enteredby or '' }}</td>
         <td>{% if row.current %}<span class="badge text-bg-primary">this</span>{% elif row.same_copy %}<span class="text-secondary">identical</span>{% endif %}</td>
     </tr>
     {%- endfor %}

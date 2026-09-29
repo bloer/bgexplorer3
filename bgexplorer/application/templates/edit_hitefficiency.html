@@ -28,7 +28,7 @@
 <p>Branch: {{ g.object.active_version }}</p>
 {%- if not isnew %}
 <p>Current revision: {{ g.object.revision }}</p>
-<p>Last modified: {{ pretty_date(g.object.modified) }}</p>
+<p>Last modified: {{ pretty_date(g.object.modified) }}{% if g.object.enteredby %} by <span id="enteredby">{{ g.object.enteredby }}</span>{% endif %}</p>
 {%- endif %}
 {%- if errors -%}
 <div id="toperror" class="alert alert-danger">

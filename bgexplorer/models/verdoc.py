@@ -9,7 +9,7 @@ from mongoengine.queryset.field_list import QueryFieldList
 from mongoengine import CASCADE, NULLIFY, PULL
 from bson import ObjectId, DBRef
 import datetime
-from typing import Optional, List
+from typing import Optional, List, Callable
 
 
 class ReadOnlyVersionError(PermissionError):
@@ -298,15 +298,16 @@ class VersionedDocument(Document):
     def other_versions(self) -> List[dict]:
         """ One row per version containing this item (any copy with the same
         original_id), sorted by version name. Each row has `version`,
-        `revision`, `modified`, `current` (the active version) and `same_copy`
-        (the version shares this physical copy)
+        `revision`, `modified`, `enteredby`, `current` (the active version)
+        and `same_copy` (the version shares this physical copy)
         """
         if self.original_id is None:
             return []
         copies = (type(self).objects(original_id=self.original_id)
-                  .only('version_tags', 'revision', 'modified'))
+                  .only('version_tags', 'revision', 'modified', 'enteredby'))
         rows = [dict(version=tag, revision=copy.revision,
-                     modified=copy.modified, current=tag == self.active_version,
+                     modified=copy.modified, enteredby=copy.enteredby,
+                     current=tag == self.active_version,
                      same_copy=copy.id == self.id)
                 for copy in copies for tag in copy.version_tags]
         return sorted(rows, key=lambda row: row['version'])
@@ -497,6 +498,19 @@ class DynamicVersionedDocument(VersionedDocument):
             super().__delattr__(*args, **kwargs)
 
 
+# returns the name of the user making changes, or None if unknown
+_user_provider: Optional[Callable[[], Optional[str]]] = None
+
+
+def set_user_provider(provider: Optional[Callable[[], Optional[str]]]
+                      ) -> None:
+    """ Saved documents get `enteredby` from `provider()`, unless it returns
+    None. This keeps the model layer free of the web app's logins
+    """
+    global _user_provider
+    _user_provider = provider
+
+
 def pre_save_post_validation(sender, document=None, created=False, **kwargs):
     """ Called by signals immediately prior to saving this object in the
     database. If multiple versions refer to this document, we split
@@ -518,6 +532,8 @@ def pre_save_post_validation(sender, document=None, created=False, **kwargs):
         document.version_tags = [document.active_version]
     document.revision += 1
     document.modified = datetime.datetime.now()
+    if _user_provider is not None and (name := _user_provider()):
+        document.enteredby = name
 
 
 signals.pre_save_post_validation.connect(pre_save_post_validation)
