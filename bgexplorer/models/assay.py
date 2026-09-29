@@ -2,7 +2,7 @@ from mongoengine import (EmbeddedDocument, StringField, EmbeddedDocumentField,
                          EmbeddedDocumentListField, DateField, IntField,
                          DictField, URLField, MapField)
 from .emissionspec import EmissionSpec, SourceCategory
-from .fields import UncertainQuantityField, AttachmentsField, QuantityField
+from .fields import UncertainQuantityField, QuantityField
 from .common import PublicationInfo
 
 
@@ -64,7 +64,6 @@ class Assay(EmissionSpec):
     publication = EmbeddedDocumentField(PublicationInfo)
     radiopurityid = StringField(label="radiopurity.org database id")
     extra_metadata = DictField()
-    attachments = AttachmentsField()
 
     def __init__(self, *args, **kwargs):
         kwargs.setdefault('category', SourceCategory.assay)

@@ -1,5 +1,6 @@
 """ Creating and editing emission specs through the web interface """
 import re
+from io import BytesIO
 from werkzeug.datastructures import MultiDict
 from bgexplorer.models.assay import Assay
 from bgexplorer.models.component import Component
@@ -259,6 +260,41 @@ class TestEmissionSpecPages(AppTestCase):
         copy = self.get('e1 (copy)')
         self.assertEqual([s.name for s in copy.sources], ['Th232', 'K40'])
 
+    def attach(self, spec, version='b'):
+        return self.client.post(
+            self.url('emissionspec.add_attachments', version, object=spec),
+            data=dict(fupload=(BytesIO(b'hello'), 'hello.txt'),
+                      description='assay report'))
+
+    def test_attachments(self):
+        view = self.html(self.client.get(self.url('emissionspec.view', 'b',
+                                                  object=self.e1)))
+        self.assertIn(self.url('emissionspec.attachments', 'b',
+                               object=self.e1), view)
+        response = self.attach(self.e1)
+        self.assertEqual(response.status_code, 302)
+        e1 = self.get()
+        self.assertEqual([a.filename for a in e1.attachments], ['hello.txt'])
+        # only on the branch
+        self.assertEqual(self.get(version='main').attachments, [])
+        html = self.html(self.client.get(self.url('emissionspec.attachments',
+                                                  'b', object=e1)))
+        self.assertIn('assay report', html)
+        self.assertIn('id="uploadform"', html)
+        attachment = self.url('emissionspec.get_attachment', 'b', object=e1,
+                              attachmentid=e1.attachments[0].id)
+        self.assertEqual(self.client.get(attachment).data, b'hello')
+        # editing and cloning keep the data
+        self.assertEqual(self.post(self.edit_form()).status_code, 302)
+        self.assertEqual(self.get().attachments[0].data, b'hello')
+        self.client.post(self.url('emissionspec.clone', 'b', object=e1))
+        self.assertEqual(self.get('e1 (copy)').attachments[0].data, b'hello')
+        # and assays have them too
+        assay = Assay(name='a1').save()
+        self.assertEqual(self.attach(assay, 'main').status_code, 302)
+        self.assertEqual(len(Assay.select_version('main').get().attachments),
+                         1)
+
     def test_readonly(self):
         """ tags have no buttons and refuse changes """
         html = self.html(self.client.get(self.url('emissionspec.overview',
@@ -274,4 +310,9 @@ class TestEmissionSpecPages(AppTestCase):
                 self.assertEqual(self.client.get(url).status_code, 403)
                 self.assertEqual(self.client.post(url, data={'name': 'x'})
                                  .status_code, 403)
-        self.assertEqual(self.get(version='t').name, 'e1')
+        self.assertEqual(self.attach(self.e1, 't').status_code, 403)
+        self.assertNotIn('id="uploadform"', self.html(self.client.get(
+            self.url('emissionspec.attachments', 't', object=self.e1))))
+        e1 = self.get(version='t')
+        self.assertEqual(e1.name, 'e1')
+        self.assertEqual(e1.attachments, [])

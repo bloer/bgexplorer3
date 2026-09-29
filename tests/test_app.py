@@ -114,6 +114,7 @@ class AppSmokeTest:
         # make sure the url discovery found everything
         for endpoint in ('index', 'overview', 'component.view',
                          'component.get_attachment',
+                         'emissionspec.get_attachment',
                          'emissionspec.sourceterms', 'hitefficiency.view',
                          'versions.new', 'versions.delete',
                          'edit_settings', 'api.list_versions', 'api.get_version'):
@@ -193,11 +194,13 @@ class TestAppSmall(AppSmokeTest, unittest.TestCase):
         client = cls.app.test_client()
         with cls.app.test_request_context():
             flask.g.active_version = cls.version
-            url = flask.url_for('component.add_attachments', object=c1)
-        response = client.post(url, data=dict(
-            fupload=(BytesIO(b'hello'), 'hello.txt'),
-            description='test attachment'))
-        assert response.status_code == 302, response.status_code
+            urls = [flask.url_for('component.add_attachments', object=c1),
+                    flask.url_for('emissionspec.add_attachments', object=e1)]
+        for url in urls:
+            response = client.post(url, data=dict(
+                fupload=(BytesIO(b'hello'), 'hello.txt'),
+                description='test attachment'))
+            assert response.status_code == 302, response.status_code
 
 
 class TestAppVersions(unittest.TestCase):
@@ -503,11 +506,14 @@ class TestAppExamples(AppSmokeTest, unittest.TestCase):
         from bgexplorer.application.examples import qis
         qis.populate_example(version_tag=cls.version, clean=True)
         c1 = Component.select_version(cls.version).first()
+        e1 = EmissionSpec.select_version(cls.version).first()
         with cls.app.test_request_context():
             flask.g.active_version = cls.version
-            url = flask.url_for('component.add_attachments', object=c1)
-        cls.app.test_client().post(url, data=dict(
-            fupload=(BytesIO(b'hello'), 'hello.txt'), description='test'))
+            urls = [flask.url_for('component.add_attachments', object=c1),
+                    flask.url_for('emissionspec.add_attachments', object=e1)]
+        for url in urls:
+            cls.app.test_client().post(url, data=dict(
+                fupload=(BytesIO(b'hello'), 'hello.txt'), description='test'))
 
 
 if __name__ == '__main__':

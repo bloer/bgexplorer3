@@ -8,7 +8,7 @@ from typing import Optional, Union
 from .common import units, validate_unique_ids
 from .isotope import (concentration_to_rate, rate_to_concentration,
                       get_isotope, compare_source_names)
-from .fields import UncertainQuantityField
+from .fields import UncertainQuantityField, AttachmentsField
 from .verdoc import VersionedDocument
 from . import settings
 from collections.abc import Mapping
@@ -139,6 +139,7 @@ class EmissionSpec(VersionedDocument):
     comment = StringField()
     category = EnumField(SourceCategory)
     sources = EmbeddedDocumentListField(EmissionSource)
+    attachments = AttachmentsField()
 
     meta = {'allow_inheritance': True,
             'indexes': ['sources.name'],
