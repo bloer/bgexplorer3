@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-36966859-2"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-36966859-2');
+</script>
+
+<link rel="stylesheet" type="text/css" href="/static/styles/styles.css">
+</head>
+
+<body>
+
+<!-- display logos for snolab, pnnl, and radiopurity -->
+<div class="logo-container">
+    <a href="https://www.pnnl.gov/" target="_blank">
+        <img id="pnnl-logo-link" src="/static/logos/pnnl_logo.png"/>
+    </a>
+</div>
+<div class="logo-container">
+    <img src="/static/logos/radiopurity_logo.png"/>
+</div>
+<div class="logo-container">
+    <a href="https://www.snolab.ca/" target="_blank">
+        <img id="snolab-logo-link" src="/static/logos/snolab_logo.png"/>
+    </a>
+</div>
+
+<!-- documentation link -->
+<div>
+    <a class="normal-text github-link" href="/static/docs/html/index.html" target="_blank">documentation</a>
+</div>
+<div class="clear-float"></div>
+
+<!-- github link -->
+<div>
+    <a class="github-link" href="https://github.com/pnnl/Radiopurity-database-assistant" target="_blank" rel="noopener noreferrer">
+        <img class="github-logo" src="/static/logos/github_logo.png" alt="GitHub logo">
+    </a>
+</div>
+<div class="clear-float"></div>
+
+<!-- links to other pages on the site -->
+<div>
+    <a href="/about"><button class="logout-link">about</button></a>
+    <a href="/simple_search"><button class="pages">search</button></a>
+    <a href="/search"><button class="pages">advanced search</button></a>
+    <a href="/edit/insert"><button class="pages">insert</button></a>
+    <a href="/edit/update"><button class="pages">update</button></a>
+</div>
+
+
+<h1>Query Assistant</h1>
+
+<!--<h3>this UI queries the  database</h3>-->
+<!--<p class="info">Note that this search assistant only performs simple queries; if you wish to perform a nested query or a query with complicated "AND" and "OR" functionality, you are advised to use the DUNEdb python toolkit to query for all records and then filter the records (returned as JSON) as you desire.</p>-->
+
+<div>
+    <div class="logo-container right-aligned">
+        <img src="/static/logos/conversion_chart.png"/>
+    </div>
+    <div class="clear-float">
+</div>
+
+<div class="section-container">
+    <form action="/simple_search" method="POST">
+
+        <div class="centered-div">
+            <p class="info">Search for records containing the term...</p>
+            <div>
+                <textarea class="hidden-object" name="query_field" rows="1" cols="5" readonly>all</textarea>
+                <textarea class="hidden-object" name="comparison_operator" rows="1" cols="5" readonly>contains</textarea>
+            </div>
+            <div>
+                <textarea id="query_value" name="query_value" rows="1" style="width:100%;"></textarea>
+                <br>
+                <input type="checkbox" name="include_synonyms" value="true" checked>
+                <label class="normal-text" for="include_synonyms">include synonyms</label>
+            </div>
+            <div>
+                <span class="left-aligned">
+                    <input id="submit-query" class="submit-button" type="submit" value="search">
+                </span>
+                <span class="right-aligned">
+                    <a href="/search">
+                        <p class="normal-text">advanced search</p>
+                    </a>
+                </span>
+            </div>
+            <div class="clear-float"></div>
+        </div>
+    </form>
+</div>
+
+
+
+<div id="query-results-container" class="section-container">
+    
+        <h3>RESULTS</h3>
+		<span class="right-aligned">
+          <h3>Units: </h3>
+          <select id="units_list" name="units_field">
+            <option value="">Units</option>
+            <option value="ppm">ppm</option>
+            <option value="ppb">ppb</option>
+            <option value="ppt">ppt</option>
+            <option value="ppq">ppq</option>
+            <option value="Bq_kg">Bq/kg</option>
+            <option value="mBq_kg">mBq/kg</option>
+            <option value="uBq_kg">uBq/kg</option>
+            <option value="nBq_kg">nBq/kg</option>
+            <option value="pBq_kg">pBq/kg</option>
+			<option value="g_g">g/g</option>
+            <option value="g_kg">g/kg</option>
+            <option value="mg_kg">mg/kg</option>
+            <option value="ug_kg">ug/kg</option>
+            <option value="ng_kg">ng/kg</option>
+            <option value="pg_kg">pg/kg</option>
+            <option value="pct">pct</option>
+          </select>
+          <button type="button" id="units_convert_button" class="right-aligned">Convert</button>
+        </span>
+		<span class="right-aligned">
+			<img id="loading_icon" width="50"></img>
+		</span>
+        <p class="info">num records: 3</p>
+        
+            <!--<button type="button" class="collapsible">{&#39;_id&#39;: &#39;60b4f3ecae890f84b01b2d7f&#39;, &#39;measurement&#39;: {&#39;description&#39;: &#39;&#39;, &#39;practitioner&#39;: {&#39;name&#39;: &#39;...</button> -->
+            
+            
+            
+            
+            <button type="button" class="collapsible">
+                <span class="collapsiblebutton-name"><b>name:</b> Mumetal</span>
+                <span class="collapsiblebutton-name"><b>grouping:</b> ILIAS ANAIS</span>
+                <span class="collapsiblebutton-name">
+                    
+                        <b>published</b>
+                    
+                </span>
+                <span class="collapsiblebutton-vals">
+                    
+                        <span><b>Th-234</b>:</span><span> 1000 mBq/kg </span>
+                    
+                        <span><b>Pb-214</b>:</span><span> 150 mBq/kg </span>
+                    
+                        <span><b>Bi-214</b>:</span><span> 150 mBq/kg </span>
+                    
+                        <span><b>Ac-228</b>:</span><span> 100 mBq/kg </span>
+                    
+                        <span><b>Pb-212</b>:</span><span> 100 mBq/kg </span>
+                    
+                        <span><b>Tl-208</b>:</span><span> 100 mBq/kg </span>
+                    
+                        <span><b>Cs-137</b>:</span><span> 30 mBq/kg </span>
+                    
+                        <span><b>K-40</b>:</span><span> 350 mBq/kg </span>
+                    
+                        <span><b>Co-60</b>:</span><span> 15 mBq/kg </span>
+                    
+                </span>
+            </button>
+            
+            <div class="collapsible-content">
+                 <table>
+                    <tr>
+                        <td><p class="collapsible-field">database id:</p></td>
+                        <td><p class="collapsible-value">60b4f3ecae890f84b01b2d7f</p></td>
+                    </tr>
+                    
+                        <tr>
+                            <td><p class="collapsible-field">grouping:</p></td>
+                            <td><p class="collapsible-value">ILIAS ANAIS</p></td>
+                        </tr>
+                    
+
+                    <!-- DATA_SOURCE INFO (just reference) -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">data reference (publication):</p></td>
+                            <td><p class="collapsible-value">ILIAS Database http://radiopurity.in2p3.fr/</p></td>
+                        </tr>
+                    
+                </table>
+                <table>
+                    <!-- SAMPLE INFO -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">sample info</p></td>
+                        </tr>
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">name:</p></td>
+                                    <td><p class="collapsible-value">Mumetal</p></td>
+                                </tr>
+                            
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">id:</p></td>
+                                    <td><p class="collapsible-value">Conc. #18</p></td>
+                                </tr>
+                            
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">description:</p></td>
+                                    <td><p class="collapsible-value">Mumetal</p></td>
+                                </tr>
+                            
+                        
+                            
+                        
+                    
+                    
+                    <!-- MEASUREMENT INFO -->
+                    <tr>
+                        <td><p class="collapsible-field">measurement info</p></td>
+                    </tr>
+                    
+                        
+                            <tr>
+                                <td><p class="collapsible-field"></p></td>
+                                <td><p class="collapsible-field">technique:</p></td>
+                                <td><p class="collapsible-value">Ge</p></td>
+                            </tr>
+                        
+                    
+                        
+                            <tr>
+                                <td><p class="collapsible-field"></p></td>
+                                <td><p class="collapsible-field">institution:</p></td>
+                                <td><p class="collapsible-value">LSC</p></td>
+                            </tr>
+                        
+                    
+                        
+                    
+                    
+
+                    <!-- measurement results -->
+                    <tr>
+                        <td><p class="collapsible-field"></p></td>
+                        <td><p class="collapsible-field">values:</p></td>
+                        <td>
+                            <table class="measurement-results-table" border=0>
+                                <!-- | 0      | 1 | 2       | 3 | 4      | 5     | 6                          | 7                                  | 8                | 9                    | -->
+                                <!-- | lt_val | < | isotope | < | gt_val | units | symmetric_error/confidence level | symmetric_error_val/confidence_val | asymmetric_error | asymmetric_error_val | -->
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Th-234</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">1000</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Pb-214</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">150</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Bi-214</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">150</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Ac-228</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">100</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Pb-212</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">100</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Tl-208</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">100</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Cs-137</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">30</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">K-40</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">350</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Co-60</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">15</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- PEOPLE INFO -->
+                    <!-- measurement requestor -->
+                    
+                    <!-- measurement practitioner -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">measurement practitioner</p></td>
+                        </tr>
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">name:</p></td>
+                                    <td><p class="collapsible-value">J.Puimedón &amp; A.Ortiz</p></td>
+                                </tr>
+                            
+                        
+                            
+                        
+                    
+                    <!-- data input -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">data input</p></td>
+                        </tr>
+                        
+                            
+                                 <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">name:</p></td>
+                                    <td><p class="collapsible-value">Benjamin Wise / James Loach</p></td>
+                                </tr>
+                            
+                        
+                            
+                                 <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">contact:</p></td>
+                                    <td><p class="collapsible-value">bwise@smu.edu / james.loach@gmail.com</p></td>
+                                </tr>
+                            
+                        
+                            
+                        
+                        
+                            <tr>
+                                <td><p class="collapsible-field"></p></td>
+                                
+                            </tr>
+                        
+                    
+                    <!-- sample owner -->
+                    
+                    
+                </table>
+              
+            </div>
+        
+            <!--<button type="button" class="collapsible">{&#39;_id&#39;: &#39;60b4f3ecae890f84b01b2bc2&#39;, &#39;measurement&#39;: {&#39;description&#39;: &#39;&#39;, &#39;practitioner&#39;: {&#39;name&#39;: &#39;...</button> -->
+            
+            
+            
+            
+            <button type="button" class="collapsible">
+                <span class="collapsiblebutton-name"><b>name:</b> Mumetal, Permimphy SP</span>
+                <span class="collapsiblebutton-name"><b>grouping:</b> ILIAS ROSEBUD</span>
+                <span class="collapsiblebutton-name">
+                    
+                        <b>published</b>
+                    
+                </span>
+                <span class="collapsiblebutton-vals">
+                    
+                        <span><b>Pb-214</b>:</span><span> 20 mBq/kg </span>
+                    
+                        <span><b>Bi-214</b>:</span><span> 20 mBq/kg </span>
+                    
+                        <span><b>Ac-228</b>:</span><span> 4 mBq/kg </span>
+                    
+                        <span><b>Pb-212</b>:</span><span> 3 mBq/kg </span>
+                    
+                        <span><b>Tl-208</b>:</span><span> 7 mBq/kg </span>
+                    
+                        <span><b>Cs-137</b>:</span><span> 4 mBq/kg </span>
+                    
+                        <span><b>K-40</b>:</span><span> 15 mBq/kg </span>
+                    
+                        <span><b>Co-60</b>:</span><span> 2 mBq/kg </span>
+                    
+                </span>
+            </button>
+            
+            <div class="collapsible-content">
+                 <table>
+                    <tr>
+                        <td><p class="collapsible-field">database id:</p></td>
+                        <td><p class="collapsible-value">60b4f3ecae890f84b01b2bc2</p></td>
+                    </tr>
+                    
+                        <tr>
+                            <td><p class="collapsible-field">grouping:</p></td>
+                            <td><p class="collapsible-value">ILIAS ROSEBUD</p></td>
+                        </tr>
+                    
+
+                    <!-- DATA_SOURCE INFO (just reference) -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">data reference (publication):</p></td>
+                            <td><p class="collapsible-value">ILIAS Database http://radiopurity.in2p3.fr/</p></td>
+                        </tr>
+                    
+                </table>
+                <table>
+                    <!-- SAMPLE INFO -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">sample info</p></td>
+                        </tr>
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">name:</p></td>
+                                    <td><p class="collapsible-value">Mumetal, Permimphy SP</p></td>
+                                </tr>
+                            
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">id:</p></td>
+                                    <td><p class="collapsible-value">Conc. #27</p></td>
+                                </tr>
+                            
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">description:</p></td>
+                                    <td><p class="collapsible-value">Mumetal, Permimphy SP</p></td>
+                                </tr>
+                            
+                        
+                            
+                        
+                    
+                    
+                    <!-- MEASUREMENT INFO -->
+                    <tr>
+                        <td><p class="collapsible-field">measurement info</p></td>
+                    </tr>
+                    
+                        
+                            <tr>
+                                <td><p class="collapsible-field"></p></td>
+                                <td><p class="collapsible-field">technique:</p></td>
+                                <td><p class="collapsible-value">Ge</p></td>
+                            </tr>
+                        
+                    
+                        
+                            <tr>
+                                <td><p class="collapsible-field"></p></td>
+                                <td><p class="collapsible-field">institution:</p></td>
+                                <td><p class="collapsible-value">LSC</p></td>
+                            </tr>
+                        
+                    
+                        
+                    
+                    
+
+                    <!-- measurement results -->
+                    <tr>
+                        <td><p class="collapsible-field"></p></td>
+                        <td><p class="collapsible-field">values:</p></td>
+                        <td>
+                            <table class="measurement-results-table" border=0>
+                                <!-- | 0      | 1 | 2       | 3 | 4      | 5     | 6                          | 7                                  | 8                | 9                    | -->
+                                <!-- | lt_val | < | isotope | < | gt_val | units | symmetric_error/confidence level | symmetric_error_val/confidence_val | asymmetric_error | asymmetric_error_val | -->
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Pb-214</p></td>
+                                                <td><p class="collapsible-value">&equals;</p></td>
+                                                <td><p class="collapsible-value">20</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                                <td><p class="collapsible-value">±</p></td><!-- This represents symmetric error -->
+                                                <td><p class="collapsible-value">6</p></td>
+												<td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Bi-214</p></td>
+                                                <td><p class="collapsible-value">&equals;</p></td>
+                                                <td><p class="collapsible-value">20</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                                <td><p class="collapsible-value">±</p></td><!-- This represents symmetric error -->
+                                                <td><p class="collapsible-value">4</p></td>
+												<td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Ac-228</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">4</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Pb-212</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">3</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Tl-208</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">7</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Cs-137</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">4</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">K-40</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">15</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Co-60</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">2</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- PEOPLE INFO -->
+                    <!-- measurement requestor -->
+                    
+                    <!-- measurement practitioner -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">measurement practitioner</p></td>
+                        </tr>
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">name:</p></td>
+                                    <td><p class="collapsible-value">J.Puimedón &amp; A.Ortiz</p></td>
+                                </tr>
+                            
+                        
+                            
+                        
+                    
+                    <!-- data input -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">data input</p></td>
+                        </tr>
+                        
+                            
+                                 <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">name:</p></td>
+                                    <td><p class="collapsible-value">Benjamin Wise / James Loach</p></td>
+                                </tr>
+                            
+                        
+                            
+                                 <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">contact:</p></td>
+                                    <td><p class="collapsible-value">bwise@smu.edu / james.loach@gmail.com</p></td>
+                                </tr>
+                            
+                        
+                            
+                        
+                        
+                            <tr>
+                                <td><p class="collapsible-field"></p></td>
+                                
+                            </tr>
+                        
+                    
+                    <!-- sample owner -->
+                    
+                    
+                </table>
+              
+            </div>
+        
+            <!--<button type="button" class="collapsible">{&#39;_id&#39;: &#39;69151107e1d42af8eb08f0d6&#39;, &#39;type&#39;: &#39;measurement&#39;, &#39;grouping&#39;: &#39;Ricochet&#39;, &#39;sample&#39;: {&#39;na...</button> -->
+            
+            
+            
+            
+            <button type="button" class="collapsible">
+                <span class="collapsiblebutton-name"><b>name:</b> Ricochet L01,muMetal Sheet,260.3g</span>
+                <span class="collapsiblebutton-name"><b>grouping:</b> Ricochet</span>
+                <span class="collapsiblebutton-name">
+                    
+                </span>
+                <span class="collapsiblebutton-vals">
+                    
+                        <span><b>40K</b>:</span><span> 11.66 mBq/kg </span>
+                    
+                        <span><b>137Cs</b>:</span><span> 1.184 mBq/kg </span>
+                    
+                        <span><b>54Mn</b>:</span><span> 1.389 mBq/kg </span>
+                    
+                        <span><b>210Pb</b>:</span><span> 7144.0 mBq/kg </span>
+                    
+                        <span><b>7Be</b>:</span><span> 13.59 mBq/kg </span>
+                    
+                        <span><b>58Co</b>:</span><span> 3.6267 mBq/kg </span>
+                    
+                        <span><b>Top of 238 U Chain</b>:</span><span> 462.9 mBq/kg </span>
+                    
+                        <span><b>Bottom of 238 U Chain</b>:</span><span> 0.9215 mBq/kg </span>
+                    
+                        <span><b>235 U Chain</b>:</span><span> 7.992 mBq/kg </span>
+                    
+                        <span><b>Thorium Chain: 228 Ac</b>:</span><span> 4.209 mBq/kg </span>
+                    
+                        <span><b>60 Co Chain</b>:</span><span> 0.7418 mBq/kg </span>
+                    
+                        <span><b>57 Co Chain</b>:</span><span> 4.726 mBq/kg </span>
+                    
+                        <span><b>Full Thorium Chain</b>:</span><span> 3.09 mBq/kg </span>
+                    
+                </span>
+            </button>
+            
+            <div class="collapsible-content">
+                 <table>
+                    <tr>
+                        <td><p class="collapsible-field">database id:</p></td>
+                        <td><p class="collapsible-value">69151107e1d42af8eb08f0d6</p></td>
+                    </tr>
+                    
+                        <tr>
+                            <td><p class="collapsible-field">grouping:</p></td>
+                            <td><p class="collapsible-value">Ricochet</p></td>
+                        </tr>
+                    
+
+                    <!-- DATA_SOURCE INFO (just reference) -->
+                    
+                </table>
+                <table>
+                    <!-- SAMPLE INFO -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">sample info</p></td>
+                        </tr>
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">name:</p></td>
+                                    <td><p class="collapsible-value">Ricochet L01,muMetal Sheet,260.3g</p></td>
+                                </tr>
+                            
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">id:</p></td>
+                                    <td><p class="collapsible-value">Ricochet L01</p></td>
+                                </tr>
+                            
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">description:</p></td>
+                                    <td><p class="collapsible-value">680962.74 seconds = 7.882 dayslive time - 260.3 +/- 0.1 g</p></td>
+                                </tr>
+                            
+                        
+                            
+                        
+                    
+                    
+                    <!-- MEASUREMENT INFO -->
+                    <tr>
+                        <td><p class="collapsible-field">measurement info</p></td>
+                    </tr>
+                    
+                        
+                    
+                        
+                            <tr>
+                                <td><p class="collapsible-field"></p></td>
+                                <td><p class="collapsible-field">institution:</p></td>
+                                <td><p class="collapsible-value">SNOLAB</p></td>
+                            </tr>
+                        
+                    
+                        
+                            <tr>
+                                <td><p class="collapsible-field"></p></td>
+                                <td><p class="collapsible-field">description:</p></td>
+                                <td><p class="collapsible-value">COAX detector</p></td>
+                            </tr>
+                        
+                    
+                    
+                        <tr>
+                            <td><p class="collapsible-field"></p></td>
+                            
+                                <td><p class="collapsible-field">measurement date:</p></td>
+                                <td><p class="collapsible-value">2024-01-25</p></td>
+                            
+                        </tr>
+                    
+
+                    <!-- measurement results -->
+                    <tr>
+                        <td><p class="collapsible-field"></p></td>
+                        <td><p class="collapsible-field">values:</p></td>
+                        <td>
+                            <table class="measurement-results-table" border=0>
+                                <!-- | 0      | 1 | 2       | 3 | 4      | 5     | 6                          | 7                                  | 8                | 9                    | -->
+                                <!-- | lt_val | < | isotope | < | gt_val | units | symmetric_error/confidence level | symmetric_error_val/confidence_val | asymmetric_error | asymmetric_error_val | -->
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">40K</p></td>
+                                                <td><p class="collapsible-value">&equals;</p></td>
+                                                <td><p class="collapsible-value">11.66</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                                <td><p class="collapsible-value">±</p></td><!-- This represents symmetric error -->
+                                                <td><p class="collapsible-value">9.96</p></td>
+												<td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">137Cs</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">1.184</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">54Mn</p></td>
+                                                <td><p class="collapsible-value">&equals;</p></td>
+                                                <td><p class="collapsible-value">1.389</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                                <td><p class="collapsible-value">±</p></td><!-- This represents symmetric error -->
+                                                <td><p class="collapsible-value">0.661</p></td>
+												<td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">210Pb</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">7144.0</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">7Be</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">13.59</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">58Co</p></td>
+                                                <td><p class="collapsible-value">&equals;</p></td>
+                                                <td><p class="collapsible-value">3.6267</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                                <td><p class="collapsible-value">±</p></td><!-- This represents symmetric error -->
+                                                <td><p class="collapsible-value">0.8986</p></td>
+												<td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Top of 238 U Chain</p></td>
+                                                <td><p class="collapsible-value">&equals;</p></td>
+                                                <td><p class="collapsible-value">462.9</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                                <td><p class="collapsible-value">±</p></td><!-- This represents symmetric error -->
+                                                <td><p class="collapsible-value">56.09</p></td>
+												<td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Bottom of 238 U Chain</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">0.9215</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">235 U Chain</p></td>
+                                                <td><p class="collapsible-value">&equals;</p></td>
+                                                <td><p class="collapsible-value">7.992</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                                <td><p class="collapsible-value">±</p></td><!-- This represents symmetric error -->
+                                                <td><p class="collapsible-value">0.8834</p></td>
+												<td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Thorium Chain: 228 Ac</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">4.209</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">60 Co Chain</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">0.7418</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">57 Co Chain</p></td>
+                                                <td><p class="collapsible-value">&equals;</p></td>
+                                                <td><p class="collapsible-value">4.726</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                                <td><p class="collapsible-value">±</p></td><!-- This represents symmetric error -->
+                                                <td><p class="collapsible-value">1.641</p></td>
+												<td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                                    <tr>
+                                        
+                                            
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value"></p></td>
+                                                <td><p class="collapsible-value">Full Thorium Chain</p></td>
+                                                <td><p class="collapsible-value">&lt;</p></td>
+                                                <td><p class="collapsible-value">3.09</p></td>
+                                                <td><p class="collapsible-value">mBq/kg</p></td>
+                                            
+                                        
+                                    </tr>
+                                
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- PEOPLE INFO -->
+                    <!-- measurement requestor -->
+                    
+                    <!-- measurement practitioner -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">measurement practitioner</p></td>
+                        </tr>
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">name:</p></td>
+                                    <td><p class="collapsible-value">Ian Lawson</p></td>
+                                </tr>
+                            
+                        
+                            
+                                <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">contact:</p></td>
+                                    <td><p class="collapsible-value">ian.lawson@snolab.ca</p></td>
+                                </tr>
+                            
+                        
+                    
+                    <!-- data input -->
+                    
+                        <tr>
+                            <td><p class="collapsible-field">data input</p></td>
+                        </tr>
+                        
+                            
+                                 <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">name:</p></td>
+                                    <td><p class="collapsible-value">Kyle Drury</p></td>
+                                </tr>
+                            
+                        
+                            
+                                 <tr>
+                                    <td><p class="collapsible-field"></p></td>
+                                    <td><p class="collapsible-field">contact:</p></td>
+                                    <td><p class="collapsible-value">kyle.drury@snolab.ca</p></td>
+                                </tr>
+                            
+                        
+                            
+                        
+                        
+                            <tr>
+                                <td><p class="collapsible-field"></p></td>
+                                
+                                    <td><p class="collapsible-field">data input date:</p></td>
+                                    <td><p class="collapsible-value">2025-11-12</p></td>
+                                
+                            </tr>
+                        
+                    
+                    <!-- sample owner -->
+                    
+                    
+                </table>
+              
+            </div>
+        
+    
+</div>
+
+
+<script>
+    var query_value_textentry = document.getElementById("query_value");
+    query_value_textentry.addEventListener("keyup", function(event) {
+    // Number 13 is the "Enter" key on the keyboard
+    if (event.keyCode === 13) {
+        event.preventDefault();
+        document.getElementById("submit-query").click();
+    }
+    });
+</script>
+
+<script>
+    var coll = document.getElementsByClassName("collapsible");
+    var i;
+
+    for (i = 0; i < coll.length; i++) {
+        coll[i].addEventListener("click", function() {
+            this.classList.toggle("active");
+            var content = this.nextElementSibling;
+            if (content.style.display === "block") {
+                content.style.display = "none";
+            } else {
+                content.style.display = "block";
+            }
+        });
+    }
+</script>
+
+<script type="text/javascript" src="./static/unit_conversion_js.js"></script>
+
+</body>
+</html>
