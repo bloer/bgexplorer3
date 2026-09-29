@@ -129,8 +129,8 @@ class EmissionSource(EmbeddedDocument):
                 self.rate.check('ppb') and
                 get_isotope(self.name) is None):
 
-            self.error("to specify rate as concentration, `name` must be "
-                       "an isotope")
+            raise ValidationError("to specify rate as concentration, `name`"
+                                  " must be an isotope", field_name='name')
 
 
 class EmissionSpec(VersionedDocument):
