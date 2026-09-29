@@ -4,7 +4,9 @@ from bson import ObjectId
 from io import BytesIO
 from ..models.sourceterm import find_sourceterms, CalculatedResults
 from ..models.budget import budget_breakdown, available_scalars, GROUPBY
-from ..models.component import Component
+from ..models.component import Component, Assembly
+from ..models.emissionspec import EmissionSpec
+from ..models.hiteff import HitEfficiency
 from ..models.fields import InlineAttachment
 from ..models.importexport import iter_json_documents, import_documents
 from ..models.verdoc import check_writable
@@ -92,6 +94,29 @@ class CollectionViews(flask.Blueprint):
                 flask.abort(400, f"Unknown type '{type_}'")
             cls = me.base.get_document(classes[type_.lower()])
         return cls(version_tag=flask.g.active_version)
+
+    def delete_impact(self, obj) -> list:
+        """ What else changes in the active version when `obj` is deleted:
+        a list of dicts with a `text` and optionally the `docs` it lists and
+        the `endpoint` blueprint to link them
+        """
+        if isinstance(obj, Component):
+            impact = [dict(text="Removed from these assemblies:",
+                           docs=list(obj.find_parents()),
+                           endpoint='component')]
+            if isinstance(obj, Assembly):
+                impact.append(dict(text="Its children are kept."))
+            return impact
+        if isinstance(obj, EmissionSpec):
+            return [dict(text="Removed from these components:",
+                         docs=list(Component.select_version(
+                             obj.active_version)(specs=obj)),
+                         endpoint='component')]
+        if isinstance(obj, HitEfficiency):
+            count = find_sourceterms(obj).count()
+            return [dict(text=f"Removed from {count} source terms, which "
+                              "will use any other matching hit efficiencies")]
+        return []
 
     def get_mtime(self, objid):
         obj = self.queryset.only('version_tags', 'original_id', 'modified')\
@@ -185,6 +210,19 @@ class CollectionViews(flask.Blueprint):
                                          form=flask.request.form,
                                          errors=errors), \
                 400 if errors else 200
+
+        @self.route('/<objid>/delete', methods=['GET', 'POST'])
+        def delete():
+            check_writable(flask.g.active_version)
+            obj = flask.g.object
+            if flask.request.method == 'POST':
+                # only removes it from the active version
+                obj.delete()
+                flask.flash(f"Deleted {obj} from {flask.g.active_version}",
+                            'success')
+                return flask.redirect(flask.url_for('.overview'))
+            return flask.render_template('delete_document.html',
+                                         impact=self.delete_impact(obj))
 
         @self.post('/<objid>/clone')
         @self.loads(*self.deferred_fields)

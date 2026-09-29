@@ -1,0 +1,29 @@
+{% extends "versionbase.html" %}
+{%- import "utils.html" as utils -%}
+{% block title %}Delete {{ g.object }} - Background Explorer{% endblock %}
+{% block pageheader %}<h1>Delete {{ g.object._class_name.rsplit('.', 1)[-1] }} <span class="text-primary">{{ g.object }}</span></h1>{% endblock %}
+{% block pagecontent %}
+<div class="alert alert-warning">
+    This removes it from version <strong>{{ g.active_version }}</strong>.
+    Other versions keep their copies.
+</div>
+{%- for item in impact %}
+<p class="mb-1">{{ item.text }}</p>
+{%- if item.docs is defined %}
+<ul class="impact">
+    {%- for doc in item.docs %}
+    <li><a href="{{ url_for(item.endpoint~'.view', object=doc) }}">{{ doc }}</a></li>
+    {%- else %}
+    <li class="text-secondary">none</li>
+    {%- endfor %}
+</ul>
+{%- endif %}
+{%- endfor %}
+<h4>Versions</h4>
+{{ utils.other_versions(g.object) }}
+<form method="POST" id="deleteform">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger">Delete</button>
+    <a class="btn btn-secondary" href="{{ url_for('.view', object=g.object) }}">Cancel</a>
+</form>
+{% endblock %}

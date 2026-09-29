@@ -20,6 +20,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-outline-success me-1" title="Create a copy of this {{ clsname }}, sharing its references">Clone</button>
         </form>
+        <a class="btn btn-outline-danger me-1" id="deletelink" href="{{ url_for('.delete', object=g.object) }}">Delete</a>
         <a class="btn btn-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a>
         {% endif %}
     </div>

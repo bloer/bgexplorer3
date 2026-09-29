@@ -133,6 +133,31 @@ def update_emissionspec(sender, document, **kwargs):
         update_component(sender=None, document=component)
 
 
+def clear_results(sourceterm_ids):
+    """ Delete the cached CalculatedResults that include any of the
+    SourceTerms with the given ids
+    """
+    CalculatedResults.objects(sources__in=list(sourceterm_ids)).delete()
+
+
+def before_delete_hiteff(sender, document, **kwargs):
+    # the reverse delete rule only pulls us from the SourceTerms
+    document._sourceterms = list(find_sourceterms(document)
+                                 .scalar('original_id'))
+
+
+def after_delete_hiteff(sender, document, **kwargs):
+    hiteff = document
+    ids = getattr(hiteff, '_sourceterms', [])
+    sourceterms = SourceTerm.select_version(hiteff.active_version)(
+        original_id__in=ids)
+    for st in sourceterms:
+        # save to recalculate livetimes without us
+        st.save()
+    clear_results(sourceterms.scalar('id'))
+    settings.touch(hiteff.active_version)
+
+
 def update_hiteff(sender, document, **kwargs):
     hiteff = document
     # reverse the usual hiteff query to find all SourceTerms that would match
@@ -157,8 +182,7 @@ def update_hiteff(sender, document, **kwargs):
                       if h.original_id != hiteff.original_id]
         st.save()
     # the values may have changed without changing which sourceterms match
-    CalculatedResults.objects(
-        sources__in=list(find_sourceterms(hiteff).scalar('id'))).delete()
+    clear_results(find_sourceterms(hiteff).scalar('id'))
 
     # update default units
     vsettings = settings.get_settings(hiteff.active_version)
@@ -174,3 +198,7 @@ mongoengine.signals.post_save.connect(update_assembly, sender=Assembly)
 mongoengine.signals.post_save.connect(update_emissionspec,
                                       sender=EmissionSpec)
 mongoengine.signals.post_save.connect(update_hiteff, sender=HitEfficiency)
+mongoengine.signals.pre_delete.connect(before_delete_hiteff,
+                                       sender=HitEfficiency)
+mongoengine.signals.post_delete.connect(after_delete_hiteff,
+                                        sender=HitEfficiency)
