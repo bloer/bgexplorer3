@@ -17,6 +17,7 @@ from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.hiteff import HitEfficiency
+from bgexplorer.models.users import User, Role
 from bgexplorer.models import versioncontrol as vc
 from tests.test_app_components import AppTestCase
 
@@ -238,3 +239,37 @@ class TestEmissionSpecEditor(BrowserTestCase):
         page.click('button[data-tableid="sources"]')
         self.assertEqual(rows.count(), 4)
         self.assertEqual(rows.nth(3).locator('.badge').count(), 0)
+
+
+class TestLoginInBrowser(BrowserTestCase):
+    LOGIN_DISABLED = False
+
+    def setUp(self):
+        super().setUp()
+        User.drop_collection()
+        vc.create_version('main')
+        self.c1 = Component(name='c1', mass='1 kg').save()
+        user = User(name='u1', role=Role.editor)
+        user.set_password('correct horse')
+        user.save()
+
+    def test_login(self):
+        view = self.url('component.view', object=self.c1)
+        page = self.open(view)
+        self.assertEqual(page.locator('a:text-is("Edit")').count(), 0)
+        page.click('#loginlink')
+        page.fill('#username', 'u1')
+        page.fill('#password', 'wrong password')
+        page.click('#loginform button[type=submit]')
+        self.assertTrue(page.locator('#loginerror').is_visible())
+        # a failed login is a 401, which the browser reports as an error
+        self.errors = [e for e in self.errors if '401' not in e]
+        page.fill('#password', 'correct horse')
+        page.click('#loginform button[type=submit]')
+        page.wait_for_url(self.base + view)
+        self.assertEqual(page.locator('#profilelink').inner_text(), 'u1')
+        page.click('a:text-is("Edit")')
+        page.wait_for_url(self.base + self.url('component.edit',
+                                               object=self.c1))
+        page.click('#logoutform button')
+        self.assertTrue(page.locator('#loginlink').is_visible())
