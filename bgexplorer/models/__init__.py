@@ -5,4 +5,5 @@ from . import assay
 from . import hiteff
 from . import sourceterm
 from . import settings
+from . import users
 
