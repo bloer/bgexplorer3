@@ -11,6 +11,7 @@ from bgexplorer.application.app import create_app
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
+from bgexplorer.models.cosmogenic import ActivatedMaterial, CosmogenicIsotope
 from bgexplorer.models.verdoc import VersionedDocument
 from bgexplorer.models.settings import get_settings
 from bgexplorer.models import versioncontrol as vc
@@ -124,6 +125,8 @@ class AppSmokeTest:
                          'component.get_attachment',
                          'emissionspec.get_attachment',
                          'emissionspec.sourceterms', 'hitefficiency.view',
+                         'activatedmaterial.view',
+                         'activatedmaterial.get_attachment',
                          'versions.new', 'versions.delete',
                          'edit_settings', 'api.list_versions', 'api.get_version'):
             self.assertIn(endpoint, tested)
@@ -197,13 +200,17 @@ class TestAppSmall(AppSmokeTest, unittest.TestCase):
             Placement(component=c2, label='c2 label'),
             ]).save()
         Assembly(name='a2', components=[a1, c1]).save()
+        m1 = ActivatedMaterial(name='m1', isotopes=[CosmogenicIsotope(
+            isotope='Co60', activationrate='97 +- 10 1/kg/day')]).save()
 
         # add an attachment through the web interface
         client = cls.app.test_client()
         with cls.app.test_request_context():
             flask.g.active_version = cls.version
             urls = [flask.url_for('component.add_attachments', object=c1),
-                    flask.url_for('emissionspec.add_attachments', object=e1)]
+                    flask.url_for('emissionspec.add_attachments', object=e1),
+                    flask.url_for('activatedmaterial.add_attachments',
+                                  object=m1)]
         for url in urls:
             response = client.post(url, data=dict(
                 fupload=(BytesIO(b'hello'), 'hello.txt'),
@@ -513,6 +520,9 @@ class TestAppExamples(AppSmokeTest, unittest.TestCase):
     def populate(cls):
         from bgexplorer.application.examples import qis
         qis.populate_example(version_tag=cls.version, clean=True)
+        ActivatedMaterial(version_tag=cls.version, name='m1', isotopes=[
+            CosmogenicIsotope(isotope='Co60',
+                              activationrate='97 +- 10 1/kg/day')]).save()
         c1 = Component.select_version(cls.version).first()
         e1 = EmissionSpec.select_version(cls.version).first()
         with cls.app.test_request_context():

@@ -1,5 +1,5 @@
 {% extends "versionbase.html" %}
-{% set title = doc_cls.__name__ | replace('HitEfficiency', 'Hit Efficiency') %}
+{% set title = doc_cls.__name__ | replace('HitEfficiency', 'Hit Efficiency') | replace('ActivatedMaterial', 'Activated Material') %}
 {% block title %}Import {{ title }} - Background Explorer{% endblock %}
 {% block pageheader %}<h1>Import {{ title }} documents</h1>{% endblock %}
 {% block pagecontent %}

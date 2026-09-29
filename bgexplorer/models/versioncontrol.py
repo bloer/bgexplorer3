@@ -2,6 +2,7 @@
 from .component import Component
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
+from .cosmogenic import ActivatedMaterial
 from .sourceterm import SourceTerm, CalculatedResults
 from .settings import VersionSettings, get_settings, touch
 from .verdoc import VersionedDocument, ReadOnlyVersionError
@@ -13,7 +14,8 @@ import logging
 log = logging.getLogger(__name__)
 
 
-_versioned_classes = [Component, EmissionSpec, HitEfficiency, SourceTerm]
+_versioned_classes = [Component, EmissionSpec, HitEfficiency, ActivatedMaterial,
+                      SourceTerm]
 
 class ProtectedVersionError(PermissionError):
     """ Raised when trying to delete the default version """

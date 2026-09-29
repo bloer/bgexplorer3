@@ -12,7 +12,7 @@ from . import versioncontrol as vc
 from . import signals
 log = logging.getLogger(__name__)
 
-VERSIONED_CLASSES = (Component, EmissionSpec, HitEfficiency, SourceTerm)
+VERSIONED_CLASSES = tuple(vc._versioned_classes)
 
 
 def collection_size(doc_cls) -> Dict[str, int]:

@@ -11,6 +11,7 @@ from ..models.settings import (get_settings, get_application_settings,
 from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
+from ..models.cosmogenic import ActivatedMaterial
 from ..models.sourceterm import CalculatedResults
 from ..models.fields import get_fromstr
 from .common import pretty_date
@@ -78,6 +79,8 @@ def create_app(config_file=None, config=None):
                            url_prefix='/explore/<active_version>/emission')
     app.register_blueprint(CollectionViews(HitEfficiency),
                            url_prefix='/explore/<active_version>/hiteff')
+    app.register_blueprint(CollectionViews(ActivatedMaterial),
+                           url_prefix='/explore/<active_version>/activation')
     # app preprocessing
     @app.url_defaults
     def add_active_version(endpoint, values):

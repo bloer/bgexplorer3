@@ -1,15 +1,12 @@
-from math import log, exp
+from bson import ObjectId
 from mongoengine import (EmbeddedDocument, StringField, EmbeddedDocumentField,
-                         EmbeddedDocumentListField, ValidationError)
+                         EmbeddedDocumentListField, ObjectIdField,
+                         ValidationError)
 
-from .common import units, PublicationInfo
-from .verdoc import VersionedDocument, VersionedReferenceField
-from .fields import QuantityField, UncertainQuantityField
-from .emissions import EmissionSpec
-from .isotope import get_halflife
-
-
-_ln2 = log(2)
+from .common import PublicationInfo, validate_unique_ids
+from .verdoc import VersionedDocument
+from .fields import UncertainQuantityField, AttachmentsField
+from .isotope import get_halflife, get_tau, compare_source_names
 
 
 def _has_halflife(source: str) -> None:
@@ -18,49 +15,41 @@ def _has_halflife(source: str) -> None:
 
 
 class CosmogenicIsotope(EmbeddedDocument):
-    id = ObjectIdField(default=ObjectId)
-    isotope = StringField(max_length=6, required=True,
-                          validation=_has_halflife)
-    activationrate = UncertainQuantityField(required=True,
-                                            units="1/g/day",
-                                            allownone=False)
+    id = ObjectIdField(required=True, default=ObjectId)
+    isotope = StringField(required=True, validation=_has_halflife)
+    activationrate = UncertainQuantityField(
+        required=True, units='1/kg/day',
+        label="Activation rate",
+        help_text="Production rate at sea level, e.g. atoms/kg/day")
+    comment = StringField()
 
-    def rate(self, exposure, cooldown=0*units.s, integration=0*units.s):
-        """ Average differential decay rate given a simple exposure history
-        returns in units of mBq/kg
-        """
-        tau = get_halflife(self.isotope) / _ln2
-        if integration <= 0*units.day:
-            integration = 1*units.ms
-        R0 = self.activationrate * (1 - exp(-exposure / tau))
-        a = cooldown
-        b = a + integration
-        return R0 * (exp(-a / tau) - exp(-b / tau)) * tau / integration
+    @property
+    def tau(self):
+        """ Mean lifetime of the isotope """
+        return get_tau(self.isotope)
 
 
 class ActivatedMaterial(VersionedDocument):
-    material = StringField(required=True)
+    """ The cosmogenic isotopes produced in a material and their sea level
+    activation rates
+    """
+    name = StringField(required=True)
+    material = StringField()
+    description = StringField()
+    comment = StringField()
     isotopes = EmbeddedDocumentListField(CosmogenicIsotope)
-    comment = StringField()
     publication = EmbeddedDocumentField(PublicationInfo)
+    attachments = AttachmentsField()
 
+    def __str__(self):
+        return self.name or f"new {type(self).__name__}"
 
-class ActivationTimeSpec(EmissionSpec):
-    activation = QuantityField(required=True, units='day')
-    cooldown = QuantityField(units='day', default=0*units.day,
-                             allownone=False)
-    integration = QuantityField(units='day', default=0*units.day,
-                                allownone=False)
-    comment = StringField()
-
-    def get_sources(component):
-        material = component.material_activation
-        if not material:
-            return []
-        return [EmissionSpec(id=source.id, name=source.isotope,
-                             rate=source.rate(self.activation, self.cooldown,
-                                              self.integration),
-                             category='activaton',
-                             multiplier=Multiplier.mass)
-                 for source in material.isotopes]
-
+    def clean(self):
+        super().clean()
+        validate_unique_ids(self.isotopes, 'isotopes')
+        for i, iso in enumerate(self.isotopes):
+            if any(compare_source_names(iso.isotope, other.isotope)
+                   for other in self.isotopes[:i]):
+                raise ValidationError(f"Isotope {iso.isotope} is listed "
+                                      "more than once",
+                                      field_name='isotopes')

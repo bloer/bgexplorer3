@@ -1,0 +1,35 @@
+{% extends "versionbase.html" %}
+{% import "datatable.html" as datatable %}
+
+{% block pageheader %}
+<div class="col-5"><h1>Activated Materials</h1></div>
+<div class="col-7 d-flex justify-content-end align-items-center">
+    {%- if can_edit %}
+    <a class="btn btn-success me-1" id="newactivatedmaterial" href="{{ url_for('.edit') }}">New Activated Material</a>
+    <a class="btn btn-outline-primary" id="import" href="{{ url_for('.import_') }}">Import</a>
+    {%- endif %}
+</div>
+{% endblock %}
+
+{% block pagecontent %}
+{% call datatable.render(['Name', 'Material', 'Isotopes', 'Reference', 'Modified']) %}
+    {% for material in data %}
+    <tr class="activatedmaterial" data-id="{{ material.id }}" data-original_id="{{ material.original_id }}">
+        <td><a href="{{ url_for('.view', object=material) }}">{{ material.name }}</a> {{ material.description or '' }}</td>
+        <td>{{ material.material or '' }}</td>
+        <td>{{ material.isotopes | map(attribute='isotope') | join(', ') }}</td>
+        <td>{% if material.publication %}{{ material.publication.shortlabel or material.publication.reference or '' }}{% endif %}</td>
+        <td data-order="{{ material.modified.timestamp() }}">{{ pretty_date(material.modified) }}</td>
+    </tr>
+    {% endfor %}
+{% endcall %}
+{% endblock %}
+
+{% block pagestyle %}
+{{ datatable.styles() }}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{{ datatable.scripts() }}
+{% endblock %}

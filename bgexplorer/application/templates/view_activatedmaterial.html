@@ -1,0 +1,54 @@
+{% extends "versionbase.html" %}
+{%- import "utils.html" as utils -%}
+
+{% set activepage = activepage | default("summary") %}
+{% block pageheader %}
+<div class="col-5">
+    <h2>Activated material <small class="text-secondary">{{ g.object.name }}</small></h2>
+</div>
+<div class="col-7">
+    <div class="nav nav-tabs justify-content-end">
+        <a class="nav-link {% if activepage == 'summary' %}active{% endif %}" href="{{ url_for('.view', object=g.object) }}">Summary</a>
+        <a class="nav-link {% if activepage == 'attachments' %}active{% endif %}" href="{{ url_for('.attachments', object=g.object) }}">Attachments
+            <span class="badge text-bg-secondary">{{ g.object.attachments|length }}</span>
+        </a>
+        <a class="nav-link" href="{{ url_for('.get_json', object=g.object) }}">Export</a>
+        {% if can_edit %}
+        <form method="POST" action="{{ url_for('.clone', object=g.object) }}" id="cloneform" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-success me-1" title="Create a copy of this material">Clone</button>
+        </form>
+        <a class="btn btn-outline-danger me-1" id="deletelink" href="{{ url_for('.delete', object=g.object) }}">Delete</a>
+        <a class="btn btn-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock pageheader %}
+
+{% block pagecontent %}
+<div class="row mb-3">
+    <div class="col-md-6 col-lg-4">
+        <h2>Info</h2>
+        {{ utils.print_document(g.object, ['name', 'material', 'description', 'comment']) }}
+    </div>
+    <div class="col-md-12 col-lg-8">
+        <h2>Isotopes</h2>
+        {{ utils.print_doclist(g.object, 'isotopes', ['isotope', 'activationrate', 'comment']) }}
+    </div>
+</div>
+{%- if g.object.publication %}
+<div class="row mb-3">
+    <div class="col-md-6 col-lg-4">
+        <h2>Publication</h2>
+        {{ utils.print_document(g.object.publication) }}
+    </div>
+</div>
+{%- endif %}
+
+<div class="row mb-3">
+    <div class="col">
+        <h4>Other versions</h4>
+        {{ utils.other_versions(g.object) }}
+    </div>
+</div>
+{% endblock %}
