@@ -1,4 +1,4 @@
-""" Site administration pages. There is no authentication yet """
+""" Site administration pages, for site_admin users only """
 import io
 import flask
 from mongoengine.errors import ValidationError
@@ -8,6 +8,7 @@ from ..models import maintenance
 from ..models.settings import ApplicationSettings, get_application_settings
 from .api import validation_fields
 from .forms import update_object
+from .auth import require, Role
 
 # form fields the site settings editor may change; the logo is uploaded
 APP_SETTINGS_FIELDS = ('org_name', 'org_url', 'allow_anon_view')
@@ -16,6 +17,13 @@ MAX_LOGO_SIZE = 1024 * 1024
 
 def create_admin_blueprint() -> flask.Blueprint:
     bp = flask.Blueprint('admin', __name__)
+
+    @bp.before_request
+    def check_role():
+        # the logo is shown on every page, including the login page
+        if flask.request.endpoint != 'admin.logo':
+            return require(Role.site_admin)
+        return None
 
     @bp.get('/')
     def index():

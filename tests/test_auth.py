@@ -5,6 +5,7 @@ from bgexplorer.models.settings import (ApplicationSettings,
                                         get_application_settings)
 from bgexplorer.models.users import User, Role
 from bgexplorer.models import versioncontrol as vc
+from bgexplorer.models.component import Component
 from tests.dbutil import TEST_MONGODB_URI
 from tests.test_app_components import AppTestCase
 
@@ -154,3 +155,129 @@ class TestLogin(AuthTestCase):
         app = create_app(config={'TESTING': True, 'SECRET_KEY': None,
                                  'MONGODB_URI': TEST_MONGODB_URI})
         self.assertTrue(app.config['SECRET_KEY'])
+
+
+class TestRoles(AuthTestCase):
+    """ What each role can do. Anonymous users can view, the default """
+    ROLES = [None] + list(Role)
+
+    def setUp(self):
+        super().setUp()
+        self.c1 = Component(name='c1').save()
+        vc.create_tag('t', 'main')
+        self.clients = {None: self.client}
+        for role in Role:
+            self.make_user(role.name, role)
+            self.clients[role] = self.app.test_client()
+            self.login(role.name, client=self.clients[role])
+
+    def request(self, role, method, url, **kwargs):
+        return self.clients[role].open(url, method=method, **kwargs)
+
+    def check(self, needed, method, url, make=None, **kwargs):
+        """ Only `needed` and above may request `url`, which may be a
+        function of a name unique to the role. `make(name)` is called first,
+        and returns the request arguments
+        """
+        for role in self.ROLES:
+            name = role.name if role else 'anonymous'
+            with self.subTest(method=method, url=url, role=name):
+                args = make(name) if make else {}
+                target = url(name) if callable(url) else url
+                response = self.request(role, method, target, **args,
+                                        **kwargs)
+                status = response.status_code
+                # anonymous users are viewers by default
+                have = role or Role.viewer
+                if have >= needed and (role or needed is Role.viewer):
+                    self.assertLess(status, 400, response.get_data(True))
+                    self.assertNotIn(self.url('auth.login'),
+                                     response.headers.get('Location', ''))
+                elif role is not None:
+                    self.assertEqual(status, 403)
+                elif target.startswith('/api/'):
+                    self.assertEqual(status, 401)
+                else:
+                    self.assertEqual(status, 302)
+                    self.assertIn(self.url('auth.login'),
+                                  response.headers['Location'])
+
+    def test_view(self):
+        for endpoint in ('index', 'overview', 'component.overview',
+                         'api.list_versions'):
+            self.check(Role.viewer, 'GET', self.url(endpoint))
+        self.check(Role.viewer, 'GET', self.url('component.view',
+                                                object=self.c1))
+
+    def test_edit(self):
+        for endpoint in ('component.edit', 'component.import_',
+                         'versions.new', 'edit_settings'):
+            self.check(Role.editor, 'GET', self.url(endpoint))
+        self.check(Role.editor, 'GET', self.url('component.delete',
+                                                object=self.c1))
+        self.check(Role.editor, 'POST', self.url('component.edit'),
+                   lambda name: dict(data={'name': name}))
+        self.check(Role.editor, 'POST', self.url('component.clone',
+                                                 object=self.c1))
+        self.check(Role.editor, 'POST', self.url('versions.new'),
+                   lambda name: dict(data={'version_tag': f'b_{name}',
+                                           'from': 'main'}))
+        self.assertEqual(sorted(c.name for c in Component.objects(
+            name__in=['editor', 'admin', 'site_admin'])),
+            ['admin', 'editor', 'site_admin'])
+        self.assertFalse(Component.objects(name__in=['anonymous', 'viewer']))
+
+    def test_versions(self):
+        def branch(prefix):
+            """ make a branch for each role to delete """
+            return lambda name: vc.create_version(prefix + name, 'main') and {}
+        self.check(Role.editor, 'POST',
+                   lambda name: self.url('versions.delete', f'd_{name}'),
+                   branch('d_'))
+        self.check(Role.editor, 'DELETE',
+                   lambda name: self.url('api.delete_version', f'e_{name}'),
+                   branch('e_'))
+        self.check(Role.editor, 'POST', self.url('api.create_version'),
+                   lambda name: dict(json={'version_tag': f'a_{name}'}))
+        # tags need admin
+        self.check(Role.admin, 'POST', self.url('versions.new'),
+                   lambda name: dict(data={'version_tag': f't_{name}',
+                                           'from': 'main', 'type': 'tag'}))
+        self.check(Role.admin, 'POST', self.url('api.create_version'),
+                   lambda name: dict(json={'version_tag': f'at_{name}',
+                                           'from': 'main', 'type': 'tag'}))
+        tags = {v.version_tag for v in vc.list_versions() if not v.editable}
+        self.assertEqual(tags, {'t', 't_admin', 't_site_admin',
+                                'at_admin', 'at_site_admin'})
+
+    def test_admin(self):
+        for endpoint in ('admin.index', 'admin.settings',
+                         'admin.maintenance_page'):
+            self.check(Role.site_admin, 'GET', self.url(endpoint))
+        self.check(Role.site_admin, 'POST',
+                   self.url('admin.clear_cache'))
+        self.assertEqual(self.client.get(self.url('admin.logo')).status_code,
+                         404)
+
+    def test_buttons(self):
+        view = self.url('component.view', object=self.c1)
+        tagview = self.url('component.view', 't', object=self.c1)
+        for role, branch, tag in ((None, False, False),
+                                  (Role.viewer, False, False),
+                                  (Role.editor, True, False)):
+            with self.subTest(role=role):
+                html = self.html(self.request(role, 'GET', view))
+                self.assertEqual('id="deletelink"' in html, branch)
+                html = self.html(self.request(role, 'GET', tagview))
+                self.assertEqual('id="deletelink"' in html, tag)
+        # only admins can make tags
+        for role, shown in ((Role.editor, False), (Role.admin, True)):
+            with self.subTest(role=role):
+                html = self.html(self.request(role, 'GET', self.url('index')))
+                self.assertIn('New version', html)
+                self.assertEqual("type=tag" in html, shown)
+                html = self.html(self.request(role, 'GET',
+                                              self.url('versions.new')))
+                self.assertEqual('id="type_tag"' in html, shown)
+        html = self.html(self.request(Role.viewer, 'GET', self.url('index')))
+        self.assertNotIn('New version', html)

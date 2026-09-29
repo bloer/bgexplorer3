@@ -8,10 +8,13 @@ from ..models.settings import get_settings
 from ..models.hiteff import HitEfficiency
 from .api import APIError, validate_new_version, validation_fields
 from .forms import update_object, LISTFIELDS_KEY
+from .auth import require, role_required, Role
 
 
 def create_versions_blueprint() -> flask.Blueprint:
     bp = flask.Blueprint('versions', __name__)
+    # every page here makes or deletes a version
+    bp.before_request(lambda: require(Role.editor))
 
     @bp.route('/new', methods=['GET', 'POST'])
     def new():
@@ -26,6 +29,10 @@ def create_versions_blueprint() -> flask.Blueprint:
             except APIError as e:
                 errors = e.fields or {'__all__': e.message}
             else:
+                # tags can't be deleted from the web interface
+                if (type_ == 'tag'
+                        and (response := require(Role.admin)) is not None):
+                    return response
                 vc.create_version(tag, fromtag, editable=type_ == 'branch',
                                   description=description)
                 kind = 'tag' if type_ == 'tag' else 'branch'
@@ -70,6 +77,7 @@ def _settings_form(form) -> MultiDict:
                       if allowed(value if name == LISTFIELDS_KEY else name)])
 
 
+@role_required(Role.editor)
 def edit_settings():
     """ Edit the VersionSettings of the active version """
     tag = flask.g.active_version

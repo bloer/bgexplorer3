@@ -191,9 +191,12 @@ def create_app(config_file=None, config=None):
         if tag is None:
             return dict()
         try:
-            return dict(settings=get_settings(tag, create=False))
+            settings = get_settings(tag, create=False)
         except KeyError:
             return dict()
+        # whether to show buttons and forms that change this version
+        return dict(settings=settings,
+                    can_edit=settings.editable and auth.has_role('editor'))
 
     app.add_template_global(pretty_date, 'pretty_date')
     app.add_template_filter(pretty_date, 'pretty_date')

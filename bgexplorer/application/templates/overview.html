@@ -5,9 +5,13 @@
     <small class="mb-3">Last modified {{ pretty_date(settings.modified) }}</small>
 </div>
 <div class="col-5 d-flex justify-content-end align-items-center">
+    {% if has_role('editor') %}
     <a class="btn btn-outline-primary me-1" href="{{ url_for('versions.new', **{'from': g.active_version}) }}">Branch</a>
+    {% endif %}
+    {% if has_role('admin') %}
     <a class="btn btn-outline-secondary me-1" href="{{ url_for('versions.new', type='tag', **{'from': g.active_version}) }}">Tag</a>
-    {% if settings.editable and g.active_version != default_version %}
+    {% endif %}
+    {% if can_edit and g.active_version != default_version %}
     <a class="btn btn-outline-danger" href="{{ url_for('versions.delete') }}">Delete</a>
     {% endif %}
 </div>
@@ -22,7 +26,7 @@
 </ul>
 <div class="d-flex align-items-center">
     <h2 class="me-3">Settings</h2>
-    {% if settings.editable %}
+    {% if can_edit %}
     <a class="btn btn-outline-primary btn-sm" href="{{ url_for('edit_settings') }}">Edit settings</a>
     {% endif %}
 </div>

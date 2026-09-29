@@ -3,7 +3,9 @@
 {% block pageheader %}
 <div class="col-8"><h1>Background Explorer</h1></div>
 <div class="col-4 d-flex justify-content-end align-items-center">
+    {% if has_role('editor') %}
     <a class="btn btn-success" href="{{ url_for('versions.new') }}">New version</a>
+    {% endif %}
 </div>
 {% endblock %}
 {% block pagecontent %}
@@ -20,9 +22,13 @@
             <td>{{ version.description or '' }}</td>
             <td>{{ pretty_date(version.modified) }}</td>
             <td class="text-end text-nowrap">
+                {% if has_role('editor') %}
                 <a class="btn btn-sm btn-outline-primary" href="{{ url_for('versions.new', **{'from': version.version_tag}) }}">Branch</a>
+                {% endif %}
+                {% if has_role('admin') %}
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('versions.new', type='tag', **{'from': version.version_tag}) }}">Tag</a>
-                {% if version.editable and version.version_tag != default_version %}
+                {% endif %}
+                {% if has_role('editor') and version.editable and version.version_tag != default_version %}
                 <a class="btn btn-sm btn-outline-danger" href="{{ url_for('versions.delete', active_version=version.version_tag) }}">Delete</a>
                 {% endif %}
             </td>

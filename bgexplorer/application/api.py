@@ -14,6 +14,7 @@ from pint.errors import PintError
 from werkzeug.exceptions import HTTPException
 from ..models.settings import VersionSettings, HitEffDbConfig
 from ..models import versioncontrol as vc
+from .auth import require, Role, SAFE_METHODS
 
 API_VERSION = 'v1'
 
@@ -191,6 +192,17 @@ def create_api() -> flask.Blueprint:
     api = flask.Blueprint('api', __name__)
 
     @api.before_request
+    def check_role():
+        # reading needs only the viewer role, checked for the whole app
+        if flask.request.method not in SAFE_METHODS:
+            return require(Role.editor)
+        return None
+
+    # The API is exempt from CSRF checks (see create_app). That is safe
+    # because changes need a JSON body: browsers can't send one, or a
+    # DELETE, cross-origin without a CORS preflight, which we never allow.
+    # The SameSite=Lax session cookie also isn't sent on cross-site POSTs
+    @api.before_request
     def require_json():
         if (flask.request.method in ('POST', 'PUT', 'PATCH')
                 and not flask.request.is_json):
@@ -226,6 +238,8 @@ def create_api() -> flask.Blueprint:
         tag, fromtag, type_, description = validate_new_version(
             body.get('version_tag'), body.get('from'),
             body.get('type', 'branch'), body.get('description'))
+        if type_ == 'tag':
+            require(Role.admin)
         settings = vc.create_version(tag, fromtag, editable=type_ == 'branch',
                                      description=description)
         response = flask.jsonify(settings_to_json(settings))

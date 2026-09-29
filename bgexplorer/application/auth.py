@@ -79,6 +79,24 @@ def role_required(role: Role):
     return decorator
 
 
+SAFE_METHODS = ('GET', 'HEAD', 'OPTIONS')
+
+
+def require_for_changes(role: Role, form_endpoints=()):
+    """ A before_request function for a blueprint: requests that may change
+    something (anything but GET), and GETs of the endpoints named in
+    `form_endpoints` (pages that only show a form), need `role`. New POST
+    routes are then protected by default
+    """
+    def check():
+        endpoint = (flask.request.endpoint or '').rsplit('.', 1)[-1]
+        if (flask.request.method not in SAFE_METHODS
+                or endpoint in form_endpoints):
+            return require(role)
+        return None
+    return check
+
+
 def safe_next(target: Optional[str]) -> str:
     """ `target` if it is a path on this site, else the index """
     if target:

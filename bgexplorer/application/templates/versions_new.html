@@ -29,10 +29,12 @@
             <input class="form-check-input" type="radio" name="type" id="type_branch" value="branch" {% if type_ != 'tag' %}checked{% endif %}>
             <label class="form-check-label" for="type_branch">Branch (editable)</label>
         </div>
+        {% if has_role('admin') %}
         <div class="form-check form-check-inline">
             <input class="form-check-input" type="radio" name="type" id="type_tag" value="tag" {% if type_ == 'tag' %}checked{% endif %}>
             <label class="form-check-label" for="type_tag">Tag (read-only snapshot)</label>
         </div>
+        {% endif %}
         {{ fielderror('type') }}
     </div>
     <div class="mb-3">

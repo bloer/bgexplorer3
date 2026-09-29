@@ -12,6 +12,7 @@ from ..models.importexport import iter_json_documents, import_documents
 from ..models.verdoc import check_writable
 from ..models.settings import get_settings
 from .api import validation_fields
+from .auth import require_for_changes, Role
 from .forms import update_object, list_snapshot, edited_rows
 from ..models.histogram import Histogram
 from pint.errors import PintError
@@ -126,6 +127,10 @@ class CollectionViews(flask.Blueprint):
 
     def _setup_processing(self):
         """ Create URL preprocessing rules """
+        # before load_object, so a missing object isn't revealed first
+        self.before_request(require_for_changes(
+            Role.editor, form_endpoints={'edit', 'delete', 'import_'}))
+
         @self.url_value_preprocessor
         def pop_objid(endpoint, values):
             flask.g.objid = values.pop('objid', None)

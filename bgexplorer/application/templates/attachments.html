@@ -12,7 +12,7 @@
             <th>Description</th>
             <th>Size</th>
             <th>Added</th>
-            {% if settings.editable %}
+            {% if can_edit %}
             <th>Remove</th>
             {% endif %}
         </tr>
@@ -24,7 +24,7 @@
             <td>{{ attachment.description or '' }}</td>
             <td>{{ "{:.1f}".format(attachment.size/1000) }} kB</td>
             <td>{{ attachment.id.generation_time | pretty_date }}</td>
-            {% if settings.editable %}
+            {% if can_edit %}
             <td>
                 <form method="POST" class="removeform" action="{{ url_for('.delete_attachment', object=g.object, attachmentid=attachment.id) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -37,7 +37,7 @@
     </tbody>
 </table>
 
-{% if settings.editable %}
+{% if can_edit %}
 <form id="uploadform" action="{{ url_for('.add_attachments', object=g.object) }}" method="POST" class="form" enctype="multipart/form-data">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div id="droptarget" class="droptarget">
