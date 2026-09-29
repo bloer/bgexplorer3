@@ -42,8 +42,21 @@
         {% block extranav %}
         {% endblock extranav %}
         {%- endfilter %}
-        <ul class="navbar-nav ms-3">
+        <ul class="navbar-nav ms-3" id="usernav">
+            {%- if has_role('site_admin') %}
             <li class="nav-item"><a class="nav-link" id="adminlink" href="{{ url_for('admin.index') }}">Admin</a></li>
+            {%- endif %}
+            {%- if current_user.is_authenticated %}
+            <li class="nav-item"><a class="nav-link" id="profilelink" href="{{ url_for('auth.profile') }}" title="Your profile">{{ current_user.name }}</a></li>
+            <li class="nav-item">
+                <form method="POST" action="{{ url_for('auth.logout') }}" id="logoutform">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="nav-link">Log out</button>
+                </form>
+            </li>
+            {%- elif not login_disabled() and request.endpoint != 'auth.login' %}
+            <li class="nav-item"><a class="nav-link" id="loginlink" href="{{ url_for('auth.login', next=request.full_path if request.query_string else request.path) }}">Log in</a></li>
+            {%- endif %}
         </ul>
         {%- set org = org_branding() %}
         {%- if org.name or org.has_logo %}

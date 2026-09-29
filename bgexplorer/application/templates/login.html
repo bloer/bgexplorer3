@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Log in - Background Explorer{% endblock %}
+{% block pageheader %}<h1>Log in</h1>{% endblock %}
+{% block pagecontent %}
+<div class="row">
+<form method="POST" id="loginform" class="col-sm-8 col-md-5 col-lg-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {%- if error %}
+    <div class="alert alert-danger" id="loginerror">{{ error }}</div>
+    {%- endif %}
+    <div class="mb-3">
+        <label class="form-label" for="username">User name</label>
+        <input type="text" class="form-control" name="username" id="username" value="{{ request.form.get('username', '') }}" autocomplete="username" required autofocus>
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="password">Password</label>
+        <input type="password" class="form-control" name="password" id="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Log in</button>
+    <p class="form-text mt-3">Accounts are created by the site administrators.</p>
+</form>
+</div>
+{% endblock %}

@@ -56,7 +56,7 @@ class AppSmokeTest:
     def setUpClass(cls):
         reset_database()
         cls.app = create_app(config={'MONGODB_URI': TEST_MONGODB_URI,
-                                     'TESTING': True,
+                                     'TESTING': True, 'LOGIN_DISABLED': True,
                                      'WTF_CSRF_ENABLED': False})
         cls.populate()
 
@@ -209,7 +209,7 @@ class TestAppVersions(unittest.TestCase):
     def setUpClass(cls):
         reset_database()
         cls.app = create_app(config={'MONGODB_URI': TEST_MONGODB_URI,
-                                     'TESTING': True,
+                                     'TESTING': True, 'LOGIN_DISABLED': True,
                                      'WTF_CSRF_ENABLED': False})
 
     @classmethod
@@ -472,7 +472,7 @@ class TestCSRF(unittest.TestCase):
     def setUpClass(cls):
         reset_database()
         cls.app = create_app(config={'MONGODB_URI': TEST_MONGODB_URI,
-                                     'TESTING': True})
+                                     'TESTING': True, 'LOGIN_DISABLED': True})
 
     @classmethod
     def tearDownClass(cls):

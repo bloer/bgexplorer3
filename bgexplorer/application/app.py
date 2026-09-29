@@ -22,6 +22,7 @@ from ..models.versioncontrol import list_versions, version_exists
 from ..models.verdoc import VersionedDocument
 from .forms import input_type, input_value, field_kind
 from . import examples
+from . import auth
 
 from ..models.asymmetric import AsymmetricUncertainty
 import pint
@@ -42,8 +43,12 @@ def create_app(config_file=None, config=None):
     app.config.from_prefixed_env()
     if config:
         app.config.update(config)
-    # this is a really bad idea
-    if 'SECRET_KEY' not in app.config:
+    if not app.config.get('SECRET_KEY'):
+        if not (app.debug or app.testing):
+            raise RuntimeError(
+                "SECRET_KEY must be set, e.g. with the FLASK_SECRET_KEY "
+                "environment variable, since it protects logins")
+        # sessions end when the server restarts
         app.config['SECRET_KEY'] = secrets.token_hex()
 
     # app extensions
@@ -54,6 +59,9 @@ def create_app(config_file=None, config=None):
     # make sure application settings and default version exist
     get_application_settings()
     get_settings()
+
+    # first, so that logins are checked before anything else
+    auth.init_app(app)
 
     # blueprints
     # the API only accepts JSON bodies, which can't be sent cross-site

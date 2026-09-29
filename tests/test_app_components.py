@@ -19,11 +19,15 @@ from tests.test_app import reset_database
 
 class AppTestCase(unittest.TestCase):
     """ Base: a fresh app and database for each test class """
+    # everyone can do everything, unless a subclass tests logins
+    LOGIN_DISABLED = True
+
     @classmethod
     def setUpClass(cls):
         reset_database()
         cls.app = create_app(config={'MONGODB_URI': TEST_MONGODB_URI,
                                      'TESTING': True,
+                                     'LOGIN_DISABLED': cls.LOGIN_DISABLED,
                                      'WTF_CSRF_ENABLED': False})
 
     @classmethod

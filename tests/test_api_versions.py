@@ -21,7 +21,7 @@ class TestAPIVersions(unittest.TestCase):
     def setUp(self):
         reset_database()
         self.app = create_app(config={'MONGODB_URI': TEST_MONGODB_URI,
-                                      'TESTING': True,
+                                      'TESTING': True, 'LOGIN_DISABLED': True,
                                       'WTF_CSRF_ENABLED': False})
         self.client = self.app.test_client()
         HitEfficiency(source='K40', location='c1',

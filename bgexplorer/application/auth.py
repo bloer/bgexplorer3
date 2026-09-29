@@ -1,105 +1,162 @@
+""" Logging in, and checking the current user's role
+
+Roles are checked here, in the application layer. Read-only versions are
+still enforced separately by the models (`check_writable`).
+
+With the LOGIN_DISABLED config option, everyone has every role.
+"""
 from functools import wraps
-from ..models.settings import User, Permission
+from typing import Optional
+from urllib.parse import urlsplit
+import flask
 from flask_login import LoginManager, current_user, login_user, logout_user
-from flask import request, current_app
-from bson import ObjectId
-from enum import Enum
-import logging
-log = logging.Logger(__name__)
+from ..models.settings import get_application_settings
+from ..models.users import User, Role, check_login
 
 login_manager = LoginManager()
+login_manager.login_view = 'auth.login'
+login_manager.login_message = "Please log in to see this page"
+login_manager.login_message_category = 'warning'
 
-class Permission(Flag):
-    """ Permission levels are additive (higher levels inherit all below)
-    except site-admin, which is handled by a dedicated additional login
-    """
-    view = 1
-    edit = 2
-    create_tags = 4
-    delete_tags = 8
-    site_admin = 256
+# endpoints anyone can reach, even if anonymous viewing is off
+PUBLIC_ENDPOINTS = {'auth.login', 'auth.logout', 'static', 'favicon',
+                    'admin.logo'}
 
-    user_edit = 3
-    user_create_tags = 7
-    user_delete_tags = 15
-    user_site_admin = 257
-
-
-class User(UserMixin, Document):
-    name = StringField(unique=True)
-    pwhash = BinaryField(required=True)
-    permissions = EnumField(Permission, required=True,
-                            default=Permission.view)
-
-    @property
-    def hasher(self):
-        return argon2.PasswordHasher()
-
-    def set_password(self, password):
-        self.pwhash = self.hasher.hash(password)
-        self.save()
-
-    def test_password(self, password):
-        try:
-            return self.hasher.verify(self.pwhash, password)
-        except argon2.exceptions.VerifyMismatchError:
-            return False
-        # exceptions for bad hash will still be raised
 
 @login_manager.user_loader
-def load_user(userid):
-    try:
-        return User.get(id=ObjectId(userid))
-    except:
-        pass
-
-def login():
-    error = None
-    if flask.request.method == 'POST':
-        username = flask.request.form['username']
-        password = flask.request.form['password']
-        try:
-            user = User.objects.get(name=username)
-            pwvalid = user.test_password(password)
-        except:
-            pass
-        if pwvalid:
-            flask.flash(f"Successfully logged in as {user.name}")
-            login_user(user)
-            next_ = flask.request.args.get('next', flask.url_for('index'))
-            return flask.redirect(next_)
-        else:
-            error = "Error logging in with the provided username and password"
-    return render_template('login.html', error=error)
+def load_user(session_id: str) -> Optional[User]:
+    return User.from_session_id(session_id)
 
 
-def logout():
-    logout_user()
-    flask.flash("User successfully logged out", 'success')
-    return flask.redirect(flask.url_for('index')
+def login_disabled() -> bool:
+    return bool(flask.current_app.config.get('LOGIN_DISABLED'))
 
-# TODO: register login_manager.unauthorized as 401 handler
-# TODO: make this act as an extension
-def check_permission(perm):
-    perm = Permissions(perm)
-    if current_app.config.get('LOGIN_DISABLED'):
-        return
-    try:
-        valid = perm in current_user.permissions
-    except AttributeError:
-        valid = (perm == Permission.view and
-                 get_application_settings().allow_anon_view)
-    if not valid:
-        return login_handler.unauthorized()
-    return
 
-def permission_required(perm: Permission):
-    """ decorator for endpoints that require specific permissions """
+def current_role() -> Optional[Role]:
+    """ The role of the current user, if any. Anonymous users are viewers
+    if the application settings allow it
+    """
+    if login_disabled():
+        return Role.site_admin
+    if current_user.is_authenticated:
+        return current_user.role
+    if get_application_settings().allow_anon_view:
+        return Role.viewer
+    return None
+
+
+def has_role(role) -> bool:
+    """ Whether the current user has `role` (a Role or its name) """
+    if isinstance(role, str):
+        role = Role[role]
+    have = current_role()
+    return have is not None and have >= role
+
+
+def require(role: Role):
+    """ Check that the current user has `role`. Returns a response to
+    log in if anonymous, raises 403 for a logged in user without the role,
+    or returns None if allowed
+    """
+    if has_role(role):
+        return None
+    if not current_user.is_authenticated:
+        if flask.request.path.startswith('/api/'):
+            flask.abort(401, "Log in to use this endpoint")
+        return login_manager.unauthorized()
+    flask.abort(403, f"This requires the {role.name} role")
+
+
+def role_required(role: Role):
+    """ View decorator: the current user must have `role` """
     def decorator(func):
         @wraps(func)
-        def decorated_func(*args, **kwargs):
-            if response := check_permission(perm):
+        def decorated(*args, **kwargs):
+            if (response := require(role)) is not None:
                 return response
-            # return current_app.ensure_sync(func)(*args, **kwargs)
             return func(*args, **kwargs)
-        return decorated_func
+        return decorated
+    return decorator
+
+
+def safe_next(target: Optional[str]) -> str:
+    """ `target` if it is a path on this site, else the index """
+    if target:
+        parts = urlsplit(target)
+        if (not parts.scheme and not parts.netloc and target.startswith('/')
+                and not target.startswith('//') and '\\' not in target):
+            return target
+    return flask.url_for('index')
+
+
+def create_auth_blueprint() -> flask.Blueprint:
+    bp = flask.Blueprint('auth', __name__)
+
+    @bp.route('/login', methods=['GET', 'POST'])
+    def login():
+        error = None
+        if flask.request.method == 'POST':
+            form = flask.request.form
+            user = check_login(form.get('username'), form.get('password'))
+            if user is not None:
+                # a new session, so an old session id can't be reused
+                flask.session.clear()
+                login_user(user)
+                flask.flash(f"Logged in as {user.name}", 'success')
+                return flask.redirect(safe_next(flask.request.args.get('next')))
+            error = "Unknown user name or wrong password"
+        return flask.render_template('login.html', error=error), \
+            401 if error else 200
+
+    @bp.post('/logout')
+    def logout():
+        logout_user()
+        flask.flash("Logged out", 'success')
+        return flask.redirect(flask.url_for('index'))
+
+    @bp.route('/profile', methods=['GET', 'POST'])
+    def profile():
+        if not current_user.is_authenticated:
+            if login_disabled():
+                return flask.render_template('profile.html', errors={})
+            return login_manager.unauthorized()
+        errors = {}
+        if flask.request.method == 'POST':
+            form = flask.request.form
+            new = form.get('new_password', '')
+            if not current_user.check_password(form.get('current_password')):
+                errors['current_password'] = "Wrong password"
+            elif new != form.get('confirm_password'):
+                errors['confirm_password'] = "The passwords don't match"
+            else:
+                try:
+                    current_user.set_password(new)
+                except ValueError as e:
+                    errors['new_password'] = str(e)
+            if not errors:
+                current_user.save()
+                # the session id changes with the password
+                login_user(current_user._get_current_object())
+                flask.flash("Password changed", 'success')
+                return flask.redirect(flask.url_for('.profile'))
+        return flask.render_template('profile.html', errors=errors), \
+            400 if errors else 200
+
+    return bp
+
+
+def init_app(app: flask.Flask) -> None:
+    """ Set up logins for `app`. Call before registering other
+    before_request functions, so that login is checked first
+    """
+    login_manager.init_app(app)
+    app.register_blueprint(create_auth_blueprint())
+
+    @app.before_request
+    def check_view_permission():
+        if flask.request.endpoint in PUBLIC_ENDPOINTS:
+            return None
+        return require(Role.viewer)
+
+    app.add_template_global(has_role, 'has_role')
+    app.add_template_global(login_disabled, 'login_disabled')

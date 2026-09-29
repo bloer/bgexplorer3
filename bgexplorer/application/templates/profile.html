@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Profile - Background Explorer{% endblock %}
+{% block pageheader %}<h1>Profile</h1>{% endblock %}
+{% block pagecontent %}
+{%- if not current_user.is_authenticated %}
+<p class="lead">Logins are disabled on this server.</p>
+{%- else %}
+<dl class="row">
+    <dt class="col-sm-2">User name</dt><dd class="col-sm-10">{{ current_user.name }}</dd>
+    <dt class="col-sm-2">Role</dt><dd class="col-sm-10" id="role">{{ current_user.role.name | replace('_', ' ') }}</dd>
+</dl>
+<div class="row">
+<form method="POST" id="passwordform" class="col-sm-8 col-md-5 col-lg-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h4>Change password</h4>
+    {%- for name, label, autocomplete in [('current_password', 'Current password', 'current-password'),
+                                         ('new_password', 'New password', 'new-password'),
+                                         ('confirm_password', 'Repeat the new password', 'new-password')] %}
+    <div class="mb-3">
+        <label class="form-label" for="{{ name }}">{{ label }}</label>
+        <input type="password" class="form-control{% if errors[name] %} is-invalid{% endif %}" name="{{ name }}" id="{{ name }}" autocomplete="{{ autocomplete }}" required>
+        {%- if errors[name] %}<div class="invalid-feedback">{{ errors[name] }}</div>{% endif %}
+    </div>
+    {%- endfor %}
+    <button type="submit" class="btn btn-primary">Change password</button>
+</form>
+</div>
+{%- endif %}
+{% endblock %}

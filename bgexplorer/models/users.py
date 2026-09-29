@@ -1,7 +1,11 @@
 """ User accounts for logging in to the application """
 import datetime
+import hashlib
+import hmac
 from enum import IntEnum
+from typing import Optional
 import argon2
+from bson import ObjectId
 from mongoengine import (Document, StringField, EnumField, BooleanField,
                          DateTimeField)
 
@@ -59,3 +63,52 @@ class User(Document):
 
     def has_role(self, role: Role) -> bool:
         return bool(self.active) and self.role >= role
+
+    # the flask-login user protocol, without depending on flask here
+    is_authenticated = True
+    is_anonymous = False
+
+    @property
+    def is_active(self) -> bool:
+        return bool(self.active)
+
+    @property
+    def session_token(self) -> str:
+        """ Changes with the password, ending sessions logged in with the
+        old one
+        """
+        return hashlib.sha256((self.pwhash or '').encode()).hexdigest()[:16]
+
+    def get_id(self) -> str:
+        return f"{self.id}:{self.session_token}"
+
+    @classmethod
+    def from_session_id(cls, session_id: str) -> Optional['User']:
+        """ The active user for a `get_id` value, or None """
+        userid, _, token = str(session_id).partition(':')
+        if not ObjectId.is_valid(userid):
+            return None
+        user = cls.objects(id=ObjectId(userid), active=True).first()
+        if user and hmac.compare_digest(user.session_token, token):
+            return user
+        return None
+
+
+def check_login(name: str, password: str) -> Optional[User]:
+    """ The active user with `name` and `password`, or None. Takes about as
+    long for unknown names as for wrong passwords
+    """
+    user = User.objects(name=(name or '').strip(), active=True).first()
+    if user is None:
+        User(pwhash=_dummy_hash()).check_password(password)
+        return None
+    return user if user.check_password(password) else None
+
+
+_dummy = []
+
+
+def _dummy_hash() -> str:
+    if not _dummy:
+        _dummy.append(_hasher.hash('not a real password'))
+    return _dummy[0]
