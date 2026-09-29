@@ -4,6 +4,7 @@ from mongoengine import (connect, disconnect, StringField, ReferenceField,
                          CASCADE, NULLIFY, PULL)
 from bgexplorer.models.component import Component, Placement, Assembly
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
+from bgexplorer.models.assay import Assay
 from bgexplorer.models.sourceterm import (SourceTerm, CalculatedResults,
                                           clear_results_cache)
 from bgexplorer.models.settings import VersionSettings, get_settings
@@ -84,6 +85,19 @@ class TestSourceTerm(unittest.TestCase):
             expected = (2 * units.kg * concentration_to_rate(name, conc))
             self.assertAlmostEqual(st.emissionrate.to('Bq').mode,
                                    expected.to('Bq').m)
+
+    def test1_spec_subclass(self):
+        """ Saving a subclass of EmissionSpec updates its components """
+        a1 = Assay(name="a1", sources=dict(Th232="10 mBq/kg")).save()
+        Component(name="c1", mass="2 kg", specs=[a1]).save()
+        st = SourceTerm.objects.get()
+        self.assertAlmostEqual(st.emissionrate.to('mBq').mode, 20)
+
+        a1.reload()
+        a1.sources[0].rate = AsymmetricUncertainty(8, 1)*units('mBq/kg')
+        a1.save()
+        st = SourceTerm.objects.get()
+        self.assertAlmostEqual(st.emissionrate.to('mBq').mode, 16)
 
     def test2_saveassembly(self):
         e1 = EmissionSpec(name="e1", sources=[EmissionSource(name="Th232", rate="10 +- 1 mBq/kg"),

@@ -192,13 +192,32 @@ def update_hiteff(sender, document, **kwargs):
     settings.touch(hiteff.active_version)
 
 
-mongoengine.signals.pre_delete.connect(delete_component)
-mongoengine.signals.post_save.connect(update_component, sender=Component)
-mongoengine.signals.post_save.connect(update_assembly, sender=Assembly)
-mongoengine.signals.post_save.connect(update_emissionspec,
-                                      sender=EmissionSpec)
-mongoengine.signals.post_save.connect(update_hiteff, sender=HitEfficiency)
-mongoengine.signals.pre_delete.connect(before_delete_hiteff,
-                                       sender=HitEfficiency)
-mongoengine.signals.post_delete.connect(after_delete_hiteff,
-                                        sender=HitEfficiency)
+def post_save(sender, document, **kwargs):
+    """ Dispatch on the document's class. Connecting with `sender=` would
+    only match that exact class, not its subclasses (e.g. Assay)
+    """
+    if isinstance(document, Assembly):
+        update_assembly(sender, document, **kwargs)
+    elif isinstance(document, Component):
+        update_component(sender, document, **kwargs)
+    elif isinstance(document, EmissionSpec):
+        update_emissionspec(sender, document, **kwargs)
+    elif isinstance(document, HitEfficiency):
+        update_hiteff(sender, document, **kwargs)
+
+
+def pre_delete(sender, document, **kwargs):
+    if isinstance(document, Component):
+        delete_component(sender, document, **kwargs)
+    elif isinstance(document, HitEfficiency):
+        before_delete_hiteff(sender, document, **kwargs)
+
+
+def post_delete(sender, document, **kwargs):
+    if isinstance(document, HitEfficiency):
+        after_delete_hiteff(sender, document, **kwargs)
+
+
+mongoengine.signals.post_save.connect(post_save)
+mongoengine.signals.pre_delete.connect(pre_delete)
+mongoengine.signals.post_delete.connect(post_delete)
