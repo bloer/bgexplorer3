@@ -14,6 +14,7 @@ from werkzeug.serving import make_server
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.common import units
 from bgexplorer.models.component import Component, Assembly, Placement
+from bgexplorer.models.cosmogenic import ActivatedMaterial, CosmogenicIsotope
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.hiteff import HitEfficiency
@@ -239,6 +240,47 @@ class TestEmissionSpecEditor(BrowserTestCase):
         page.click('button[data-tableid="sources"]')
         self.assertEqual(rows.count(), 4)
         self.assertEqual(rows.nth(3).locator('.badge').count(), 0)
+
+
+class TestReferencePicker(BrowserTestCase):
+    def setUp(self):
+        super().setUp()
+        vc.create_version('main')
+        self.cu = ActivatedMaterial(name='Cu', isotopes=[CosmogenicIsotope(
+            isotope='Co60', activationrate='97 1/kg/day')]).save()
+        self.c1 = Component(name='c1', mass='1 kg').save()
+
+    def material(self):
+        return Component.objects.get(name='c1').activated_material
+
+    def test_choose_and_clear(self):
+        page = self.open(self.url('component.edit', object=self.c1))
+        picker = page.locator('#activated_material')
+        self.assertEqual(picker.locator('.referencename').inner_text(),
+                         'none')
+        picker.locator('button.referenceSelector').click()
+        # bootstrap ignores hide() until the modal has finished opening
+        page.wait_for_function("document.getElementById("
+                               "'selectReferenceModal').classList"
+                               ".contains('show')")
+        page.wait_for_timeout(500)
+        page.locator('#selectReferenceModalBody a:text-is("Cu")').click()
+        page.wait_for_selector('#selectReferenceModal', state='hidden')
+        self.assertEqual(picker.locator('.referencename').inner_text(), 'Cu')
+        page.click('#mainform button[type=submit] >> nth=0')
+        page.wait_for_url(self.base + self.url('component.view',
+                                               object=self.c1))
+        self.assertEqual(self.material().name, 'Cu')
+
+        page.goto(self.base + self.url('component.edit', object=self.c1))
+        self.assertEqual(picker.locator('.referencename').inner_text(), 'Cu')
+        picker.locator('button.referenceClear').click()
+        self.assertEqual(picker.locator('.referencename').inner_text(),
+                         'none')
+        page.click('#mainform button[type=submit] >> nth=0')
+        page.wait_for_url(self.base + self.url('component.view',
+                                               object=self.c1))
+        self.assertIsNone(self.material())
 
 
 class TestLoginInBrowser(BrowserTestCase):

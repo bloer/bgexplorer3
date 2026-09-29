@@ -3,13 +3,14 @@ from mongoengine import (EmbeddedDocument, StringField, DateField,
                          EmbeddedDocumentField, DictField, ValidationError,
                          EmbeddedDocumentListField, ListField, FloatField,
                          URLField, ObjectIdField,
-                         PULL, IntField)
+                         PULL, NULLIFY, IntField)
 from bson import ObjectId
 
 from .verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedListField, VersionedEmbeddedDocumentListField)
 from .fields import QuantityField, AttachmentsField
 from .emissionspec import EmissionSpec, EmissionSource
+from .cosmogenic import ActivatedMaterial
 from .common import units, validate_unique_ids
 
 
@@ -69,6 +70,10 @@ class Component(VersionedDocument):
                                endpoint='emissionspec',
                                ))
     sources = EmbeddedDocumentListField(EmissionSource)
+    activated_material = VersionedReferenceField(
+        ActivatedMaterial, reverse_delete_rule=NULLIFY,
+        endpoint='activatedmaterial',
+        help_text="Cosmogenic activation rates for this component")
 
     meta = {'allow_inheritance': True}
 

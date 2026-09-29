@@ -48,6 +48,9 @@
         {% for attr in ['description', 'material', 'notes', 'location'] %}
         <dt class="col-4">{{ attr | title }}</dt><dd class="col-8">{{ g.object[attr] }} </dd>
         {% endfor %}
+        {%- if g.object.activated_material %}
+        <dt class="col-4">Activated material</dt><dd class="col-8" id="activated_material"><a href="{{ url_for('activatedmaterial.view', object=g.object.activated_material) }}">{{ g.object.activated_material.name }}</a></dd>
+        {%- endif %}
         {% for key, val in g.object.extra_metadata.items() %}
         <dt class="col-4">{{ key }}</dt><dd class="col-4">{{ val | urlize }}</dd>
         {% endfor %}

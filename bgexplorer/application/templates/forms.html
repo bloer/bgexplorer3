@@ -60,12 +60,22 @@
                     var id = link.parentNode.parentNode.dataset.original_id;
                     id = id || link.parentNode.parentNode.dataset.id;
                     input.value = id;
-                    caller.remove();
-                    cell.appendChild(link.cloneNode(true));
+                    if(caller.dataset.picker){
+                        // referencepicker keeps its buttons to change or clear
+                        cell.querySelector(".referencename").replaceChildren(link.cloneNode(true));
+                    } else {
+                        caller.remove();
+                        cell.appendChild(link.cloneNode(true));
+                    }
                     modal.hide();
                 };
             });
         });
+    }
+    function clearReference(caller){
+        const picker = caller.closest(".referencepicker");
+        picker.querySelector("input").value = "";
+        picker.querySelector(".referencename").innerHTML = '<span class="text-secondary">none</span>';
     }
 </script>
 {% endmacro %}
@@ -144,6 +154,24 @@ input{% if open %} type="{{ type }}"{% endif -%}
 
 
 {# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{#- a single reference, with buttons to choose another or clear it -#}
+{%- macro referencepicker(field, value, name) -%}
+<div class="referencepicker d-flex align-items-center" id="{{ name }}">
+    <input type="hidden" name="{{ name }}" value="{{ input_value(value) if value else '' }}">
+    <span class="referencename me-2">
+        {%- if value -%}
+        <a href="{{ url_for(field.endpoint~'.view', object=value) }}">{{ value.name or value.id }}</a>
+        {%- else -%}
+        <span class="text-secondary">none</span>
+        {%- endif -%}
+    </span>
+    <button type="button" class="btn btn-sm btn-secondary me-1 referenceSelector" data-picker="1" data-url="{{ url_for(field.endpoint~'.overview', embedded=1) }}" onClick="loadReferenceSelector(this);">Choose</button>
+    <button type="button" class="btn btn-sm btn-outline-danger referenceClear" onClick="clearReference(this);">Clear</button>
+</div>
+{%- endmacro -%}
+
+
+{# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
 {% macro formfield(obj, fieldname, field=none, nameprefix='', outerclass="", errmsg=none) -%}
 {%- set field = field or obj._fields[fieldname] -%}
 {%- set value = obj[fieldname] | default('') -%}
@@ -161,7 +189,11 @@ input{% if open %} type="{{ type }}"{% endif -%}
     {% if not field.hidden -%}
         <label for="{{ name }}" class="{{ labelclass }}">{{ (field.label or field.verbose_name or fieldname) | replace('_', ' ') | title }}</label>
     {% endif -%}
+    {%- if type == "reference" %}
+    {{ referencepicker(field, value, name) }}
+    {%- else %}
     {{ forminput(field, value, name, id=name, errmsg=errmsg) }}
+    {%- endif %}
     {%- if field.help_text is defined and not field.hidden %}
         <div class="form-text mb-3">{{ field.help_text }}</div>
     {% endif -%}

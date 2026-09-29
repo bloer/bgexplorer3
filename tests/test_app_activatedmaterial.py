@@ -1,6 +1,7 @@
 """ Creating and editing activated materials through the web interface """
 from io import BytesIO
 from werkzeug.datastructures import MultiDict
+from bgexplorer.models.component import Component
 from bgexplorer.models.cosmogenic import ActivatedMaterial
 from bgexplorer.models import versioncontrol as vc
 from tests.test_app_components import AppTestCase
@@ -94,3 +95,69 @@ class TestActivatedMaterialPages(AppTestCase):
         copies = ActivatedMaterial.select_version('b')(name='Cu')
         self.assertEqual(copies.count(), 2)
         self.assertEqual({len(c.isotopes) for c in copies}, {2})
+
+
+class TestComponentActivatedMaterial(AppTestCase):
+    def setUp(self):
+        super().setUp()
+        vc.create_version('main')
+        self.cu = copper().save()
+        self.c1 = Component(name='c1', mass='1 kg',
+                            activated_material=self.cu).save()
+        self.c2 = Component(name='c2', mass='1 kg').save()
+        vc.create_version('b', 'main')
+
+    def get(self, name, version='b'):
+        return Component.select_version(version).get(name=name)
+
+    def edit(self, component, value, version='b'):
+        url = self.url('component.edit', version, object=component)
+        form = mainform(self.html(self.client.get(url)))
+        self.assertIn('activated_material', form)
+        form['activated_material'] = value
+        return self.client.post(url, data=form)
+
+    def test_choose_and_clear(self):
+        html = self.html(self.client.get(
+            self.url('component.edit', 'b', object=self.c2)))
+        self.assertIn('Cosmogenic activation', html)
+        self.assertIn(self.url('activatedmaterial.overview', 'b',
+                               embedded=1), html)
+        response = self.edit(self.c2, str(self.cu.original_id))
+        self.assertEqual(response.status_code, 302)
+        c2 = self.get('c2')
+        self.assertEqual(c2.activated_material.name, 'Cu')
+        self.assertIsNone(self.get('c2', 'main').activated_material)
+        html = self.html(self.client.get(
+            self.url('component.view', 'b', object=c2)))
+        self.assertIn('id="activated_material"', html)
+        self.assertIn(self.url('activatedmaterial.view', 'b',
+                               object=self.cu), html)
+
+        # the form shows the current value, and submits it unchanged
+        self.assertEqual(self.edit(self.c1, str(self.cu.original_id))
+                         .status_code, 302)
+        self.assertEqual(self.get('c1').activated_material.name, 'Cu')
+        self.assertEqual(self.edit(self.c1, '').status_code, 302)
+        self.assertIsNone(self.get('c1').activated_material)
+        self.assertEqual(self.get('c1', 'main').activated_material.name,
+                         'Cu')
+
+    def test_embedded_overview(self):
+        html = self.html(self.client.get(
+            self.url('activatedmaterial.overview', 'b', embedded=1)))
+        self.assertNotIn('<nav', html)
+        self.assertIn('class="table', html)
+        self.assertIn(f'data-original_id="{self.cu.original_id}"', html)
+
+    def test_delete(self):
+        html = self.html(self.client.get(
+            self.url('activatedmaterial.delete', 'b', object=self.cu)))
+        self.assertIn('Removed from these components', html)
+        self.assertIn(self.url('component.view', 'b', object=self.c1), html)
+        response = self.client.post(
+            self.url('activatedmaterial.delete', 'b', object=self.cu))
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(self.get('c1').activated_material)
+        self.assertEqual(self.get('c1', 'main').activated_material.name,
+                         'Cu')

@@ -1,5 +1,7 @@
+{%- import "datatable.html" as datatable -%}
+{%- set embedded = request.args.embedded | default(false) -%}
+{%- if not embedded -%}
 {% extends "versionbase.html" %}
-{% import "datatable.html" as datatable %}
 
 {% block pageheader %}
 <div class="col-5"><h1>Activated Materials</h1></div>
@@ -10,6 +12,15 @@
     {%- endif %}
 </div>
 {% endblock %}
+{% block pagestyle %}
+{{ datatable.styles() }}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{{ datatable.scripts() }}
+{% endblock %}
+{%- endif -%}
 
 {% block pagecontent %}
 {% call datatable.render(['Name', 'Material', 'Isotopes', 'Reference', 'Modified']) %}
@@ -23,13 +34,4 @@
     </tr>
     {% endfor %}
 {% endcall %}
-{% endblock %}
-
-{% block pagestyle %}
-{{ datatable.styles() }}
-{% endblock %}
-
-{% block scripts %}
-{{ super() }}
-{{ datatable.scripts() }}
 {% endblock %}

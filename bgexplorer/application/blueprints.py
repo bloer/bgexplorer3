@@ -7,6 +7,7 @@ from ..models.budget import budget_breakdown, available_scalars, GROUPBY
 from ..models.component import Component, Assembly
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
+from ..models.cosmogenic import ActivatedMaterial
 from ..models.fields import InlineAttachment
 from ..models.importexport import iter_json_documents, import_documents
 from ..models.verdoc import check_writable
@@ -112,6 +113,11 @@ class CollectionViews(flask.Blueprint):
             return [dict(text="Removed from these components:",
                          docs=list(Component.select_version(
                              obj.active_version)(specs=obj)),
+                         endpoint='component')]
+        if isinstance(obj, ActivatedMaterial):
+            return [dict(text="Removed from these components:",
+                         docs=list(Component.select_version(
+                             obj.active_version)(activated_material=obj)),
                          endpoint='component')]
         if isinstance(obj, HitEfficiency):
             count = find_sourceterms(obj).count()
