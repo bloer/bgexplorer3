@@ -1,0 +1,109 @@
+{% extends "versionbase.html" %}
+{% from "forms.html" import formfield, formscripts, subdocform, dynamictable, maptable, modal with context %}
+
+{%- set isnew = g.object.original_id is none -%}
+{%- set typename = g.object._class_name.rsplit('.', 1)[-1] -%}
+{%- macro buttons() -%}
+    <div class="d-flex justify-content-end">
+        <button class="btn btn-success me-1" type="submit" form="mainform">Save</button>
+        {%- if isnew %}
+        <a class="btn btn-warning me-1" href="{{ request.url }}">Reset</a>
+        <a class="btn btn-danger" href="{{ url_for('.overview') }}">Cancel</a>
+        {%- else %}
+        <a class="btn btn-warning me-1" href="{{ url_for('.edit', object=g.object) }}">Reload</a>
+        <a class="btn btn-danger" href="{{ url_for('.view', object=g.object) }}">Cancel</a>
+        {%- endif %}
+    </div>
+{%- endmacro -%}
+
+{% block pageheader %}
+<div class="col-5">
+    <h2>{% if isnew %}New {{ typename }}{% else %}Editing {{ typename }} <span class="text-primary">{{ g.object.name }}</span>{% endif %}</h2>
+</div>
+<div class="col-7">
+    {{ buttons() }}
+</div>
+{% endblock pageheader %}
+
+{% block pagecontent %}
+<p>Branch: {{ g.object.active_version }}</p>
+{%- if not isnew %}
+<p>Current revision: {{ g.object.revision }}</p>
+<p>Last modified: {{ pretty_date(g.object.modified) }}</p>
+{%- endif %}
+{%- if errors -%}
+<div id="toperror" class="alert alert-danger">
+    Errors found in form; please correct and resubmit.
+    <ul class="mb-0">{% for name, message in errors.items() %}<li><strong>{{ name }}</strong>: {{ message }}</li>{% endfor %}</ul>
+</div>
+{%- endif -%}
+{%- set basefields = ['name', 'description', 'comment', 'category', 'sources'] -%}
+<form method="POST" id="mainform">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row mb-3">
+        <fieldset class="col-sm-12 col-md-6">
+            <legend>Basic Info</legend>
+            {%- for fieldname in basefields[:-1] -%}
+            {{ formfield(g.object, fieldname) }}
+            {%- endfor -%}
+        </fieldset>
+    </div>
+    <fieldset class="row mb-3">
+        <legend>Sources</legend>
+        <p class="form-text">Rows marked <span class="badge text-bg-info">default</span>
+            are generated from another source by this version's settings, and
+            follow it when it changes. Edit one to override its value; delete
+            an override to restore the default.</p>
+        {% call(source) dynamictable(g.object, 'sources') -%}
+        {%- if source.generated_from -%}
+        {%- set parent = g.object.sources | selectattr('id', 'equalto', source.generated_from) | first -%}
+        <span class="badge text-bg-info me-1 generated" title="Generated from {{ parent.name if parent else 'another source' }}; edit to override">default{% if parent %} (from {{ parent.name }}){% endif %}</span>
+        {%- endif -%}
+        {%- endcall %}
+    </fieldset>
+    {#- fields of subclasses, e.g. Assay #}
+    <div class="row mb-3">
+    {%- for fieldname in g.object._fields_ordered if fieldname not in basefields -%}
+    {%- set field = g.object._fields[fieldname] -%}
+    {%- set kind = field_kind(field) -%}
+    {%- set label = (field.label or field.verbose_name or fieldname) | replace('_', ' ') | title -%}
+    {%- if kind == 'subdoc' %}
+        <fieldset class="col-sm-12 col-md-6 mb-3" id="{{ fieldname }}_fields">
+            <legend>{{ label }}</legend>
+            {{ subdocform(g.object, fieldname) }}
+        </fieldset>
+    {%- elif kind == 'map' %}
+        <fieldset class="col-sm-12 col-md-6 mb-3">
+            <legend>{{ label }}</legend>
+            {{ maptable(g.object, fieldname) }}
+        </fieldset>
+    {%- elif kind == 'list' %}
+        <fieldset class="col-12 mb-3">
+            <legend>{{ label }}</legend>
+            {{ dynamictable(g.object, fieldname) }}
+        </fieldset>
+    {%- elif kind == 'field' %}
+        <div class="col-sm-12 col-md-6">{{ formfield(g.object, fieldname) }}</div>
+    {%- endif %}
+    {%- endfor %}
+    </div>
+    {{ buttons() }}
+</form>
+{{ modal() }}
+{% endblock pagecontent %}
+
+{% block pagescripts %}
+{{ formscripts() }}
+<script>
+    // an edited default becomes an override when saved
+    document.querySelector('#sources tbody').addEventListener('input', event => {
+        const badge = event.target.closest('tr').querySelector('.badge.generated');
+        if (badge) {
+            badge.classList.replace('generated', 'overridden');
+            badge.classList.replace('text-bg-info', 'text-bg-warning');
+            badge.textContent = 'override';
+            badge.title = 'Will be saved as an override of the default';
+        }
+    });
+</script>
+{% endblock pagescripts %}

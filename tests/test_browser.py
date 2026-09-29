@@ -210,3 +210,31 @@ class TestPlotsInBrowser(BrowserTestCase):
         # each measured bin is a full step, broken at the limits
         self.assertEqual(line['x'], [0, 1, 1, 2, None, 3, 4, 4, 5, None])
         self.assertEqual(line['y'][:4], [1, 1, 2, 2])
+
+
+class TestEmissionSpecEditor(BrowserTestCase):
+    def setUp(self):
+        super().setUp()
+        vc.create_version('main')
+        self.spec = EmissionSpec(name='e1', sources=[
+            EmissionSource(name='U238', rate='10 +- 1 mBq/kg')]).save()
+
+    def test_override_badge(self):
+        """ editing a generated source marks it as an override """
+        page = self.open(self.url('emissionspec.edit', object=self.spec))
+        rows = page.locator('#sources tbody tr')
+        self.assertEqual(rows.count(), 3)
+        self.assertEqual(page.locator('.badge.generated').count(), 2)
+        ra226 = rows.nth(2)
+        self.assertIn('default (from U238)', ra226.inner_text())
+        ra226.locator('input[name="sources.rate"]').fill('4 mBq/kg')
+        self.assertEqual(ra226.locator('.badge').inner_text(), 'override')
+        self.assertEqual(page.locator('.badge.generated').count(), 1)
+        # a select counts as an edit too
+        u235 = rows.nth(1)
+        u235.locator('select[name="sources.category"]').select_option('radon')
+        self.assertEqual(page.locator('.badge.generated').count(), 0)
+        # adding a row works, and has no badge
+        page.click('button[data-tableid="sources"]')
+        self.assertEqual(rows.count(), 4)
+        self.assertEqual(rows.nth(3).locator('.badge').count(), 0)

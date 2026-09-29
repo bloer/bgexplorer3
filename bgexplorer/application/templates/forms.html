@@ -72,12 +72,10 @@
 
 
 {# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
+{#- errors are keyed by dotted path, with list indices and map keys as
+    path elements, e.g. `sources.0.rate` -#}
 {%- macro finderrmsg(fieldnames) -%}
-{%- set ns = namespace(e=errors) -%}
-{%- for name in fieldnames -%}
-{%- set ns.e = ns.e[name] | default({}) -%}
-{%- endfor -%}
-{{ ns.e or '' }}
+{{ errors[fieldnames | join('.')] | default('') }}
 {%- endmacro -%}
 
 
@@ -161,7 +159,7 @@ input{% if open %} type="{{ type }}"{% endif -%}
 
 <div class="form-field {{ outerclass }} {%- if field.required %} required-field {%- endif %}">
     {% if not field.hidden -%}
-        <label for="{{ name }}" class="{{ labelclass }}">{{ field.label | default(fieldname) | replace('_', ' ') | title }}</label>
+        <label for="{{ name }}" class="{{ labelclass }}">{{ (field.label or field.verbose_name or fieldname) | replace('_', ' ') | title }}</label>
     {% endif -%}
     {{ forminput(field, value, name, id=name, errmsg=errmsg) }}
     {%- if field.help_text is defined and not field.hidden %}
@@ -177,10 +175,13 @@ input{% if open %} type="{{ type }}"{% endif -%}
 {# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
 {% macro subdocform(parentobj, fieldname, outerclass="") %}
     {% set obj = parentobj[fieldname] %}
-    {% set subdoc = g.object._fields[fieldname].document_type %}
+    {% set subdoc = parentobj._fields[fieldname].document_type %}
     {% for subfieldname in subdoc._fields_ordered %}
+    {#- update_object can't parse lists nested in EmbeddedDocuments #}
+    {%- if field_kind(subdoc._fields[subfieldname]) == 'field' %}
     {{ formfield(obj, subfieldname, field=subdoc._fields[subfieldname],
                  nameprefix=fieldname~'.', outerclass=outerclass) }}
+    {%- endif %}
     {% endfor %}
 {% endmacro %}
 
@@ -188,7 +189,7 @@ input{% if open %} type="{{ type }}"{% endif -%}
 
 
 {# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
-{%- macro dynamictablerow(obj, fieldname, entry=none, template=false, plainref=false, index=none) -%}
+{%- macro dynamictablerow(obj, fieldname, entry=none, template=false, plainref=false, index=none, extra=none) -%}
 {%- set embeddedfield = obj._fields[fieldname].field -%}
 {%- set subdoc = embeddedfield.document_type -%}
     <tr>
@@ -210,7 +211,9 @@ input{% if open %} type="{{ type }}"{% endif -%}
         {%- endfor -%}
         {%- endif -%}
 
-        <td style="text-align:right"><a href="#" onclick="removeDynamicTableRow(this);" class="btn btn-danger" style="font-weight:bold">x</a></td>
+        <td style="text-align:right" class="text-nowrap">
+            {%- if extra and entry is not none %}{{ extra(entry) }}{% endif -%}
+            <a href="#" onclick="removeDynamicTableRow(this);" class="btn btn-danger" style="font-weight:bold">x</a></td>
     </tr>
 
 {%- endmacro -%}
@@ -219,7 +222,8 @@ input{% if open %} type="{{ type }}"{% endif -%}
 {# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
 {%- macro dynamictable(obj, fieldname, plainref=false) -%}
 {# Render an EmbeddedDocumentList as a table with javascript handlers to
-    add and remove rows
+    add and remove rows. If called with a `call(entry)` block, its content is
+    shown at the end of each existing row
 #}
 {%- set subdoc = obj._fields[fieldname].field.document_type -%}
 {# tell update_object this list is in the form, even if it has no rows #}
@@ -239,7 +243,8 @@ input{% if open %} type="{{ type }}"{% endif -%}
     </thead>
     <tbody>
         {%- for listitem in obj[fieldname] -%}
-        {{ dynamictablerow(obj, fieldname, entry=listitem, plainref=plainref, index=loop.index0) }}
+        {{ dynamictablerow(obj, fieldname, entry=listitem, plainref=plainref, index=loop.index0,
+                           extra=caller if caller is defined else none) }}
         {%- endfor -%}
     </tbody>
 </table>

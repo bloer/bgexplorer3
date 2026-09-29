@@ -11,7 +11,19 @@
 {{ datatable.scripts() }}
 {% endblock %}
 
-{% block pageheader %}<h1>Radiation sources</h1>{% endblock %}
+{% block pageheader %}
+<div class="col-5"><h1>Radiation sources</h1></div>
+<div class="col-7 d-flex justify-content-end align-items-center">
+    {%- if settings.editable %}
+    <a class="btn btn-success me-1" id="newemissionspec" href="{{ url_for('.edit') }}">New Emission Spec</a>
+    {%- for subclass in doc_cls._subclasses[1:] %}
+    {%- set typename = subclass.rsplit('.', 1)[-1] %}
+    <a class="btn btn-success me-1" id="new{{ typename | lower }}" href="{{ url_for('.edit', type=typename | lower) }}">New {{ typename }}</a>
+    {%- endfor %}
+    <a class="btn btn-outline-primary" id="import" href="{{ url_for('.import_') }}">Import</a>
+    {%- endif %}
+</div>
+{% endblock %}
 {%- endif -%}
 
 {% block pagecontent %}

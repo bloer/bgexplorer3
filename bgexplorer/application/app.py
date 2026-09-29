@@ -20,7 +20,7 @@ from .versions import create_versions_blueprint, edit_settings
 from .admin import create_admin_blueprint
 from ..models.versioncontrol import list_versions, version_exists
 from ..models.verdoc import VersionedDocument
-from .forms import input_type, input_value
+from .forms import input_type, input_value, field_kind
 from . import examples
 
 from ..models.asymmetric import AsymmetricUncertainty
@@ -191,6 +191,7 @@ def create_app(config_file=None, config=None):
     app.add_template_filter(pretty_date, 'pretty_date')
     app.add_template_global(input_type, 'input_type')
     app.add_template_global(input_value, 'input_value')
+    app.add_template_global(field_kind, 'field_kind')
     app.add_template_global(get_fromstr, 'get_fromstr')
     app.add_template_global(VersionedDocument.get_default_tag(),
                             'default_version')

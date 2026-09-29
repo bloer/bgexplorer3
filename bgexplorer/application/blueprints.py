@@ -10,7 +10,7 @@ from ..models.importexport import iter_json_documents, import_documents
 from ..models.verdoc import check_writable
 from ..models.settings import get_settings
 from .api import validation_fields
-from .forms import update_object
+from .forms import update_object, list_snapshot, edited_rows
 from ..models.histogram import Histogram
 from pint.errors import PintError
 from .plotting import histogram_json, scalar_json, unit_str
@@ -165,7 +165,13 @@ class CollectionViews(flask.Blueprint):
             if 'object' not in flask.g:
                 flask.g.object = self.new_document(req.args.get('type'))
             if req.method == 'POST':
-                obj = update_object(flask.g.object, req.form, errors=errors)
+                obj = flask.g.object
+                # generated emission sources the user edits become overrides
+                if overrides := hasattr(obj, 'mark_overrides'):
+                    shown = list_snapshot(obj, 'sources', obj.OVERRIDE_FIELDS)
+                obj = update_object(obj, req.form, errors=errors)
+                if overrides:
+                    obj.mark_overrides(edited_rows(shown, req.form, 'sources'))
                 if not errors:
                     try:
                         obj.save()

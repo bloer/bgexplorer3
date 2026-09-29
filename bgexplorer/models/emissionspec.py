@@ -70,13 +70,14 @@ class Multiplier(Enum):
                 return True
         # if we get here, none match
         raise ValidationError(f"Rate units {rate.u} invalid"
-                              f" for multiplier {self}")
+                              f" for multiplier {self.name}")
 
     def getvalue(self, component) -> Union[float, units.Quantity]:
         """ Extract the numerical value of the multipler from component """
         mult = 1
         if self is not Multiplier.none:
-            mult = getattr(component, self.name)
+            # values name the Component attributes, e.g. surface_area
+            mult = getattr(component, self.value)
         return mult
 
 
@@ -114,11 +115,15 @@ class EmissionSource(EmbeddedDocument):
         # rate and id may have been set after __init__ (e.g. by forms)
         if self.rate is not None:
             self.rate.m.id = self.id
-        if self.multiplier is None:
-            self.multiplier = Multiplier.get_multiplier(self.rate)
-            # ^ will raise ValidationError if it can't be auto-determined
-        else:
-            self.multiplier.check_units(self.rate)
+        try:
+            if self.multiplier is None:
+                self.multiplier = Multiplier.get_multiplier(self.rate)
+                # ^ will raise ValidationError if it can't be auto-determined
+            else:
+                self.multiplier.check_units(self.rate)
+        except ValidationError as e:
+            # the rate is what's wrong, so forms can show it there
+            raise ValidationError(e.message, field_name='rate') from e
 
         if (self.multiplier is Multiplier.mass and
                 self.rate.check('ppb') and
@@ -166,8 +171,17 @@ class EmissionSpec(VersionedDocument):
         if matchin is None:
             return
 
-        matchout = [s for s in self.sources if s.generated_from == matchin.id
-                    and compare_source_names(newsource.newsource, s.name)]
+        generated = [s for s in self.sources if s.generated_from == matchin.id
+                     and compare_source_names(newsource.newsource, s.name)]
+        # generated sources are defaults: a source given by the user wins
+        if any(s is not matchin and not s.generated_from
+               and compare_source_names(newsource.newsource, s.name)
+               for s in self.sources):
+            for source in generated:
+                self.sources.remove(source)
+            return
+
+        matchout = generated
         doinsert = False
         if matchout:
             matchout = matchout[0]
@@ -193,6 +207,19 @@ class EmissionSpec(VersionedDocument):
 
         if doinsert:
             self.sources.append(matchout)
+
+    # fields of an EmissionSource which, if edited, make a generated source
+    # an override of the default
+    OVERRIDE_FIELDS = ('name', 'category', 'rate', 'multiplier', 'particle',
+                       'spectrum')
+
+    def mark_overrides(self, edited) -> None:
+        """ Generated sources whose (str) id is in `edited` were changed by
+        the user, so keep their values instead of regenerating them
+        """
+        for source in self.sources:
+            if source.generated_from and str(source.id) in edited:
+                source.generated_from = None
 
     def clean(self):
         """ Automatically populate derived spectra from settings """

@@ -28,8 +28,7 @@ SKIP_ENDPOINTS = {'static', 'test'}
 
 # pages that don't work yet. These are expected to fail so that fixing them
 # is noticed.
-# TODO: add edit templates for emissionspecs and hiteffs
-KNOWN_BROKEN = {'emissionspec.edit'}
+KNOWN_BROKEN = set()
 # endpoints whose GET doesn't return 200 with the test fixtures
 EXPECTED_STATUS = {'admin.logo': 404}  # no logo is set
 
@@ -120,6 +119,7 @@ class AppSmokeTest:
                          'edit_settings', 'api.list_versions', 'api.get_version'):
             self.assertIn(endpoint, tested)
 
+    @unittest.skipUnless(KNOWN_BROKEN, "no known broken pages")
     @unittest.expectedFailure
     def test2_known_broken(self):
         for endpoint, url in self.urls():

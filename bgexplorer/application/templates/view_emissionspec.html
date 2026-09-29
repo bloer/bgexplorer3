@@ -11,7 +11,13 @@
         <a class="nav-link {% if activepage == 'summary' %}active{% endif %}" href="{{ url_for('.view', object=g.object) }}">Summary</a>
         <a class="nav-link {% if activepage == 'sourceterms' %}active{% endif %}" href="{{ url_for('.sourceterms', object=g.object) }}">Source Terms</a>
         <a class="nav-link" href="{{ url_for('.get_json', object=g.object) }}">Export</a>
-        {% if settings.editable %}<a class="btn btn-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a>{% endif %}
+        {% if settings.editable %}
+        <form method="POST" action="{{ url_for('.clone', object=g.object) }}" id="cloneform" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-success me-1" title="Create a copy of this {{ clsname }}">Clone</button>
+        </form>
+        <a class="btn btn-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a>
+        {% endif %}
     </div>
 </div>
 {% endblock pageheader %}

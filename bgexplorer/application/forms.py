@@ -1,7 +1,8 @@
+from enum import Enum
 import mongoengine as me
 from pint.errors import PintError
 from ..models.verdoc import VersionedDocument
-from ..models.fields import get_fromstr
+from ..models.fields import get_fromstr, InlineAttachment
 
 def input_type(field):
     """ Determine the <input> type for the given field """
@@ -35,6 +36,68 @@ def input_value(value):
     if isinstance(value, me.EmbeddedDocument):
         return getattr(value, 'id', None) or value
     return get_fromstr(value) or value
+
+
+def submitted_value(value) -> str:
+    """ The string a form input shows for `value`, which is what an
+    unchanged input submits
+    """
+    if value is None:
+        return ''
+    if isinstance(value, Enum):
+        # enum selects submit the value, see forms.html
+        return str(value.value)
+    return str(input_value(value))
+
+
+def field_kind(field) -> str:
+    """ How an edit form shows `field`: 'field' for a plain input, 'list' for
+    a dynamictable of EmbeddedDocuments, 'subdoc' for an EmbeddedDocument,
+    'map' for a maptable, or 'skip' for fields that aren't edited in forms
+    """
+    if field.name in VersionedDocument._fields or field.name == '_cls':
+        return 'skip'
+    if isinstance(field, me.EmbeddedDocumentListField):
+        # attachments have their own form
+        if issubclass(field.field.document_type, InlineAttachment):
+            return 'skip'
+        return 'list'
+    if isinstance(field, me.EmbeddedDocumentField):
+        return 'subdoc'
+    if (isinstance(field, me.DictField) and not
+            isinstance(getattr(field, 'field', None),
+                       (me.EmbeddedDocumentField, me.ListField))):
+        return 'map'
+    if isinstance(field, (me.ListField, me.DictField)):
+        # includes lists nested in EmbeddedDocuments, which update_object
+        # can't parse
+        return 'skip'
+    return 'field'
+
+
+def list_snapshot(obj, fieldname, subfields) -> dict:
+    """ What the form shows for each row of EmbeddedDocumentList
+    `fieldname`: {row id: {subfield: submitted_value}}, to find edited rows
+    with `edited_rows`
+    """
+    return {str(row.id): {sub: submitted_value(row[sub]) for sub in subfields}
+            for row in obj[fieldname]}
+
+
+def edited_rows(snapshot, form, fieldname) -> set:
+    """ ids of the rows in `snapshot` whose values in `form` differ from what
+    was shown. Rows are matched by the submitted `fieldname.id`
+    """
+    ids = form.getlist(f'{fieldname}.id')
+    edited = set()
+    for i, rowid in enumerate(ids):
+        if (shown := snapshot.get(rowid)) is None:
+            continue
+        for sub, value in shown.items():
+            submitted = form.getlist(f'{fieldname}.{sub}')
+            if i < len(submitted) and submitted[i].strip() != value.strip():
+                edited.add(rowid)
+    return edited
 
 
 LISTFIELDS_KEY = '_listfields'
