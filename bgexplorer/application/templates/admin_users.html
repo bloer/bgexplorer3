@@ -1,0 +1,31 @@
+{% extends "adminbase.html" %}
+{% block title %}Users - Background Explorer{% endblock %}
+{% block pageheader %}
+<div class="col-8"><h1>Users</h1></div>
+<div class="col-4 d-flex justify-content-end align-items-center">
+    <a class="btn btn-success" id="newuser" href="{{ url_for('admin.new_user') }}">New user</a>
+</div>
+{% endblock %}
+{% block pagecontent %}
+<table id="users" class="table table-hover align-middle">
+    <thead>
+        <tr><th>Name</th><th>Role</th><th>Status</th><th>Created</th></tr>
+    </thead>
+    <tbody>
+        {% for user in users %}
+        <tr class="user">
+            <td><a href="{{ url_for('admin.edit_user', userid=user.id) }}">{{ user.name }}</a></td>
+            <td>{{ user.role.name | replace('_', ' ') }}</td>
+            <td>{% if user.active %}active{% else %}<span class="badge text-bg-secondary">inactive</span>{% endif %}</td>
+            <td>{{ pretty_date(user.created) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">No users yet</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+<p class="form-text">Roles include the ones before them: viewers read
+everything (only needed when anonymous viewing is off), editors change
+documents and branches, admins also make tags, and site admins also manage
+the site and its users.</p>
+{% endblock %}

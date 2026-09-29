@@ -1,9 +1,9 @@
 {% extends "adminbase.html" %}
 {% block pageheader %}<h1>Site administration</h1>{% endblock %}
 {% block pagecontent %}
-<div class="alert alert-warning">Admin pages have no access control yet.</div>
 <ul id="adminlinks">
     <li><a href="{{ url_for('admin.settings') }}">Site settings</a>: organization name, logo and link; anonymous access</li>
+    <li><a href="{{ url_for('admin.users') }}">Users</a>: accounts and their roles</li>
     <li><a href="{{ url_for('admin.maintenance_page') }}">Maintenance</a>: database statistics, the calculation cache, orphaned documents and rebuilding source terms</li>
 </ul>
 {% endblock %}

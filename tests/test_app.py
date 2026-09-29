@@ -15,6 +15,7 @@ from bgexplorer.models.verdoc import VersionedDocument
 from bgexplorer.models.settings import get_settings
 from bgexplorer.models import versioncontrol as vc
 from bgexplorer.models.histogram import Histogram
+from bgexplorer.models.users import User
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.common import units
 from tests.dbutil import TEST_MONGODB_URI, connect_test_db
@@ -59,6 +60,8 @@ class AppSmokeTest:
                                      'TESTING': True, 'LOGIN_DISABLED': True,
                                      'WTF_CSRF_ENABLED': False})
         cls.populate()
+        # for the user admin pages
+        User(name='smoketest').save()
 
     @classmethod
     def tearDownClass(cls):
@@ -89,6 +92,11 @@ class AppSmokeTest:
             for obj in objects:
                 if obj is not None:
                     values['objid'] = str(obj.original_id)
+                if 'userid' in rule.arguments:
+                    for user in User.objects:
+                        yield rule.endpoint, rule.build(
+                            dict(values, userid=str(user.id)))[1]
+                    continue
                 if 'attachmentid' in rule.arguments:
                     for attachment in getattr(obj, 'attachments', []):
                         yield rule.endpoint, rule.build(

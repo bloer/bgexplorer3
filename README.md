@@ -1,5 +1,35 @@
 # Background Explorer
 
+## Users and login
+
+The server has local user accounts, each with one role. Roles include the
+ones before them:
+
+- `viewer`: read everything. Only needed when anonymous viewing is off.
+- `editor`: change documents, and create, edit and delete branches.
+- `admin`: also create tags, which are read-only snapshots.
+- `site_admin`: also change the site settings, run maintenance and manage
+  users, on the `/admin` pages.
+
+Anyone can view the models without logging in, unless "allow anon view" is
+turned off in the site settings.
+
+The server must have a `SECRET_KEY`, which protects the login sessions, e.g.
+from the `FLASK_SECRET_KEY` environment variable. Keep it secret and the same
+across restarts. Only debug and test servers make a temporary one.
+
+Create the first site admin on the command line, with the same configuration
+as the server; it asks for a password. They can then add other users through
+the web interface.
+
+```sh
+flask --app bgexplorer create-user NAME --role site_admin
+flask --app bgexplorer set-password NAME  # if a password is forgotten
+```
+
+Set `LOGIN_DISABLED = True` in the configuration to give everyone every role,
+e.g. for a server only you can reach.
+
 ## Running tests
 
 Install with the development extras, then run pytest:

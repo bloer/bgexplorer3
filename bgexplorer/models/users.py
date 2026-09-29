@@ -94,6 +94,15 @@ class User(Document):
         return None
 
 
+def is_last_site_admin(user: User) -> bool:
+    """ Whether `user` is the only active site_admin, so mustn't be demoted
+    or deactivated
+    """
+    return (user.active and user.role is Role.site_admin
+            and not User.objects(id__ne=user.id, role=Role.site_admin,
+                                 active=True).count())
+
+
 def check_login(name: str, password: str) -> Optional[User]:
     """ The active user with `name` and `password`, or None. Takes about as
     long for unknown names as for wrong passwords

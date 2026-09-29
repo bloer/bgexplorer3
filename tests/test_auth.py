@@ -252,7 +252,8 @@ class TestRoles(AuthTestCase):
 
     def test_admin(self):
         for endpoint in ('admin.index', 'admin.settings',
-                         'admin.maintenance_page'):
+                         'admin.maintenance_page', 'admin.users',
+                         'admin.new_user'):
             self.check(Role.site_admin, 'GET', self.url(endpoint))
         self.check(Role.site_admin, 'POST',
                    self.url('admin.clear_cache'))
@@ -293,3 +294,126 @@ class TestRoles(AuthTestCase):
         self.assertIn('error', response.get_json())
         self.assertIsNone(response.headers.get('Access-Control-Allow-Origin'))
         self.assertNotIn('x', {v.version_tag for v in vc.list_versions()})
+
+
+class TestUserAdmin(AuthTestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin = self.make_user('root', Role.site_admin)
+        self.login('root')
+
+    def test_create(self):
+        url = self.url('admin.new_user')
+        html = self.html(self.client.get(url))
+        self.assertIn('id="userform"', html)
+        for form, field in ((dict(name='', role='editor',
+                                  password=PASSWORD), 'name'),
+                            (dict(name='root', role='editor',
+                                  password=PASSWORD), 'name'),
+                            (dict(name='u1', role='boss',
+                                  password=PASSWORD), 'role'),
+                            (dict(name='u1', role='editor',
+                                  password='short'), 'password')):
+            with self.subTest(form=form):
+                response = self.client.post(url, data=form)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('is-invalid', self.html(response))
+        self.assertEqual(User.objects.count(), 1)
+        response = self.client.post(url, data=dict(name=' u1 ', role='editor',
+                                                   password=PASSWORD))
+        self.assertEqual(response.status_code, 302)
+        user = User.objects.get(name='u1')
+        self.assertIs(user.role, Role.editor)
+        self.assertTrue(user.active)
+        html = self.html(self.client.get(self.url('admin.users')))
+        self.assertIn('>u1</a>', html)
+        self.assertEqual(self.login('u1', client=self.app.test_client())
+                         .status_code, 302)
+
+    def test_edit(self):
+        user = self.make_user('u1', Role.editor)
+        other = self.app.test_client()
+        self.login('u1', client=other)
+        url = self.url('admin.edit_user', userid=user.id)
+        self.assertIn('id="active"', self.html(self.client.get(url)))
+        # an empty password is unchanged
+        response = self.client.post(url, data=dict(role='admin',
+                                                   active='true'))
+        self.assertEqual(response.status_code, 302)
+        user.reload()
+        self.assertIs(user.role, Role.admin)
+        self.assertTrue(user.check_password(PASSWORD))
+        self.assertEqual(other.get(self.url('versions.new')).status_code, 200)
+        # a new password logs the user out
+        response = self.client.post(url, data=dict(role='admin',
+                                                   active='true',
+                                                   password='battery staple'))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(User.objects.get(name='u1')
+                        .check_password('battery staple'))
+        self.assertEqual(other.get(self.url('versions.new')).status_code, 302)
+        self.login('u1', 'battery staple', client=other)
+        # deactivating does too
+        response = self.client.post(url, data=dict(role='admin'))
+        self.assertFalse(User.objects.get(name='u1').active)
+        self.assertEqual(other.get(self.url('versions.new')).status_code, 302)
+        self.assertEqual(self.client.get(self.url('admin.edit_user',
+                                                  userid='nonsense'))
+                         .status_code, 404)
+
+    def test_last_site_admin(self):
+        url = self.url('admin.edit_user', userid=self.admin.id)
+        for form in (dict(role='admin', active='true'),
+                     dict(role='site_admin')):
+            with self.subTest(form=form):
+                response = self.client.post(url, data=form)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('last active site_admin', self.html(response))
+                self.admin.reload()
+                self.assertIs(self.admin.role, Role.site_admin)
+                self.assertTrue(self.admin.active)
+        # with another site_admin, this one can step down
+        self.make_user('root2', Role.site_admin)
+        response = self.client.post(url, data=dict(role='editor',
+                                                   active='true'))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.client.get(self.url('admin.users')).status_code,
+                         403)
+
+
+class TestCli(AuthTestCase):
+    def invoke(self, *args, input=None):
+        return self.app.test_cli_runner().invoke(args=list(args),
+                                                 input=input)
+
+    def test_create_user(self):
+        result = self.invoke('create-user', 'root', '--role', 'site_admin',
+                             input=f'{PASSWORD}\n{PASSWORD}\n')
+        self.assertEqual(result.exit_code, 0, result.output)
+        user = User.objects.get(name='root')
+        self.assertIs(user.role, Role.site_admin)
+        self.assertTrue(user.check_password(PASSWORD))
+        self.assertNotIn(PASSWORD, result.output)
+        result = self.invoke('create-user', 'root', '--password', PASSWORD)
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn('already a user', result.output)
+        result = self.invoke('create-user', 'u2', '--password', 'short')
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn('at least 8', result.output)
+        result = self.invoke('create-user', 'u3', '--role', 'boss',
+                             '--password', PASSWORD)
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertEqual(User.objects.count(), 1)
+        result = self.invoke('create-user', 'u4', '--password', PASSWORD)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIs(User.objects.get(name='u4').role, Role.viewer)
+
+    def test_set_password(self):
+        self.make_user('u1')
+        result = self.invoke('set-password', 'u1',
+                             input='battery staple\nbattery staple\n')
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertTrue(User.objects.get().check_password('battery staple'))
+        result = self.invoke('set-password', 'nobody', '--password', PASSWORD)
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn('No user', result.output)

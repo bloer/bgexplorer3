@@ -1,0 +1,40 @@
+{% extends "adminbase.html" %}
+{%- set isnew = user.pk is none %}
+{% block title %}{{ 'New user' if isnew else user.name }} - Background Explorer{% endblock %}
+{% block pageheader %}<h1>{{ 'New user' if isnew else 'User ' ~ user.name }}</h1>{% endblock %}
+{% block pagecontent %}
+<form method="POST" id="userform" class="col-sm-8 col-md-5 col-lg-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {%- if isnew %}
+    <div class="mb-3">
+        <label class="form-label" for="name">Name</label>
+        <input type="text" class="form-control{% if errors.name %} is-invalid{% endif %}" name="name" id="name" value="{{ user.name or '' }}" autocomplete="off" required>
+        {%- if errors.name %}<div class="invalid-feedback">{{ errors.name }}</div>{% endif %}
+    </div>
+    {%- endif %}
+    <div class="mb-3">
+        <label class="form-label" for="role">Role</label>
+        <select class="form-select{% if errors.role %} is-invalid{% endif %}" name="role" id="role">
+            {%- for role in roles %}
+            <option value="{{ role.name }}" {% if role == user.role %}selected{% endif %}>{{ role.name | replace('_', ' ') }}</option>
+            {%- endfor %}
+        </select>
+        {%- if errors.role %}<div class="invalid-feedback">{{ errors.role }}</div>{% endif %}
+    </div>
+    {%- if not isnew %}
+    <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" name="active" id="active" value="true" {% if user.active %}checked{% endif %}>
+        <label class="form-check-label" for="active">Active</label>
+        <div class="form-text">Inactive users can't log in, and are logged out at once.</div>
+    </div>
+    {%- endif %}
+    <div class="mb-3">
+        <label class="form-label" for="password">{{ 'Password' if isnew else 'New password' }}</label>
+        <input type="password" class="form-control{% if errors.password %} is-invalid{% endif %}" name="password" id="password" autocomplete="new-password" {% if isnew %}required{% endif %}>
+        {%- if errors.password %}<div class="invalid-feedback">{{ errors.password }}</div>{% endif %}
+        {%- if not isnew %}<div class="form-text">Leave empty to keep the current password. Setting one logs the user out.</div>{% endif %}
+    </div>
+    <button type="submit" class="btn btn-success">Save</button>
+    <a class="btn btn-secondary" href="{{ url_for('admin.users') }}">Cancel</a>
+</form>
+{% endblock %}
