@@ -281,3 +281,15 @@ class TestRoles(AuthTestCase):
                 self.assertEqual('id="type_tag"' in html, shown)
         html = self.html(self.request(Role.viewer, 'GET', self.url('index')))
         self.assertNotIn('New version', html)
+
+    def test_api_csrf(self):
+        """ The API has no CSRF tokens, so must refuse the form posts that
+        another site could make with a user's cookie
+        """
+        url = self.url('api.create_version')
+        response = self.request(Role.site_admin, 'POST', url,
+                                data={'version_tag': 'x'})
+        self.assertEqual(response.status_code, 415)
+        self.assertIn('error', response.get_json())
+        self.assertIsNone(response.headers.get('Access-Control-Allow-Origin'))
+        self.assertNotIn('x', {v.version_tag for v in vc.list_versions()})
