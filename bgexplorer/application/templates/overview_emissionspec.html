@@ -20,7 +20,8 @@
     {%- set typename = subclass.rsplit('.', 1)[-1] %}
     <a class="btn btn-success me-1" id="new{{ typename | lower }}" href="{{ url_for('.edit', type=typename | lower) }}">New {{ typename }}</a>
     {%- endfor %}
-    <a class="btn btn-outline-primary" id="import" href="{{ url_for('.import_') }}">Import</a>
+    <a class="btn btn-outline-primary me-1" id="import" href="{{ url_for('.import_') }}">Import</a>
+    <a class="btn btn-outline-primary" id="importradiopurity" href="{{ url_for('radiopurity.search') }}">Import from radiopurity.org</a>
     {%- endif %}
 </div>
 {% endblock %}

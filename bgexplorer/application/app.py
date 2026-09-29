@@ -19,6 +19,7 @@ from .blueprints import CollectionViews
 from .api import create_api, API_VERSION
 from .versions import create_versions_blueprint, edit_settings
 from .admin import create_admin_blueprint
+from .radiopurity import create_radiopurity_blueprint
 from ..models.versioncontrol import list_versions, version_exists
 from ..models.verdoc import VersionedDocument
 from .forms import input_type, input_value, field_kind
@@ -76,6 +77,8 @@ def create_app(config_file=None, config=None):
     app.register_blueprint(CollectionViews(Component),
                            url_prefix='/explore/<active_version>/component')
     app.register_blueprint(CollectionViews(EmissionSpec),
+                           url_prefix='/explore/<active_version>/emission')
+    app.register_blueprint(create_radiopurity_blueprint(),
                            url_prefix='/explore/<active_version>/emission')
     app.register_blueprint(CollectionViews(HitEfficiency),
                            url_prefix='/explore/<active_version>/hiteff')

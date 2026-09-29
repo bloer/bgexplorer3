@@ -1,0 +1,84 @@
+{% extends "versionbase.html" %}
+{% block title %}Import from radiopurity.org - Background Explorer{% endblock %}
+{% block pageheader %}<h1>Import assays from radiopurity.org</h1>{% endblock %}
+{% block pagecontent %}
+<p>Search the <a href="https://www.radiopurity.org/simple_search" target="_blank">radiopurity.org</a>
+database, then choose the results to add to <strong>{{ g.active_version }}</strong>
+as new Assays. Values that can't be imported are marked, and are kept only in
+the assay's extra metadata.</p>
+<form method="GET" id="searchform" class="row g-2 align-items-center mb-3">
+    <div class="col-md-6">
+        <input class="form-control" type="search" id="q" name="q" value="{{ term }}" placeholder="Search term, e.g. copper" required>
+    </div>
+    <div class="col-auto form-check ms-2">
+        <input class="form-check-input" type="checkbox" id="include_synonyms" name="include_synonyms" value="true" {% if include_synonyms %}checked{% endif %}>
+        <label class="form-check-label" for="include_synonyms">Include synonyms</label>
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-primary">Search</button>
+        <a class="btn btn-secondary" href="{{ url_for('emissionspec.overview') }}">Cancel</a>
+    </div>
+</form>
+
+{% if term %}
+<p>{{ records | length }} results for <strong>{{ term }}</strong>{% if existing %}, {{ existing | length }} already imported{% endif %}.</p>
+{% endif %}
+{% if records %}
+<form method="POST" id="importform">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="q" value="{{ term }}">
+    {% if include_synonyms %}<input type="hidden" name="include_synonyms" value="true">{% endif %}
+    <table class="table table-sm table-hover align-middle" id="results">
+        <thead>
+            <tr>
+                <th><input class="form-check-input" type="checkbox" id="selectall" title="Select all"></th>
+                <th>Name</th><th>Grouping</th><th>Technique</th>
+                <th>Institution</th><th>Values</th><th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for record in records %}
+        {% set meas = record.raw.measurement %}
+        <tr>
+            <td><input class="form-check-input select" type="checkbox" name="id" value="{{ record.id }}" {% if record.id not in existing %}checked{% endif %}></td>
+            <td title="{{ record.raw.sample.description or '' }}">{{ record.name }}</td>
+            <td>{{ record.raw.grouping }}</td>
+            <td>{{ meas.technique or '' }}</td>
+            <td>{{ meas.institution or '' }}</td>
+            <td>
+                {% for value in record.values %}
+                <span class="text-nowrap me-2">
+                    {% if value.warning %}
+                    <span class="badge text-bg-warning" title="{{ value.warning }}">{{ value.isotope or '?' }}</span>
+                    {{ value.rate or meas.results[loop.index0].value | join(', ') ~ ' ' ~ meas.results[loop.index0].unit }}
+                    {% else %}
+                    <b>{{ value.name }}</b> {{ value.rate }}
+                    {% endif %}
+                </span>
+                {% endfor %}
+            </td>
+            <td>
+                {% if record.id in existing %}
+                <a href="{{ url_for('emissionspec.view', object=existing[record.id]) }}" class="badge text-bg-secondary">already imported</a>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <button type="submit" class="btn btn-success" id="importselected">Import selected</button>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block pagescripts %}
+<script>
+const selectall = document.getElementById('selectall');
+if (selectall) {
+    selectall.addEventListener('change', () => {
+        document.querySelectorAll('#results input.select').forEach(
+            box => { box.checked = selectall.checked; });
+    });
+}
+</script>
+{% endblock %}
