@@ -242,7 +242,7 @@ class TestPlotsInBrowser(BrowserTestCase):
             let target = tick.querySelector('text');
             if(drill)
                 target = [...tick.querySelectorAll('tspan')].find(
-                    t => t.textContent === '▸');
+                    t => t.dataset.drill);
             const box = target.getBoundingClientRect();
             return [box.left + box.width / 2, box.top + box.height / 2];}}""",
             [label, drill])
@@ -319,7 +319,10 @@ class TestPlotsInBrowser(BrowserTestCase):
         page.locator('#budgetplot .dashboard-reset').click()
         self.wait_dashboard(page)
 
-        # drill into an assembly from the marker after its label
+        # drill into an assembly from the marker before its label
+        self.assertEqual(page.evaluate(f"""() => [...{self.panel_js('component')}
+            .querySelectorAll('.ytick tspan title')].map(t => t.textContent)"""),
+            ['drill down'])
         self.click_row(page, 'component', 'a1', drill=True)
         self.assertEqual(self.rows(page, 'component'), ['c2', 'c1'])
         crumbs = page.locator('#budgetplot .breadcrumb')

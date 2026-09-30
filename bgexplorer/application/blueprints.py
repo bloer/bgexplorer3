@@ -406,13 +406,23 @@ class CollectionViews(flask.Blueprint):
                             limit=scalar_json(row['limit']))
             charts = {groupby: [row_json(row) for row in rows]
                       for groupby, rows in result['charts'].items()}
+
+            def total_json(value):
+                """ scalar_json plus its magnitude formatted as text and as
+                LaTeX, as in the contributions table
+                """
+                data = scalar_json(value)
+                if data is not None:
+                    data.update(text='{:S}'.format(value.m),
+                                latex='{:LS}'.format(value.m))
+                return data
             return flask.jsonify(
                 scalar=scalar, scalars=scalars,
                 units=unit_str(result['units']), filters=filters.todict(),
                 count=result['count'], ntotal=result['ntotal'],
-                total={kind: scalar_json(value)
+                total={kind: total_json(value)
                        for kind, value in result['total'].items()},
-                unfiltered={kind: scalar_json(value)
+                unfiltered={kind: total_json(value)
                             for kind, value in result['unfiltered'].items()},
                 breadcrumb=[dict(key=list(path), label=label)
                             for path, label in result['breadcrumb']],

@@ -253,6 +253,13 @@ class TestDashboard(AppTestCase):
         self.assertTrue(data['total']['limit']['is_limit'])
         self.assertGreater(data['total']['all']['upper_limit'],
                            data['total']['measured']['value'])
+        # totals are also formatted, like the contributions table
+        total = self.total(self.a2).to('dru').m
+        self.assertEqual(data['total']['all']['text'], '{:S}'.format(total))
+        self.assertEqual(data['total']['all']['latex'], '{:LS}'.format(total))
+        self.assertTrue(data['total']['limit']['text'].startswith('<'))
+        self.assertEqual(data['unfiltered']['all']['text'],
+                         data['total']['all']['text'])
 
         filters = ('{"root": ["%s"], "material": [{"key": "copper"}]}'
                    % self.p_a1)

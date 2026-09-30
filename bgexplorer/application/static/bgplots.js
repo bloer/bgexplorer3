@@ -277,8 +277,20 @@ const bgplots = (function(){
                            .replace(/>/g, '&gt;');
     }
 
-    // clicking this after an assembly's label shows what's inside it
-    const DRILL = '▸';
+    // clicking this before an assembly's label shows what's inside it
+    const DRILL = '▶';
+
+    /* Mark the drill down markers in `plot`'s labels, with a tooltip */
+    function titleDrill(plot){
+        plot.querySelectorAll('.ytick tspan:not([data-drill])').forEach(tspan => {
+            if(tspan.textContent !== DRILL)
+                return;
+            tspan.dataset.drill = '1';
+            const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            title.textContent = 'drill down';
+            tspan.appendChild(title);
+        });
+    }
 
     /* The y axis label of a dashboard row, in plotly's pseudo-HTML */
     function tickText(row, highlighted, drillable){
@@ -294,7 +306,7 @@ const bgplots = (function(){
         if(highlighted)
             text = `<b>${text}</b>`;
         if(drillable && row.children)
-            text += ` <span style="color:#0d6efd">${DRILL}</span>`;
+            text = `<span style="color:#0d6efd">${DRILL}</span> ` + text;
         return text;
     }
 
@@ -348,12 +360,15 @@ const bgplots = (function(){
         const traces = budgetTraces(rows, r => r.selected === false, data.units);
         if(same){
             // relabel, then move the values from where they were
-            Plotly.react(plot, plot.data, layout, CONFIG).then(() => Plotly.animate(
-                plot, {data: traces, traces: traces.map((t, i) => i)},
-                {transition: {duration: 400, easing: 'cubic-in-out'},
-                 frame: {duration: 400, redraw: false}, mode: 'immediate'}));
+            Plotly.react(plot, plot.data, layout, CONFIG).then(() => {
+                titleDrill(plot);
+                return Plotly.animate(
+                    plot, {data: traces, traces: traces.map((t, i) => i)},
+                    {transition: {duration: 400, easing: 'cubic-in-out'},
+                     frame: {duration: 400, redraw: false}, mode: 'immediate'});
+            });
         } else {
-            Plotly.react(plot, traces, layout, CONFIG);
+            Plotly.react(plot, traces, layout, CONFIG).then(() => titleDrill(plot));
         }
         return rows;
     }
@@ -361,15 +376,16 @@ const bgplots = (function(){
     const GROUP_TITLES = {component: 'component', isotope: 'isotope',
                           material: 'material', category: 'source category'};
 
-    /* Text for a scalar_json value */
+    /* A total from the server, formatted there as text and LaTeX, which
+     * is typeset if MathJax is loaded
+     */
     function formatValue(v, units){
-        if(!v)
-            return '0';
         const u = units ? ' ' + units : '';
-        if(v.is_limit)
-            return `< ${v.upper_limit.toPrecision(3)}${u}`;
-        return `${v.value.toPrecision(3)} (+${v.err_plus.toPrecision(2)}`
-             + ` −${v.err_minus.toPrecision(2)})${u}`;
+        if(!v)
+            return '0' + u;
+        if(window.MathJax && MathJax.typesetPromise && v.latex)
+            return `\\(${v.latex}\\)${u}`;
+        return v.text + u;
     }
 
     /* Rows with a unique `id` for their plotly category, and their label as
@@ -397,7 +413,7 @@ const bgplots = (function(){
      * Clicking a row's label keeps only its SourceTerms, ctrl-clicking
      * removes them, and shift-clicking collects several rows until shift is
      * released. Each panel is filtered by the other panels' selections,
-     * and shades or fades its own. Clicking the ▸ after an assembly's
+     * and shades or fades its own. Clicking the ▶ before an assembly's
      * label drills into it. The rows stay put while filtering, and the
      * values move to their new places. All
      * sums, with their correlated uncertainties, are done by the server.
@@ -572,11 +588,13 @@ const bgplots = (function(){
                     el('li', {text: 'Ctrl-click a label to remove its contributions'}),
                     el('li', {text: 'Hold shift to pick several labels, applied when shift is released'}),
                     el('li', {text: 'Each chart is filtered by the others; its own selection is shaded'}),
-                    el('li', {text: `Click the ${DRILL} after an assembly to show what is inside it; `
+                    el('li', {text: `Click the ${DRILL} before an assembly to show what is inside it; `
                                     + 'rows ending in ← are inside the row above'}),
                     el('li', {text: 'Drag across a chart to zoom, double-click to zoom out'})])]);
             children.push(help);
             info.replaceChildren(...children);
+            if(window.MathJax && MathJax.typesetPromise)
+                MathJax.typesetPromise([info]).catch(() => {});
         }
 
         function showNavigation(data){
@@ -596,7 +614,7 @@ const bgplots = (function(){
                 return;
             const i = rows.findIndex(r => sameKey(r.key, selected[0].key));
             if(i >= 0 && rows[i].children)
-                drill.appendChild(link(`Show inside ${rows[i].label} ${DRILL}`,
+                drill.appendChild(link(`${DRILL} Show inside ${rows[i].label}`,
                                        () => setRoot(rows[i].key),
                                        {'class': 'dashboard-drilldown btn btn-sm btn-outline-primary mb-1'}));
         }
@@ -630,6 +648,8 @@ const bgplots = (function(){
                                              groupby === 'component');
                     if(panel._rows.length && !panel._bound){
                         panel.on('plotly_relayout', event => sync(panel, event));
+                        // zooming redraws the labels
+                        panel.on('plotly_afterplot', () => titleDrill(panel));
                         panel._bound = true;
                     }
                 });
@@ -658,7 +678,7 @@ const bgplots = (function(){
             const row = d && panel._rows && panel._rows[Math.round(d.x)];
             if(!row)
                 return;
-            if(event.target.textContent === DRILL && row.children)
+            if(event.target.closest('[data-drill]') && row.children)
                 setRoot(row.key);
             else
                 pick(groupbys[i], row, event);
