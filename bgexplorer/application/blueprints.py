@@ -382,7 +382,7 @@ class CollectionViews(flask.Blueprint):
         @self.get('/<objid>/dashboard.json')
         def dashboard_json():
             """ Every budget breakdown for the `filters` in BudgetFilter
-            JSON format, and the total passing them
+            JSON format, and the totals with and without them
             """
             args = flask.request.args
             scalars = available_scalars(flask.g.active_version)
@@ -400,7 +400,8 @@ class CollectionViews(flask.Blueprint):
                 key = row['key']
                 return dict(key=list(key) if isinstance(key, tuple) else key,
                             label=row['label'], depth=row['depth'],
-                            selected=row['selected'],
+                            selected=row['selected'], size=row['size'],
+                            children=row.get('children', False),
                             measured=scalar_json(row['measured']),
                             limit=scalar_json(row['limit']))
             charts = {groupby: [row_json(row) for row in rows]
@@ -411,6 +412,8 @@ class CollectionViews(flask.Blueprint):
                 count=result['count'], ntotal=result['ntotal'],
                 total={kind: scalar_json(value)
                        for kind, value in result['total'].items()},
+                unfiltered={kind: scalar_json(value)
+                            for kind, value in result['unfiltered'].items()},
                 breadcrumb=[dict(key=list(path), label=label)
                             for path, label in result['breadcrumb']],
                 charts=charts)

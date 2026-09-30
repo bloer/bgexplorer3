@@ -58,6 +58,8 @@ class Term(NamedTuple):
     value: object
     is_limit: bool
     keys: dict
+    # the length of its bar in base units: the upper limit or central value
+    size: float
 
 
 def _component_path(st: SourceTerm, child_ids: set) -> Tuple[str, ...]:
@@ -92,7 +94,10 @@ def term_values(obj: Component, scalar: str,
                         isotope=st.source.name,
                         material=st.material or NO_MATERIAL,
                         category=category.value if category else NO_CATEGORY)
-            terms.append(Term(st, value, _is_limit(st), keys))
+            is_limit = _is_limit(st)
+            base = value.to_base_units().m
+            size = base.get_upper_limit(0.9) if is_limit else base.nominal_value
+            terms.append(Term(st, value, is_limit, keys, size))
         return terms
     key = _cache_key(obj, 'terms', _ref_id(obj),
                      relativeto and _ref_id(relativeto), scalar)
@@ -192,15 +197,17 @@ class BudgetFilter:
 
 
 def _placement_names(component: Component, depth: int) -> dict:
-    """ Names of the placements up to `depth` levels below `component`,
-    keyed by their path of placement ids (as strings)
+    """ Names of the placements up to `depth` levels below `component`, and
+    whether each has children of its own, keyed by their path of placement
+    ids (as strings)
     """
     names = {}
 
     def walk(comp, prefix):
         for placement in getattr(comp, 'children', None) or []:
             path = prefix + (str(placement.id),)
-            names[path] = placement.name
+            children = getattr(placement.component, 'children', None)
+            names[path] = (placement.name, bool(children))
             if len(path) < depth:
                 walk(placement.component, path)
     walk(component, ())
@@ -225,11 +232,24 @@ def _resolve_root(obj: Component, root: Tuple[str, ...]):
 
 
 class _Group:
-    """ Sums of the measured and upper limit parts of some SourceTerms """
+    """ Sums of the measured and upper limit parts of some SourceTerms, and
+    the summed sizes of all SourceTerms in the group before filtering
+    """
     def __init__(self):
         self.measured = None
         self.limit = None
         self.selected = False
+        self.size = 0.
+        self.base_unit = None
+
+    def include(self, term: Term, selected: bool, passing: bool):
+        """ Add `term` to the unfiltered size, and to the sums if `passing`
+        """
+        self.size += term.size
+        self.base_unit = self.base_unit or term.value.to_base_units().u
+        self.selected |= selected
+        if passing:
+            self.add(term)
 
     def add(self, term: Term):
         if term.is_limit:
@@ -254,32 +274,34 @@ class _Group:
         return result
 
 
-def _size(row: dict) -> float:
-    """ The length of a row's bar """
-    return max([r.m.get_upper_limit(0.9) if kind == 'limit'
-                else r.m.nominal_value
-                for kind in ('measured', 'limit')
-                if (r := row[kind]) is not None] or [0])
-
-
 def _rows(groups: dict, labels: dict, unit) -> List[dict]:
     """ Rows of converted sums from `groups` keyed by group key, largest
-    first
+    unfiltered size first, so filtering doesn't reorder them. Rows with
+    nothing passing the filters have measured and limit None
     """
-    rows = [dict(key=key, label=labels.get(key, key), depth=0,
-                 selected=group.selected, **group.converted(unit))
-            for key, group in groups.items()]
-    rows.sort(key=_size, reverse=True)
-    return rows
+    groups = sorted(groups.items(), key=lambda item: item[1].size,
+                    reverse=True)
+    return [dict(key=key, label=labels.get(key, key), depth=0,
+                 selected=group.selected, size=_convert_size(group, unit),
+                 **group.converted(unit))
+            for key, group in groups]
+
+
+def _convert_size(group: _Group, unit) -> float:
+    if not group.size:
+        return 0.
+    return float(group.size) * unitreg.Quantity(1, group.base_unit).to(unit).m
 
 
 def _component_rows(terms: List[Term], filters: BudgetFilter,
                     chart_root: Component, depth: int, unit) -> List[dict]:
     """ Rows for each child of `chart_root` (at path `filters.root`), each
-    followed by rows for its own children down to `depth` levels. Only
-    plain Components have sources of their own (Assemblies' sources are all
-    from their children), so if `chart_root` is one, its single row has key
-    None, which can't be filtered on
+    followed by rows for its own children down to `depth` levels, from
+    `terms` below the root. Only plain Components have sources of their own
+    (Assemblies' sources are all from their children), so if `chart_root`
+    is one, its single row has key None, which can't be filtered on. Rows
+    also have `children`, whether they are Assemblies that can be drilled
+    into
     """
     root = filters.root
     names = _placement_names(chart_root, depth)
@@ -287,13 +309,15 @@ def _component_rows(terms: List[Term], filters: BudgetFilter,
     for term in terms:
         path = term.keys['component'][len(root):]
         selected = filters.passes('component', term.keys['component'])
+        passing = filters.matches(term.keys, skip='component')
         for level in {min(len(path), 1), min(len(path), depth)}:
-            group = groups[path[:level]]
-            group.add(term)
-            group.selected |= selected
-    labels = {path: names.get(path, path[-1] if path else chart_root.name)
+            groups[path[:level]].include(term, selected, passing)
+    labels = {path: names[path][0] if path in names
+              else path[-1] if path else chart_root.name
               for path in groups}
     rows = _rows(groups, labels, unit)
+    for row in rows:
+        row['children'] = row['key'] in names and names[row['key']][1]
     # children after their parent, and full paths from obj as keys
     ordered = []
     for row in rows:
@@ -336,12 +360,16 @@ def dashboard(obj: Component, scalar: str,
     breakdown uses all filters except its own, so its rows show what could
     be selected; rows its own filters reject have `selected` False.
 
-    Returns dict(scalar, units, count, ntotal, total, breadcrumb, charts):
-    count of the SourceTerms passing all filters out of ntotal with a value,
-    their total as dict(measured, limit, all), the breadcrumb of (path, name)
-    down to `filters.root`, and charts of rows for each groupby. Each row is
-    dict(key, label, depth, selected, measured, limit), largest first. The
-    component rows are described in `_component_rows`.
+    Returns dict(scalar, units, count, ntotal, total, unfiltered,
+    breadcrumb, charts): count of the SourceTerms passing all filters out of
+    ntotal with a value, their total and that of all ntotal, each as
+    dict(measured, limit, all), the breadcrumb of (path, name) down to
+    `filters.root`, and charts of rows for each groupby. Each chart has a row
+    for every group below the root, whatever the other filters, so rows
+    stay put while filtering. Each row is dict(key, label, depth, selected,
+    size, measured, limit), in order of their unfiltered size (a float in
+    `units`); measured and limit are None if nothing in the row passes the
+    filters. The component rows are described in `_component_rows`.
     Raises ValueError for an unknown groupby, scalar or root.
     """
     _check_args(obj, scalar, groupbys)
@@ -350,28 +378,33 @@ def dashboard(obj: Component, scalar: str,
     terms = term_values(obj, scalar, relativeto)
     unit = _unit(terms, obj.active_version, scalar, unit)
 
+    root = filters.root
+    below = [t for t in terms if t.keys['component'][:len(root)] == root]
     charts = {}
     for groupby in groupbys:
-        passing = [t for t in terms if filters.matches(t.keys, skip=groupby)]
         if groupby == 'component':
-            charts[groupby] = _component_rows(passing, filters, chart_root,
+            charts[groupby] = _component_rows(below, filters, chart_root,
                                               depth, unit)
             continue
         groups = defaultdict(_Group)
-        for term in passing:
-            group = groups[term.keys[groupby]]
-            group.add(term)
-            group.selected |= filters.passes(groupby, term.keys[groupby])
+        for term in below:
+            key = term.keys[groupby]
+            groups[key].include(term, filters.passes(groupby, key),
+                                filters.matches(term.keys, skip=groupby))
         charts[groupby] = _rows(groups, {}, unit)
 
     total = _Group()
+    unfiltered = _Group()
     count = 0
     for term in terms:
+        unfiltered.add(term)
         if filters.matches(term.keys):
             total.add(term)
             count += 1
+    parts = ('measured', 'limit', 'all')
     return dict(scalar=scalar, units=unit, count=count, ntotal=len(terms),
-                total=total.converted(unit, ('measured', 'limit', 'all')),
+                total=total.converted(unit, parts),
+                unfiltered=unfiltered.converted(unit, parts),
                 breadcrumb=breadcrumb, charts=charts)
 
 

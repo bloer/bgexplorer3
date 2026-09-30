@@ -125,6 +125,7 @@ class TestDashboard(AppTestCase):
         self.assertEqual(result['count'], 4)
         self.assertSame(result['total']['all'], self.total(self.a2))
         self.assertTrue(result['total']['limit'].m.isupperlimit())
+        self.assertSame(result['unfiltered']['all'], result['total']['all'])
         self.assertEqual(result['breadcrumb'], [((), 'a2')])
         # two levels of components, children after their parent
         rows = result['charts']['component']
@@ -133,6 +134,8 @@ class TestDashboard(AppTestCase):
         self.assertEqual(rows[0]['key'], (self.p_a1,))
         self.assertEqual(rows[1]['key'], (self.p_a1, self.p_c1))
         self.assertTrue(all(row['selected'] for row in rows))
+        self.assertEqual([row['children'] for row in rows],
+                         [True, False, False, False])
         # c1: 2 x 2 kg x 10 mBq/kg x 0.1 dru/mBq
         self.assertAlmostEqual(rows[1]['measured'].m.nominal_value, 4.)
         self.assertSame(rows[0]['measured'] + rows[0]['limit'],
@@ -154,8 +157,20 @@ class TestDashboard(AppTestCase):
         isotopes = {row['key']: row for row in result['charts']['isotope']}
         self.assertAlmostEqual(isotopes['Th232']['measured'].m.nominal_value,
                                4.)
-        self.assertEqual(self.labels(result['charts']['component']),
-                         [('a1', 0), ('c1', 1)])
+        # rows stay put, but only copper's have values
+        rows = result['charts']['component']
+        self.assertEqual(self.labels(rows), [
+            ('a1', 0), ('c1', 1), ('c2 label', 1), ('c3', 0)])
+        self.assertEqual([row['measured'] is not None for row in rows],
+                         [True, True, False, False])
+        self.assertTrue(all(row['limit'] is None for row in rows[2:]))
+        self.assertTrue(all(row['selected'] for row in rows))
+        # ordered by, and with, the unfiltered sizes
+        unfiltered = dashboard(self.a2, 'v1')['charts']['component']
+        self.assertEqual([row['size'] for row in rows],
+                         [row['size'] for row in unfiltered])
+        self.assertAlmostEqual(rows[1]['size'], 4. + 2 * 2 * 25 * 0.2, delta=0.5)
+        self.assertSame(result['unfiltered']['all'], self.total(self.a2))
         # but not the material breakdown itself, where the rest are dimmed
         materials = {row['key']: row['selected']
                      for row in result['charts']['material']}
@@ -231,6 +246,9 @@ class TestDashboard(AppTestCase):
         rows = data['charts']['component']
         self.assertEqual(rows[1]['key'], [self.p_a1, self.p_c1])
         self.assertEqual(rows[1]['depth'], 1)
+        self.assertGreater(rows[1]['size'], 4.)
+        self.assertEqual([row['children'] for row in rows],
+                         [True, False, False, False])
         self.assertAlmostEqual(rows[1]['measured']['value'], 4.)
         self.assertTrue(data['total']['limit']['is_limit'])
         self.assertGreater(data['total']['all']['upper_limit'],
@@ -242,6 +260,8 @@ class TestDashboard(AppTestCase):
             filters=filters, unit='mdru')).get_json()
         self.assertEqual(data['count'], 2)
         self.assertEqual(data['units'], 'mdru')
+        self.assertGreater(data['unfiltered']['all']['upper_limit'],
+                           data['total']['all']['upper_limit'])
         self.assertEqual(data['filters']['material'],
                          [dict(key='copper', exclude=False)])
         self.assertEqual([c['label'] for c in data['breadcrumb']],
