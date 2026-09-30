@@ -3,7 +3,8 @@ import mongoengine as me
 from bson import ObjectId
 from io import BytesIO
 from ..models.sourceterm import find_sourceterms, CalculatedResults
-from ..models.budget import budget_breakdown, available_scalars, GROUPBY
+from ..models.budget import (budget_breakdown, available_scalars, GROUPBY,
+                             dashboard, BudgetFilter)
 from ..models.component import Component, Assembly
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
@@ -377,6 +378,42 @@ class CollectionViews(flask.Blueprint):
             return flask.jsonify(scalar=scalar, scalars=scalars,
                                  groupby=budget['groupby'],
                                  units=unit_str(budget['units']), rows=rows)
+
+        @self.get('/<objid>/dashboard.json')
+        def dashboard_json():
+            """ Every budget breakdown for the `filters` in BudgetFilter
+            JSON format, and the total passing them
+            """
+            args = flask.request.args
+            scalars = available_scalars(flask.g.active_version)
+            scalar = args.get('scalar') or (scalars[0] if scalars else '')
+            try:
+                filters = BudgetFilter.from_json(args.get('filters'))
+                result = dashboard(
+                    flask.g.object, scalar, filters,
+                    relativeto=flask.g.get('relativeto'),
+                    unit=args.get('unit') or None)
+            except (ValueError, PintError) as e:
+                return flask.jsonify(error=dict(message=str(e))), 400
+
+            def row_json(row):
+                key = row['key']
+                return dict(key=list(key) if isinstance(key, tuple) else key,
+                            label=row['label'], depth=row['depth'],
+                            selected=row['selected'],
+                            measured=scalar_json(row['measured']),
+                            limit=scalar_json(row['limit']))
+            charts = {groupby: [row_json(row) for row in rows]
+                      for groupby, rows in result['charts'].items()}
+            return flask.jsonify(
+                scalar=scalar, scalars=scalars,
+                units=unit_str(result['units']), filters=filters.todict(),
+                count=result['count'], ntotal=result['ntotal'],
+                total={kind: scalar_json(value)
+                       for kind, value in result['total'].items()},
+                breadcrumb=[dict(key=list(path), label=label)
+                            for path, label in result['breadcrumb']],
+                charts=charts)
 
         @self.get('/<objid>/results')
         def results():

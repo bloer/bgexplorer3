@@ -217,3 +217,47 @@ class TestDashboard(AppTestCase):
         self.c3.mass = '2 kg'
         self.c3.save()
         self.assertIsNot(term_values(self.a2, 'v1'), terms)
+
+    def test_json(self):
+        url = self.url('component.dashboard_json', object=self.a2)
+        data = self.client.get(url).get_json()
+        self.assertEqual(data['scalar'], 'v1')
+        self.assertEqual(data['units'], 'dru')
+        self.assertEqual((data['count'], data['ntotal']), (4, 4))
+        self.assertEqual(data['filters'], {})
+        self.assertEqual(data['breadcrumb'], [dict(key=[], label='a2')])
+        self.assertEqual(set(data['charts']),
+                         {'component', 'isotope', 'material', 'category'})
+        rows = data['charts']['component']
+        self.assertEqual(rows[1]['key'], [self.p_a1, self.p_c1])
+        self.assertEqual(rows[1]['depth'], 1)
+        self.assertAlmostEqual(rows[1]['measured']['value'], 4.)
+        self.assertTrue(data['total']['limit']['is_limit'])
+        self.assertGreater(data['total']['all']['upper_limit'],
+                           data['total']['measured']['value'])
+
+        filters = ('{"root": ["%s"], "material": [{"key": "copper"}]}'
+                   % self.p_a1)
+        data = self.client.get(url, query_string=dict(
+            filters=filters, unit='mdru')).get_json()
+        self.assertEqual(data['count'], 2)
+        self.assertEqual(data['units'], 'mdru')
+        self.assertEqual(data['filters']['material'],
+                         [dict(key='copper', exclude=False)])
+        self.assertEqual([c['label'] for c in data['breadcrumb']],
+                         ['a2', 'a1'])
+        self.assertEqual([row['selected'] for row in
+                          data['charts']['material']], [True, False])
+
+        for query in (dict(scalar='nope'), dict(unit='kg'),
+                      dict(filters='nope'), dict(filters='{"root": ["x"]}')):
+            with self.subTest(query=query):
+                response = self.client.get(url, query_string=query)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('message', response.get_json()['error'])
+        # relative to a parent assembly
+        data = self.client.get(self.url(
+            'component.dashboard_json', object=self.a1,
+            relativeto=self.a2)).get_json()
+        self.assertEqual([row['label'] for row in data['charts']['component']],
+                         ['c1', 'c2 label'])
