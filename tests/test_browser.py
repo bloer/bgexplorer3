@@ -217,21 +217,35 @@ class TestPlotsInBrowser(BrowserTestCase):
                 f"'#budgetplot .bgplot[data-groupby=\"{groupby}\"]')")
 
     def rows(self, page, groupby):
-        """ The labels shown in a panel, without indentation """
+        """ The labels shown in a panel """
         return page.evaluate(f"""() => {self.panel_js(groupby)}
             ._fullLayout.yaxis.categoryarray.map(
-                label => label.replace(/[\\u00a0\\u200b↳ ]/g, ''))""")
+                label => label.replace(/\\u200b/g, ''))""")
 
-    def click_row(self, page, groupby, label, modifiers=(), wait=True):
-        x, y = page.evaluate(f"""(label) => {{
+    def values(self, page, groupby):
+        """ The labels of the rows with something drawn, in order """
+        shown = page.evaluate(f"""() => {self.panel_js(groupby)}
+            .data.map(t => t.y).flat()""")
+        return [row for row in self.rows(page, groupby) if row in shown]
+
+    def click_row(self, page, groupby, label, modifiers=(), wait=True,
+                  drill=False):
+        """ Click a row's y axis label, or the drill down marker after it """
+        x, y = page.evaluate(f"""([label, drill]) => {{
             const p = {self.panel_js(groupby)};
-            const fl = p._fullLayout, box = p.getBoundingClientRect();
-            const i = fl.yaxis.categoryarray.findIndex(
-                l => l.replace(/[\\u00a0\\u200b↳ ]/g, '') === label);
-            if(i < 0)
+            const i = p._fullLayout.yaxis.categoryarray.findIndex(
+                l => l.replace(/\\u200b/g, '') === label);
+            const tick = [...p.querySelectorAll('.ytick')].find(
+                t => t.__data__.x === i);
+            if(!tick)
                 throw new Error('no row ' + label);
-            return [box.left + fl._size.l + fl._size.w / 2,
-                    box.top + fl._size.t + fl.yaxis.l2p(i)];}}""", label)
+            let target = tick.querySelector('text');
+            if(drill)
+                target = [...tick.querySelectorAll('tspan')].find(
+                    t => t.textContent === '▸');
+            const box = target.getBoundingClientRect();
+            return [box.left + box.width / 2, box.top + box.height / 2];}}""",
+            [label, drill])
         for key in modifiers:
             page.keyboard.down(key)
         page.mouse.move(x, y)
@@ -253,11 +267,28 @@ class TestPlotsInBrowser(BrowserTestCase):
         self.assertEqual(self.rows(page, 'component'), ['a1', 'c2', 'c1'])
         self.assertEqual(self.rows(page, 'material'), ['steel', 'copper'])
 
+        self.assertIn('Total:', self.info(page))
+        self.assertNotIn('Unfiltered', self.info(page))
+
+        # clicking inside a plot doesn't filter
+        box = page.evaluate(f"""() => {{
+            const p = {self.panel_js('material')}, fl = p._fullLayout;
+            const box = p.getBoundingClientRect();
+            return [box.left + fl._size.l + fl._size.w / 2,
+                    box.top + fl._size.t + fl.yaxis.l2p(1)];}}""")
+        page.mouse.click(*box)
+        page.wait_for_timeout(200)
+        self.assertIn('2 of 2 source terms', self.info(page))
+
         # keep only copper: the other panels only show c1's Th232
         self.click_row(page, 'material', 'copper')
         self.assertIn('1 of 2 source terms', self.info(page))
         self.assertIn('copper', self.info(page))
-        self.assertEqual(self.rows(page, 'isotope'), ['Th232'])
+        self.assertIn('Filtered total:', self.info(page))
+        self.assertIn('Unfiltered total:', self.info(page))
+        self.assertEqual(self.values(page, 'isotope'), ['Th232'])
+        # with the same rows
+        self.assertEqual(self.rows(page, 'isotope'), ['K40', 'Th232'])
         # but its own panel still shows both, with copper shaded
         self.assertEqual(self.rows(page, 'material'), ['steel', 'copper'])
         shapes = page.evaluate(
@@ -268,7 +299,7 @@ class TestPlotsInBrowser(BrowserTestCase):
         # ctrl-click removes copper instead
         self.click_row(page, 'material', 'copper', ['Control'])
         self.assertIn('not copper', self.info(page))
-        self.assertEqual(self.rows(page, 'isotope'), ['K40'])
+        self.assertEqual(self.values(page, 'isotope'), ['K40'])
 
         page.locator('#budgetplot .dashboard-reset').click()
         self.wait_dashboard(page)
@@ -277,8 +308,6 @@ class TestPlotsInBrowser(BrowserTestCase):
 
         # shift-clicks are applied together when shift is released
         self.click_row(page, 'isotope', 'Th232', ['Shift'], wait=False)
-        # plotly takes two quick clicks as a double click
-        page.wait_for_timeout(400)
         self.click_row(page, 'isotope', 'K40', wait=False)
         self.assertIn('Release shift', self.info(page))
         page.keyboard.up('Shift')
@@ -290,10 +319,8 @@ class TestPlotsInBrowser(BrowserTestCase):
         page.locator('#budgetplot .dashboard-reset').click()
         self.wait_dashboard(page)
 
-        # select an assembly to drill into it
-        self.click_row(page, 'component', 'a1')
-        page.locator('#budgetplot .dashboard-drilldown').click()
-        self.wait_dashboard(page)
+        # drill into an assembly from the marker after its label
+        self.click_row(page, 'component', 'a1', drill=True)
         self.assertEqual(self.rows(page, 'component'), ['c2', 'c1'])
         crumbs = page.locator('#budgetplot .breadcrumb')
         self.assertEqual(crumbs.inner_text().split(), ['a2', 'a1'])
@@ -301,13 +328,20 @@ class TestPlotsInBrowser(BrowserTestCase):
         crumbs.locator('a').click()
         self.wait_dashboard(page)
         self.assertEqual(self.rows(page, 'component'), ['a1', 'c2', 'c1'])
+        # or by selecting it
+        self.click_row(page, 'component', 'a1')
+        page.locator('#budgetplot .dashboard-drilldown').click()
+        self.wait_dashboard(page)
+        self.assertEqual(self.rows(page, 'component'), ['c2', 'c1'])
+        page.locator('#budgetplot .dashboard-reset').click()
+        self.wait_dashboard(page)
 
         # the filters are kept in the url
         self.click_row(page, 'material', 'steel')
         hash = page.evaluate('() => location.hash')
         page = self.open_dashboard(url + hash)
         self.assertIn('1 of 2 source terms', self.info(page))
-        self.assertEqual(self.rows(page, 'isotope'), ['K40'])
+        self.assertEqual(self.values(page, 'isotope'), ['K40'])
 
     def test_limit_bins(self):
         page = self.open(self.url('hitefficiency.view', object=self.hiteff))

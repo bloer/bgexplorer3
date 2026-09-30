@@ -195,47 +195,50 @@ const bgplots = (function(){
      * Rows where `dim(row)` are drawn faded. The measured points of the
      * other rows are the last trace.
      */
-    function budgetTraces(rows, dim){
+    /* Traces for budget `rows`, each with a unique `id` for its y category.
+     * Rows where `dim` is true are faded. Always the same four traces, so
+     * plotly can animate between filters: faded and unfaded limits, then
+     * faded and unfaded measured values
+     */
+    function budgetTraces(rows, dim, units){
         dim = dim || (() => false);
+        const u = units ? ' ' + units : '';
         const measured = rows.filter(r => r.measured && r.measured.value > 0);
         const limits = rows.filter(r => r.limit && r.limit.upper_limit > 0);
-        const arrows = [false, true].map(faded => {
-            const arrowx = [], arrowy = [];
-            limits.filter(r => dim(r) === faded).forEach(r => {
-                arrowx.push(r.limit.upper_limit, r.limit.upper_limit / 4, null);
-                arrowy.push(r.label, r.label, null);
-            });
-            return {type: 'scatter', mode: 'lines', x: arrowx, y: arrowy,
-                    opacity: faded ? 0.25 : 1,
-                    line: {color: LIMIT_COLOR, width: 2}, hoverinfo: 'skip',
-                    showlegend: false, legendgroup: 'limit'};
+        // a limit is an arrow from the limit to a quarter of it
+        const limitTraces = [true, false].map(faded => {
+            const rows = limits.filter(r => dim(r) === faded);
+            return {type: 'scatter', mode: 'markers', name: '90% upper limit',
+                    opacity: faded ? 0.25 : 1, showlegend: !faded,
+                    ids: rows.map(r => r.id),
+                    x: rows.map(r => r.limit.upper_limit / 4),
+                    y: rows.map(r => r.id),
+                    customdata: rows.map(r => r.limit.upper_limit),
+                    error_x: {type: 'data', symmetric: false, width: 0, thickness: 2,
+                              array: rows.map(r => 0.75 * r.limit.upper_limit),
+                              arrayminus: rows.map(() => 0), color: LIMIT_COLOR},
+                    hovertemplate: `< %{customdata:.3g}${u}<extra></extra>`,
+                    marker: {symbol: 'triangle-left', size: 10, color: LIMIT_COLOR}};
         });
-        return [
-            ...arrows,
-            {type: 'scatter', mode: 'markers', name: '90% upper limit',
-             legendgroup: 'limit',
-             x: limits.map(r => r.limit.upper_limit / 4),
-             y: limits.map(r => r.label),
-             customdata: limits.map(r => r.limit.upper_limit),
-             hovertemplate: '%{y}: < %{customdata:.3g}<extra></extra>',
-             marker: {symbol: 'triangle-left', size: 10, color: LIMIT_COLOR,
-                      opacity: limits.map(r => dim(r) ? 0.25 : 1)}},
-            ...[true, false].map(faded => {
-                const rows = measured.filter(r => dim(r) === faded);
-                return {type: 'scatter', mode: 'markers', name: 'Measured',
-                        opacity: faded ? 0.25 : 1, showlegend: !faded,
-                        x: rows.map(r => r.measured.value),
-                        y: rows.map(r => r.label),
-                        error_x: {type: 'data', symmetric: false,
-                                  array: rows.map(r => r.measured.err_plus),
-                                  // keep the lower bar on a log axis
-                                  arrayminus: rows.map(r => Math.min(r.measured.err_minus,
-                                                                     0.999 * r.measured.value)),
-                                  color: MEASURED_COLOR},
-                        hovertemplate: '%{y}: %{x:.3g}<extra></extra>',
-                        marker: {symbol: 'circle', size: 8, color: MEASURED_COLOR}};
-            }),
-        ];
+        const measuredTraces = [true, false].map(faded => {
+            const rows = measured.filter(r => dim(r) === faded);
+            return {type: 'scatter', mode: 'markers', name: 'Measured',
+                    opacity: faded ? 0.25 : 1, showlegend: !faded,
+                    ids: rows.map(r => r.id),
+                    x: rows.map(r => r.measured.value),
+                    y: rows.map(r => r.id),
+                    customdata: rows.map(r => [r.measured.err_plus, r.measured.err_minus]),
+                    error_x: {type: 'data', symmetric: false,
+                              array: rows.map(r => r.measured.err_plus),
+                              // keep the lower bar on a log axis
+                              arrayminus: rows.map(r => Math.min(r.measured.err_minus,
+                                                                 0.999 * r.measured.value)),
+                              color: MEASURED_COLOR},
+                    hovertemplate: '%{x:.3g} (+%{customdata[0]:.2g} −%{customdata[1]:.2g})'
+                                 + `${u}<extra></extra>`,
+                    marker: {symbol: 'circle', size: 8, color: MEASURED_COLOR}};
+        });
+        return limitTraces.concat(measuredTraces);
     }
 
     function rowSize(row){
@@ -269,46 +272,90 @@ const bgplots = (function(){
         return [Math.min(a[0], b[0]), Math.max(a[1], b[1])];
     }
 
-    /* Draw `data.rows` into `plot`, hiding rows below `threshold` of the
-     * total of the top level (depth 0) rows. Rows in `highlight` are
-     * shaded, and rows with `selected` false are faded. Returns whether
-     * anything was drawn
+    function escapeText(text){
+        return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                           .replace(/>/g, '&gt;');
+    }
+
+    // clicking this after an assembly's label shows what's inside it
+    const DRILL = '▸';
+
+    /* The y axis label of a dashboard row, in plotly's pseudo-HTML */
+    function tickText(row, highlighted, drillable){
+        let text = escapeText(row.name);
+        // right-justified, so children are marked at the end
+        if(row.depth)
+            text += ' ←';
+        const empty = !(row.measured || row.limit);
+        const color = empty || row.selected === false ? '#adb5bd'
+                    : row.depth ? '#6c757d' : null;
+        if(color)
+            text = `<span style="color:${color}">${text}</span>`;
+        if(highlighted)
+            text = `<b>${text}</b>`;
+        if(drillable && row.children)
+            text += ` <span style="color:#0d6efd">${DRILL}</span>`;
+        return text;
+    }
+
+    /* Draw the budget `data.rows` into `plot`, hiding rows below
+     * `threshold` of the total unfiltered size of the top level (depth 0)
+     * rows. Rows in `highlight` are shaded, and rows with `selected` false
+     * are faded. Changes to the same rows are animated. Returns the rows
+     * drawn, whose y axis labels are in the same order
      */
-    function drawBudget(plot, data, threshold, title, range, highlight){
+    function drawBudget(plot, data, threshold, title, range, highlight, drillable){
+        const size = r => r.size === undefined ? rowSize(r) : r.size;
         const total = data.rows.filter(r => !r.depth)
-                               .reduce((sum, r) => sum + rowSize(r), 0);
-        const rows = data.rows.filter(r => rowSize(r) > 0
-                                      && rowSize(r) >= threshold * total);
-        // clear plotly's state along with any message
-        Plotly.purge(plot);
-        plot.replaceChildren();
+                               .reduce((sum, r) => sum + size(r), 0);
+        const rows = data.rows.filter(r => size(r) > 0 && size(r) >= threshold * total);
+        const ids = rows.map(r => r.id);
+        const same = plot._fullLayout && sameKey(ids, plot._rowids);
+        if(!same || !rows.length){
+            // clear plotly's state, and its event handlers, along with any message
+            Plotly.purge(plot);
+            plot.replaceChildren();
+            plot._bound = false;
+        }
+        plot._rowids = ids;
         if(!rows.length){
             plot.appendChild(el('p', {'class': 'text-secondary', text: 'No contributions'}));
-            return false;
+            return rows;
         }
         const shapes = [];
-        rows.forEach((r, i) => {
-            if(highlight && highlight(r))
-                shapes.push({type: 'rect', xref: 'paper', x0: 0, x1: 1, yref: 'y',
-                             y0: i - 0.5, y1: i + 0.5, layer: 'below',
-                             fillcolor: '#fff3cd', line: {width: 0}});
-        });
+        const band = (i, color) => shapes.push({
+            type: 'rect', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: i - 0.5, y1: i + 0.5,
+            layer: 'below', fillcolor: color, line: {width: 0}});
+        // children of the row above
+        rows.forEach((r, i) => { if(r.depth) band(i, '#f3f5f7'); });
+        rows.forEach((r, i) => { if(highlight && highlight(r)) band(i, '#fff3cd'); });
         const layout = {
             title: {text: title, font: {size: 14}},
             margin: {t: 30, r: 10, l: 10},
             height: 120 + 22 * rows.length,
             xaxis: {type: 'log', title: {text: data.scalar + unitLabel(data.units)},
                     exponentformat: 'power', gridcolor: '#ddd', range: range},
+            // the labels are clicked on to filter, so keep them uncovered
             yaxis: {type: 'category', automargin: true, autorange: 'reversed',
-                    categoryorder: 'array', categoryarray: rows.map(r => r.label)},
-            // clicking anywhere along a row picks it
-            hovermode: 'y',
+                    fixedrange: true, categoryorder: 'array', categoryarray: ids,
+                    tickmode: 'array', tickvals: ids,
+                    ticktext: rows.map(r => tickText(r, highlight && highlight(r), drillable))},
+            hovermode: 'closest',
             shapes: shapes,
             legend: {orientation: 'h', y: -0.15},
             showlegend: false,
         };
-        Plotly.react(plot, budgetTraces(rows, r => r.selected === false), layout, CONFIG);
-        return true;
+        const traces = budgetTraces(rows, r => r.selected === false, data.units);
+        if(same){
+            // relabel, then move the values from where they were
+            Plotly.react(plot, plot.data, layout, CONFIG).then(() => Plotly.animate(
+                plot, {data: traces, traces: traces.map((t, i) => i)},
+                {transition: {duration: 400, easing: 'cubic-in-out'},
+                 frame: {duration: 400, redraw: false}, mode: 'immediate'}));
+        } else {
+            Plotly.react(plot, traces, layout, CONFIG);
+        }
+        return rows;
     }
 
     const GROUP_TITLES = {component: 'component', isotope: 'isotope',
@@ -325,18 +372,17 @@ const bgplots = (function(){
              + ` −${v.err_minus.toPrecision(2)})${u}`;
     }
 
-    /* Labels shown on the y axis: indented by depth, and unique, since
-     * they are plotly's categories
+    /* Rows with a unique `id` for their plotly category, and their label as
+     * `name`
      */
     function displayRows(rows){
         const seen = new Set();
         return rows.map(r => {
-            let label = r.depth ? '\u00a0\u00a0'.repeat(r.depth) + '↳ ' + r.label
-                                : r.label;
-            while(seen.has(label))
-                label += '\u200b';
-            seen.add(label);
-            return Object.assign({}, r, {name: r.label, label: label});
+            let id = r.label;
+            while(seen.has(id))
+                id += '\u200b';
+            seen.add(id);
+            return Object.assign({}, r, {name: r.label, id: id});
         });
     }
 
@@ -348,10 +394,12 @@ const bgplots = (function(){
      * with a panel of the filters and the total passing them. `url` is the
      * dashboard.json endpoint, `scalars` the result names to choose from.
      *
-     * Clicking a row keeps only its SourceTerms, ctrl-clicking removes
-     * them, and shift-clicking collects several rows until shift is
+     * Clicking a row's label keeps only its SourceTerms, ctrl-clicking
+     * removes them, and shift-clicking collects several rows until shift is
      * released. Each panel is filtered by the other panels' selections,
-     * and shades or fades its own. Assemblies can be drilled into. All
+     * and shades or fades its own. Clicking the ▸ after an assembly's
+     * label drills into it. The rows stay put while filtering, and the
+     * values move to their new places. All
      * sums, with their correlated uncertainties, are done by the server.
      * The state is kept in the URL's hash. All panels share one x range,
      * and zoom and pan together.
@@ -481,19 +529,24 @@ const bgplots = (function(){
 
         function showInfo(){
             const children = [];
+            const anyFilters = filters.root.length
+                               || groupbys.some(groupby => entries(groupby).length);
+            const total = (title, t, cls) => {
+                children.push(el('p', {'class': 'mb-0 ' + cls}, [
+                    el('strong', {text: title + ': '}),
+                    el('span', {text: formatValue(t.all, current.units)})]));
+                children.push(el('p', {'class': 'mb-2 small text-secondary', text:
+                    t.measured && t.limit ? `measured ${formatValue(t.measured, current.units)}, `
+                                          + `limits ${formatValue(t.limit, current.units)}` : ''}));
+            };
             if(current){
-                const t = current.total;
-                children.push(
-                    el('p', {'class': 'mb-1'}, [
-                        el('strong', {text: `${current.count}`}),
-                        el('span', {text: ` of ${current.ntotal} source terms pass all filters`})]),
-                    el('p', {'class': 'mb-1 dashboard-total'}, [
-                        el('strong', {text: 'Total: '}),
-                        el('span', {text: formatValue(t.all, current.units)})]));
-                if(t.measured && t.limit)
-                    children.push(el('p', {'class': 'mb-1 small text-secondary', text:
-                        `measured ${formatValue(t.measured, current.units)}, `
-                        + `limits ${formatValue(t.limit, current.units)}`}));
+                children.push(el('p', {'class': 'mb-2'}, [
+                    el('strong', {text: `${current.count}`}),
+                    el('span', {text: ` of ${current.ntotal} source terms pass all filters`})]));
+                if(anyFilters)
+                    total('Filtered total', current.total, 'dashboard-total');
+                total(anyFilters ? 'Unfiltered total' : 'Total', current.unfiltered,
+                      'dashboard-unfiltered' + (anyFilters ? ' text-secondary' : ''));
             }
             const active = el('ul', {'class': 'list-unstyled mb-1 dashboard-filters'});
             groupbys.forEach(groupby => entries(groupby).forEach(entry => {
@@ -504,8 +557,6 @@ const bgplots = (function(){
                     el('span', {text: (entry.exclude ? 'not ' : '') + entry.label}),
                     remover]));
             }));
-            const anyFilters = filters.root.length
-                               || groupbys.some(groupby => entries(groupby).length);
             children.push(el('h5', {'class': 'mt-3', text: 'Filters'}));
             if(pending)
                 children.push(el('p', {'class': 'small text-secondary',
@@ -517,11 +568,13 @@ const bgplots = (function(){
             const help = el('details', {'class': 'mt-3 small'}, [
                 el('summary', {text: 'How to filter'}),
                 el('ul', {}, [
-                    el('li', {text: 'Click a row to keep only its contributions, or again to undo'}),
-                    el('li', {text: 'Ctrl-click a row to remove its contributions'}),
-                    el('li', {text: 'Hold shift to pick several rows, applied when shift is released'}),
+                    el('li', {text: 'Click a label to keep only its contributions, or again to undo'}),
+                    el('li', {text: 'Ctrl-click a label to remove its contributions'}),
+                    el('li', {text: 'Hold shift to pick several labels, applied when shift is released'}),
                     el('li', {text: 'Each chart is filtered by the others; its own selection is shaded'}),
-                    el('li', {text: 'Select one assembly to show what is inside it'})])]);
+                    el('li', {text: `Click the ${DRILL} after an assembly to show what is inside it; `
+                                    + 'rows ending in ← are inside the row above'}),
+                    el('li', {text: 'Drag across a chart to zoom, double-click to zoom out'})])]);
             children.push(help);
             info.replaceChildren(...children);
         }
@@ -535,17 +588,17 @@ const bgplots = (function(){
                           [last ? el('span', {text: crumb.label})
                                 : link(crumb.label, () => setRoot(crumb.key))]);
             }));
-            // drill into a single selected assembly shown with its children
+            // drill into a single selected assembly
             drill.replaceChildren();
             const selected = entries('component').filter(e => !e.exclude);
             const rows = data.charts.component || [];
             if(selected.length !== 1)
                 return;
             const i = rows.findIndex(r => sameKey(r.key, selected[0].key));
-            if(i >= 0 && !rows[i].depth && rows[i+1] && rows[i+1].depth)
-                drill.appendChild(link(`▸ Show inside ${rows[i].label}`,
+            if(i >= 0 && rows[i].children)
+                drill.appendChild(link(`Show inside ${rows[i].label} ${DRILL}`,
                                        () => setRoot(rows[i].key),
-                                       {'class': 'dashboard-drilldown'}));
+                                       {'class': 'dashboard-drilldown btn btn-sm btn-outline-primary mb-1'}));
         }
 
         function draw(rescale){
@@ -571,18 +624,14 @@ const bgplots = (function(){
                 panels.forEach((panel, i) => {
                     const groupby = groupbys[i];
                     const own = entries(groupby).length > 0;
-                    const byLabel = new Map(results[i].rows.map(r => [r.label, r]));
-                    if(!drawBudget(panel, results[i], threshold.value / 100,
-                                   'By ' + GROUP_TITLES[groupby], range && range.slice(),
-                                   own ? (r => r.selected) : null))
-                        return;
-                    panel.on('plotly_relayout', event => sync(panel, event));
-                    panel.on('plotly_click', event => {
-                        const point = event.points && event.points[0];
-                        const row = point && byLabel.get(point.y);
-                        if(row)
-                            pick(groupby, row, event.event || {});
-                    });
+                    panel._rows = drawBudget(panel, results[i], threshold.value / 100,
+                                             'By ' + GROUP_TITLES[groupby], range && range.slice(),
+                                             own ? (r => r.selected) : null,
+                                             groupby === 'component');
+                    if(panel._rows.length && !panel._bound){
+                        panel.on('plotly_relayout', event => sync(panel, event));
+                        panel._bound = true;
+                    }
                 });
                 showInfo();
                 showNavigation(data);
@@ -601,6 +650,19 @@ const bgplots = (function(){
             history.replaceState(null, '', '#' + params);
             draw(false);
         }
+
+        // filter by clicking the y axis labels, not the plot, which zooms
+        panels.forEach((panel, i) => panel.addEventListener('click', event => {
+            const tick = event.target.closest && event.target.closest('.ytick');
+            const d = tick && tick.__data__;
+            const row = d && panel._rows && panel._rows[Math.round(d.x)];
+            if(!row)
+                return;
+            if(event.target.textContent === DRILL && row.children)
+                setRoot(row.key);
+            else
+                pick(groupbys[i], row, event);
+        }));
 
         document.addEventListener('keyup', event => {
             if(event.key === 'Shift' && pending)
