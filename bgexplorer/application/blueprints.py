@@ -3,8 +3,8 @@ import mongoengine as me
 from bson import ObjectId
 from io import BytesIO
 from ..models.sourceterm import find_sourceterms, CalculatedResults
-from ..models.budget import (budget_breakdown, available_scalars, GROUPBY,
-                             dashboard, BudgetFilter)
+from ..models.budget import (available_scalars, GROUPBY, dashboard,
+                             BudgetFilter)
 from ..models.component import Component, Assembly
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
@@ -359,26 +359,6 @@ class CollectionViews(flask.Blueprint):
                     histogram_json(hist, cfg and cfg.display_unit)
             return flask.jsonify(spectra)
 
-        @self.get('/<objid>/budget.json')
-        def budget_json():
-            args = flask.request.args
-            scalars = available_scalars(flask.g.active_version)
-            scalar = args.get('scalar') or (scalars[0] if scalars else '')
-            try:
-                budget = budget_breakdown(
-                    flask.g.object, scalar, args.get('groupby', 'component'),
-                    relativeto=flask.g.get('relativeto'),
-                    unit=args.get('unit') or None)
-            except (ValueError, PintError) as e:
-                return flask.jsonify(error=dict(message=str(e))), 400
-            rows = [dict(label=row['label'],
-                         measured=scalar_json(row['measured']),
-                         limit=scalar_json(row['limit']))
-                    for row in budget['rows']]
-            return flask.jsonify(scalar=scalar, scalars=scalars,
-                                 groupby=budget['groupby'],
-                                 units=unit_str(budget['units']), rows=rows)
-
         @self.get('/<objid>/dashboard.json')
         def dashboard_json():
             """ Every budget breakdown for the `filters` in BudgetFilter
@@ -402,8 +382,7 @@ class CollectionViews(flask.Blueprint):
                             label=row['label'], depth=row['depth'],
                             selected=row['selected'], size=row['size'],
                             children=row.get('children', False),
-                            measured=scalar_json(row['measured']),
-                            limit=scalar_json(row['limit']))
+                            value=scalar_json(row['value']))
             charts = {groupby: [row_json(row) for row in rows]
                       for groupby, rows in result['charts'].items()}
 
@@ -420,10 +399,8 @@ class CollectionViews(flask.Blueprint):
                 scalar=scalar, scalars=scalars,
                 units=unit_str(result['units']), filters=filters.todict(),
                 count=result['count'], ntotal=result['ntotal'],
-                total={kind: total_json(value)
-                       for kind, value in result['total'].items()},
-                unfiltered={kind: total_json(value)
-                            for kind, value in result['unfiltered'].items()},
+                total=total_json(result['total']),
+                unfiltered=total_json(result['unfiltered']),
                 breadcrumb=[dict(key=list(path), label=label)
                             for path, label in result['breadcrumb']],
                 charts=charts)

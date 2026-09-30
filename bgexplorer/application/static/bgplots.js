@@ -190,74 +190,67 @@ const bgplots = (function(){
         draw();
     }
 
-    /* A horizontal budget chart: measured values as red points with error
-     * bars, upper limits as blue left-pointing arrows from the 90% limit.
-     * Rows where `dim(row)` are drawn faded. The measured points of the
-     * other rows are the last trace.
-     */
-    /* Traces for budget `rows`, each with a unique `id` for its y category.
-     * Rows where `dim` is true are faded. Always the same four traces, so
-     * plotly can animate between filters: faded and unfaded limits, then
-     * faded and unfaded measured values
+    /* Traces for budget `rows`, each with a unique `id` for its y category
+     * and a `value`, the sum of its measurements and upper limits. Values
+     * are red points with error bars, and upper limits (if everything in
+     * the row is one) blue lines from the edge of the plot ending in an
+     * arrow at the 90% limit. Rows where `dim` is true are faded. Always the
+     * same four traces, so plotly can animate between filters: faded and
+     * unfaded limits, then faded and unfaded values
      */
     function budgetTraces(rows, dim, units){
         dim = dim || (() => false);
         const u = units ? ' ' + units : '';
-        const measured = rows.filter(r => r.measured && r.measured.value > 0);
-        const limits = rows.filter(r => r.limit && r.limit.upper_limit > 0);
-        // a limit is an arrow from the limit to a quarter of it
+        const values = rows.filter(r => r.value && !r.value.is_limit && r.value.value > 0);
+        const limits = rows.filter(r => r.value && r.value.is_limit && r.value.upper_limit > 0);
         const limitTraces = [true, false].map(faded => {
             const rows = limits.filter(r => dim(r) === faded);
             return {type: 'scatter', mode: 'markers', name: '90% upper limit',
                     opacity: faded ? 0.25 : 1, showlegend: !faded,
                     ids: rows.map(r => r.id),
-                    x: rows.map(r => r.limit.upper_limit / 4),
+                    x: rows.map(r => r.value.upper_limit),
                     y: rows.map(r => r.id),
-                    customdata: rows.map(r => r.limit.upper_limit),
+                    // far past the edge of any log axis, which clips it
                     error_x: {type: 'data', symmetric: false, width: 0, thickness: 2,
-                              array: rows.map(r => 0.75 * r.limit.upper_limit),
-                              arrayminus: rows.map(() => 0), color: LIMIT_COLOR},
-                    hovertemplate: `< %{customdata:.3g}${u}<extra></extra>`,
+                              array: rows.map(() => 0),
+                              arrayminus: rows.map(r => r.value.upper_limit * (1 - 1e-12)),
+                              color: LIMIT_COLOR},
+                    hovertemplate: `< %{x:.3g}${u}<extra></extra>`,
                     marker: {symbol: 'triangle-left', size: 10, color: LIMIT_COLOR}};
         });
-        const measuredTraces = [true, false].map(faded => {
-            const rows = measured.filter(r => dim(r) === faded);
-            return {type: 'scatter', mode: 'markers', name: 'Measured',
+        const valueTraces = [true, false].map(faded => {
+            const rows = values.filter(r => dim(r) === faded);
+            return {type: 'scatter', mode: 'markers', name: 'Value',
                     opacity: faded ? 0.25 : 1, showlegend: !faded,
                     ids: rows.map(r => r.id),
-                    x: rows.map(r => r.measured.value),
+                    x: rows.map(r => r.value.value),
                     y: rows.map(r => r.id),
-                    customdata: rows.map(r => [r.measured.err_plus, r.measured.err_minus]),
+                    customdata: rows.map(r => [r.value.err_plus, r.value.err_minus]),
                     error_x: {type: 'data', symmetric: false,
-                              array: rows.map(r => r.measured.err_plus),
+                              array: rows.map(r => r.value.err_plus),
                               // keep the lower bar on a log axis
-                              arrayminus: rows.map(r => Math.min(r.measured.err_minus,
-                                                                 0.999 * r.measured.value)),
+                              arrayminus: rows.map(r => Math.min(r.value.err_minus,
+                                                                 0.999 * r.value.value)),
                               color: MEASURED_COLOR},
                     hovertemplate: '%{x:.3g} (+%{customdata[0]:.2g} −%{customdata[1]:.2g})'
                                  + `${u}<extra></extra>`,
                     marker: {symbol: 'circle', size: 8, color: MEASURED_COLOR}};
         });
-        return limitTraces.concat(measuredTraces);
-    }
-
-    function rowSize(row){
-        return Math.max(row.measured ? row.measured.value : 0,
-                        row.limit ? row.limit.upper_limit : 0);
+        return limitTraces.concat(valueTraces);
     }
 
     /* log10 x range covering everything drawn for `rows`, padded */
     function budgetRange(rows){
         const points = [];
         rows.forEach(r => {
-            if(r.measured && r.measured.value > 0){
-                const m = r.measured;
-                points.push(m.value, m.value + m.err_plus);
-                if(m.value - m.err_minus > 0)
-                    points.push(m.value - m.err_minus);
+            const v = r.value;
+            if(v && v.is_limit && v.upper_limit > 0){
+                points.push(v.upper_limit);
+            } else if(v && v.value > 0){
+                points.push(v.value, v.value + v.err_plus);
+                if(v.value - v.err_minus > 0)
+                    points.push(v.value - v.err_minus);
             }
-            if(r.limit && r.limit.upper_limit > 0)
-                points.push(r.limit.upper_limit, r.limit.upper_limit / 4);
         });
         if(!points.length)
             return null;
@@ -298,7 +291,7 @@ const bgplots = (function(){
         // right-justified, so children are marked at the end
         if(row.depth)
             text += ' ←';
-        const empty = !(row.measured || row.limit);
+        const empty = !row.value;
         const color = empty || row.selected === false ? '#adb5bd'
                     : row.depth ? '#6c757d' : null;
         if(color)
@@ -317,10 +310,9 @@ const bgplots = (function(){
      * drawn, whose y axis labels are in the same order
      */
     function drawBudget(plot, data, threshold, title, range, highlight, drillable){
-        const size = r => r.size === undefined ? rowSize(r) : r.size;
         const total = data.rows.filter(r => !r.depth)
-                               .reduce((sum, r) => sum + size(r), 0);
-        const rows = data.rows.filter(r => size(r) > 0 && size(r) >= threshold * total);
+                               .reduce((sum, r) => sum + r.size, 0);
+        const rows = data.rows.filter(r => r.size > 0 && r.size >= threshold * total);
         const ids = rows.map(r => r.id);
         const same = plot._fullLayout && sameKey(ids, plot._rowids);
         if(!same || !rows.length){
@@ -547,14 +539,10 @@ const bgplots = (function(){
             const children = [];
             const anyFilters = filters.root.length
                                || groupbys.some(groupby => entries(groupby).length);
-            const total = (title, t, cls) => {
-                children.push(el('p', {'class': 'mb-0 ' + cls}, [
+            const total = (title, t, cls) => children.push(
+                el('p', {'class': 'mb-2 ' + cls}, [
                     el('strong', {text: title + ': '}),
-                    el('span', {text: formatValue(t.all, current.units)})]));
-                children.push(el('p', {'class': 'mb-2 small text-secondary', text:
-                    t.measured && t.limit ? `measured ${formatValue(t.measured, current.units)}, `
-                                          + `limits ${formatValue(t.limit, current.units)}` : ''}));
-            };
+                    el('span', {text: formatValue(t, current.units)})]));
             if(current){
                 children.push(el('p', {'class': 'mb-2'}, [
                     el('strong', {text: `${current.count}`}),
@@ -570,7 +558,7 @@ const bgplots = (function(){
                                      {'class': 'text-danger ms-1', title: 'remove this filter'});
                 active.appendChild(el('li', {}, [
                     el('span', {'class': 'text-secondary', text: GROUP_TITLES[groupby] + ': '}),
-                    el('span', {text: (entry.exclude ? 'not ' : '') + entry.label}),
+                    el('span', {text: (entry.exclude ? 'not ' : '') + (entry.label || entry.key)}),
                     remover]));
             }));
             children.push(el('h5', {'class': 'mt-3', text: 'Filters'}));

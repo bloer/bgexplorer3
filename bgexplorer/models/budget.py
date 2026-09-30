@@ -41,14 +41,6 @@ def display_unit(version: str, scalar: str):
     return None
 
 
-def _is_limit(sourceterm: SourceTerm) -> bool:
-    rate = sourceterm.source.rate
-    try:
-        return bool(rate.m.isupperlimit())
-    except AttributeError:
-        return False
-
-
 class Term(NamedTuple):
     """ One SourceTerm's value of a scalar, and its key for each groupby.
     The component key is the path of placement ids (as strings) from the
@@ -56,10 +48,7 @@ class Term(NamedTuple):
     """
     sourceterm: SourceTerm
     value: object
-    is_limit: bool
     keys: dict
-    # the length of its bar in base units: the upper limit or central value
-    size: float
 
 
 def _component_path(st: SourceTerm, child_ids: set) -> Tuple[str, ...]:
@@ -94,10 +83,7 @@ def term_values(obj: Component, scalar: str,
                         isotope=st.source.name,
                         material=st.material or NO_MATERIAL,
                         category=category.value if category else NO_CATEGORY)
-            is_limit = _is_limit(st)
-            base = value.to_base_units().m
-            size = base.get_upper_limit(0.9) if is_limit else base.nominal_value
-            terms.append(Term(st, value, is_limit, keys, size))
+            terms.append(Term(st, value, keys))
         return terms
     key = _cache_key(obj, 'terms', _ref_id(obj),
                      relativeto and _ref_id(relativeto), scalar)
@@ -232,65 +218,56 @@ def _resolve_root(obj: Component, root: Tuple[str, ...]):
 
 
 class _Group:
-    """ Sums of the measured and upper limit parts of some SourceTerms, and
-    the summed sizes of all SourceTerms in the group before filtering
+    """ The sum of some SourceTerms' values passing the filters, and of all
+    of them. Measurements and upper limits are summed together, as
+    AsymmetricUncertainties
     """
     def __init__(self):
-        self.measured = None
-        self.limit = None
+        self.value = None
+        self.unfiltered = None
         self.selected = False
-        self.size = 0.
-        self.base_unit = None
+
+    @staticmethod
+    def _add(total, value):
+        return value if total is None else total + value
+
+    def add(self, term: Term):
+        self.value = self._add(self.value, term.value)
 
     def include(self, term: Term, selected: bool, passing: bool):
-        """ Add `term` to the unfiltered size, and to the sums if `passing`
-        """
-        self.size += term.size
-        self.base_unit = self.base_unit or term.value.to_base_units().u
+        """ Add `term` to the unfiltered sum, and to the sum if `passing` """
+        self.unfiltered = self._add(self.unfiltered, term.value)
         self.selected |= selected
         if passing:
             self.add(term)
 
-    def add(self, term: Term):
-        if term.is_limit:
-            self.limit = term.value if self.limit is None \
-                else self.limit + term.value
-        else:
-            self.measured = term.value if self.measured is None \
-                else self.measured + term.value
 
-    @property
-    def all(self):
-        if self.measured is None or self.limit is None:
-            return self.measured if self.limit is None else self.limit
-        return self.measured + self.limit
+def _convert(value, unit):
+    return None if value is None else value.to_reduced_units().to(unit)
 
-    def converted(self, unit, parts=('measured', 'limit')) -> dict:
-        result = {}
-        for kind in parts:
-            value = getattr(self, kind)
-            result[kind] = (None if value is None
-                            else value.to_reduced_units().to(unit))
-        return result
+
+def _size(value) -> float:
+    """ Where a value is drawn: its upper limit, or else its central value
+    """
+    if value is None:
+        return 0.
+    m = value.m
+    return float(m.get_upper_limit(0.9) if m.isupperlimit()
+                 else m.nominal_value)
 
 
 def _rows(groups: dict, labels: dict, unit) -> List[dict]:
     """ Rows of converted sums from `groups` keyed by group key, largest
     unfiltered size first, so filtering doesn't reorder them. Rows with
-    nothing passing the filters have measured and limit None
+    nothing passing the filters have value None
     """
-    groups = sorted(groups.items(), key=lambda item: item[1].size,
-                    reverse=True)
-    return [dict(key=key, label=labels.get(key, key), depth=0,
-                 selected=group.selected, size=_convert_size(group, unit),
-                 **group.converted(unit))
-            for key, group in groups]
-
-
-def _convert_size(group: _Group, unit) -> float:
-    if not group.size:
-        return 0.
-    return float(group.size) * unitreg.Quantity(1, group.base_unit).to(unit).m
+    rows = [dict(key=key, label=labels.get(key, key), depth=0,
+                 selected=group.selected,
+                 size=_size(_convert(group.unfiltered, unit)),
+                 value=_convert(group.value, unit))
+            for key, group in groups.items()]
+    rows.sort(key=lambda row: row['size'], reverse=True)
+    return rows
 
 
 def _component_rows(terms: List[Term], filters: BudgetFilter,
@@ -362,14 +339,16 @@ def dashboard(obj: Component, scalar: str,
 
     Returns dict(scalar, units, count, ntotal, total, unfiltered,
     breadcrumb, charts): count of the SourceTerms passing all filters out of
-    ntotal with a value, their total and that of all ntotal, each as
-    dict(measured, limit, all), the breadcrumb of (path, name) down to
-    `filters.root`, and charts of rows for each groupby. Each chart has a row
-    for every group below the root, whatever the other filters, so rows
-    stay put while filtering. Each row is dict(key, label, depth, selected,
-    size, measured, limit), in order of their unfiltered size (a float in
-    `units`); measured and limit are None if nothing in the row passes the
-    filters. The component rows are described in `_component_rows`.
+    ntotal with a value, their total and that of all ntotal, the breadcrumb
+    of (path, name) down to `filters.root`, and charts of rows for each
+    groupby. Each chart has a row for every group below the root, whatever
+    the other filters, so rows stay put while filtering. Each row is
+    dict(key, label, depth, selected, size, value), in order of their
+    unfiltered size (a float in `units`: the upper limit of limits, else the
+    central value); value is None if nothing in the row passes the filters.
+    Measurements and upper limits are summed together, so a value is only a
+    limit if everything in it is. The component rows are described in
+    `_component_rows`.
     Raises ValueError for an unknown groupby, scalar or root.
     """
     _check_args(obj, scalar, groupbys)
@@ -401,29 +380,7 @@ def dashboard(obj: Component, scalar: str,
         if filters.matches(term.keys):
             total.add(term)
             count += 1
-    parts = ('measured', 'limit', 'all')
     return dict(scalar=scalar, units=unit, count=count, ntotal=len(terms),
-                total=total.converted(unit, parts),
-                unfiltered=unfiltered.converted(unit, parts),
+                total=_convert(total.value, unit),
+                unfiltered=_convert(unfiltered.value, unit),
                 breadcrumb=breadcrumb, charts=charts)
-
-
-def budget_breakdown(obj: Component, scalar: str, groupby: str,
-                     relativeto: Optional[Assembly] = None,
-                     unit=None) -> dict:
-    """ Sum the result `scalar` of `obj` (optionally only as placed in
-    `relativeto`) in groups by 'component' (the direct children of `obj`),
-    'isotope', 'material' or 'category'. Each group is split into measured
-    sources and those with upper-limit emission rates.
-
-    Returns dict(scalar, groupby, units, rows), with rows of
-    (label, measured, limit) as quantities or None, largest first.
-    Raises ValueError for an unknown groupby or scalar.
-    """
-    _check_args(obj, scalar, [groupby])
-    result = dashboard(obj, scalar, relativeto=relativeto, unit=unit,
-                       groupbys=[groupby], depth=1)
-    rows = [dict(label=row['label'], measured=row['measured'],
-                 limit=row['limit']) for row in result['charts'][groupby]]
-    return dict(scalar=scalar, groupby=groupby, units=result['units'],
-                rows=rows)

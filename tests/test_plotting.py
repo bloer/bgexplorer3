@@ -1,15 +1,14 @@
-""" Plot data: serializing results and budget breakdowns """
+""" Plot data: serializing results, and the pages drawing them """
 import unittest
 import numpy as np
 from bgexplorer.application.plotting import histogram_json, scalar_json
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
-from bgexplorer.models.budget import budget_breakdown, available_scalars
+from bgexplorer.models.budget import available_scalars
 from bgexplorer.models.common import units
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.hiteff import HitEfficiency
-from bgexplorer.models.sourceterm import CalculatedResults
 from bgexplorer.models import versioncontrol as vc
 from tests.test_app_components import AppTestCase
 
@@ -87,99 +86,8 @@ class TestPlots(AppTestCase):
         self.a2 = Assembly(name='a2', children=[
             Placement(component=self.a1)]).save()
 
-    def total(self, obj, relativeto=None):
-        return CalculatedResults.for_object(obj, relativeto, save=False,
-                                            cache=False).scalars['v1']
-
-    def check_sum(self, budget, total):
-        """ All groups add up to the total """
-        parts = [v for row in budget['rows']
-                 for v in (row['measured'], row['limit']) if v is not None]
-        summed = sum(parts[1:], parts[0]).to(total.u)
-        self.assertAlmostEqual(summed.m.nominal_value, total.m.nominal_value)
-        self.assertAlmostEqual(summed.m.get_upper_limit(0.9),
-                               total.m.get_upper_limit(0.9))
-
-    def test_budget_groups(self):
-        total = self.total(self.a1)
-        budget = budget_breakdown(self.a1, 'v1', 'component')
-        rows = {row['label']: row for row in budget['rows']}
-        self.assertEqual(set(rows), {'c1', 'c2 label'})
-        # c1: 2 x 2 kg x 10 mBq/kg x 0.1 dru/mBq, and a limit from K40
-        self.assertAlmostEqual(rows['c1']['measured'].m.nominal_value, 4.)
-        self.assertTrue(rows['c1']['limit'].m.isupperlimit())
-        # c2: 1 kg x 10 mBq/kg x 0.3 dru/mBq, no hiteff for K40
-        self.assertAlmostEqual(rows['c2 label']['measured'].m.nominal_value,
-                               3.)
-        self.assertIsNone(rows['c2 label']['limit'])
-        self.assertEqual(budget['rows'][0]['label'], 'c1')
-        self.check_sum(budget, total)
-
-        budget = budget_breakdown(self.a1, 'v1', 'isotope')
-        rows = {row['label']: row for row in budget['rows']}
-        self.assertEqual(set(rows), {'Th232', 'K40'})
-        self.assertIsNone(rows['Th232']['limit'])
-        self.assertAlmostEqual(rows['Th232']['measured'].m.nominal_value, 7.)
-        self.assertIsNone(rows['K40']['measured'])
-        self.check_sum(budget, total)
-
-        budget = budget_breakdown(self.a1, 'v1', 'material')
-        self.assertEqual({row['label'] for row in budget['rows']},
-                         {'copper', 'steel'})
-        self.check_sum(budget, total)
-
-    def test_budget_nested(self):
-        # a2's only child is a1
-        budget = budget_breakdown(self.a2, 'v1', 'component')
-        self.assertEqual([row['label'] for row in budget['rows']], ['a1'])
-        self.check_sum(budget, self.total(self.a2))
-        # a1 relative to a2 splits into a1's children
-        budget = budget_breakdown(self.a1, 'v1', 'component',
-                                  relativeto=self.a2)
-        self.assertEqual({row['label'] for row in budget['rows']},
-                         {'c1', 'c2 label'})
-        self.check_sum(budget, self.total(self.a1, self.a2))
-        # a plain component's own sources
-        budget = budget_breakdown(self.c1, 'v1', 'component')
-        self.assertEqual([row['label'] for row in budget['rows']], ['c1'])
-        self.check_sum(budget, self.total(self.c1))
-
-    def test_budget_units_and_errors(self):
-        budget = budget_breakdown(self.a1, 'v1', 'isotope', unit='mdru')
-        self.assertEqual(budget['units'], units('mdru').u)
-        rows = {row['label']: row for row in budget['rows']}
-        self.assertAlmostEqual(rows['Th232']['measured'].m.nominal_value,
-                               7000.)
+    def test_available_scalars(self):
         self.assertEqual(available_scalars('main'), ['v1'])
-        with self.assertRaises(ValueError):
-            budget_breakdown(self.a1, 'nope', 'isotope')
-        with self.assertRaises(ValueError):
-            budget_breakdown(self.a1, 'v1', 'nope')
-
-    def test_budget_json(self):
-        url = self.url('component.budget_json', object=self.a1)
-        data = self.client.get(url + '?groupby=isotope').get_json()
-        self.assertEqual(data['scalar'], 'v1')
-        self.assertEqual(data['scalars'], ['v1'])
-        self.assertEqual(data['units'], 'dru')
-        rows = {row['label']: row for row in data['rows']}
-        self.assertAlmostEqual(rows['Th232']['measured']['value'], 7.)
-        self.assertFalse(rows['Th232']['measured']['is_limit'])
-        self.assertTrue(rows['K40']['limit']['is_limit'])
-        self.assertGreater(rows['K40']['limit']['upper_limit'], 0)
-        # defaults to groupby component
-        data = self.client.get(url).get_json()
-        self.assertEqual(data['groupby'], 'component')
-        for query in ('?groupby=nope', '?scalar=nope', '?unit=kg'):
-            with self.subTest(query=query):
-                response = self.client.get(url + query)
-                self.assertEqual(response.status_code, 400)
-                self.assertIn('message', response.get_json()['error'])
-        # relative to a parent assembly
-        data = self.client.get(self.url(
-            'component.budget_json', object=self.a1,
-            relativeto=self.a2)).get_json()
-        self.assertEqual(len(data['rows']), 2)
 
     def test_spectra_json(self):
         hiteff = HitEfficiency.select_version('main').get(source='Th232',
