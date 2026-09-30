@@ -350,15 +350,24 @@ const bgplots = (function(){
             showlegend: false,
         };
         const traces = budgetTraces(rows, r => r.selected === false, data.units);
+        const drawing = plot._drawing = (plot._drawing || 0) + 1;
         if(same){
-            // relabel, then move the values from where they were
+            // relabel, then move the values from where they were. The
+            // animation doesn't draw the error bars of points moving
+            // between traces, or always remove the old points, so redraw
+            // the final state (already in plot.data, so react would skip
+            // it) unless a newer draw has started
+            const settle = () => {
+                if(drawing === plot._drawing)
+                    return Plotly.redraw(plot).then(() => titleDrill(plot));
+            };
             Plotly.react(plot, plot.data, layout, CONFIG).then(() => {
                 titleDrill(plot);
                 return Plotly.animate(
                     plot, {data: traces, traces: traces.map((t, i) => i)},
                     {transition: {duration: 400, easing: 'cubic-in-out'},
                      frame: {duration: 400, redraw: false}, mode: 'immediate'});
-            });
+            }).then(settle, settle);
         } else {
             Plotly.react(plot, traces, layout, CONFIG).then(() => titleDrill(plot));
         }

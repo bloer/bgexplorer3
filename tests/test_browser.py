@@ -256,6 +256,18 @@ class TestPlotsInBrowser(BrowserTestCase):
             page.wait_for_timeout(100)
             self.wait_dashboard(page)
 
+    def assertDrawn(self, page):
+        """ Once any animation settles, every panel draws exactly its
+        data: one marker and error bar per point, and no leftovers
+        """
+        page.wait_for_function("""() => document.getElementById('budgetplot')
+            .panels.every(p => !p._fullLayout || [...p.querySelectorAll(
+                '.scatterlayer .trace')].every(g => {
+                const n = p.data[g.__data__[0].trace.index].x.length;
+                return g.querySelectorAll('.point').length === n
+                    && g.querySelectorAll('.errorbar path.xerror').length === n;
+            }))""", timeout=3000)
+
     def info(self, page):
         return page.locator('#budgetplot .dashboard-info').inner_text()
 
@@ -300,10 +312,12 @@ class TestPlotsInBrowser(BrowserTestCase):
         self.click_row(page, 'material', 'copper', ['Control'])
         self.assertIn('not copper', self.info(page))
         self.assertEqual(self.values(page, 'isotope'), ['K40'])
+        self.assertDrawn(page)
 
         page.locator('#budgetplot .dashboard-reset').click()
         self.wait_dashboard(page)
         self.assertIn('2 of 2 source terms', self.info(page))
+        self.assertDrawn(page)
         self.assertEqual(self.rows(page, 'isotope'), ['K40', 'Th232'])
 
         # shift-clicks are applied together when shift is released
