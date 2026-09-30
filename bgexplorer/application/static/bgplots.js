@@ -191,38 +191,50 @@ const bgplots = (function(){
     }
 
     /* A horizontal budget chart: measured values as red points with error
-     * bars, upper limits as blue left-pointing arrows from the 90% limit
+     * bars, upper limits as blue left-pointing arrows from the 90% limit.
+     * Rows where `dim(row)` are drawn faded. The measured points of the
+     * other rows are the last trace.
      */
-    function budgetTraces(rows){
+    function budgetTraces(rows, dim){
+        dim = dim || (() => false);
         const measured = rows.filter(r => r.measured && r.measured.value > 0);
         const limits = rows.filter(r => r.limit && r.limit.upper_limit > 0);
-        const arrowx = [], arrowy = [];
-        limits.forEach(r => {
-            arrowx.push(r.limit.upper_limit, r.limit.upper_limit / 4, null);
-            arrowy.push(r.label, r.label, null);
+        const arrows = [false, true].map(faded => {
+            const arrowx = [], arrowy = [];
+            limits.filter(r => dim(r) === faded).forEach(r => {
+                arrowx.push(r.limit.upper_limit, r.limit.upper_limit / 4, null);
+                arrowy.push(r.label, r.label, null);
+            });
+            return {type: 'scatter', mode: 'lines', x: arrowx, y: arrowy,
+                    opacity: faded ? 0.25 : 1,
+                    line: {color: LIMIT_COLOR, width: 2}, hoverinfo: 'skip',
+                    showlegend: false, legendgroup: 'limit'};
         });
         return [
-            {type: 'scatter', mode: 'lines', x: arrowx, y: arrowy,
-             line: {color: LIMIT_COLOR, width: 2}, hoverinfo: 'skip',
-             showlegend: false, legendgroup: 'limit'},
+            ...arrows,
             {type: 'scatter', mode: 'markers', name: '90% upper limit',
              legendgroup: 'limit',
              x: limits.map(r => r.limit.upper_limit / 4),
              y: limits.map(r => r.label),
              customdata: limits.map(r => r.limit.upper_limit),
              hovertemplate: '%{y}: < %{customdata:.3g}<extra></extra>',
-             marker: {symbol: 'triangle-left', size: 10, color: LIMIT_COLOR}},
-            {type: 'scatter', mode: 'markers', name: 'Measured',
-             x: measured.map(r => r.measured.value),
-             y: measured.map(r => r.label),
-             error_x: {type: 'data', symmetric: false,
-                       array: measured.map(r => r.measured.err_plus),
-                       // keep the lower bar on a log axis
-                       arrayminus: measured.map(r => Math.min(r.measured.err_minus,
-                                                              0.999 * r.measured.value)),
-                       color: MEASURED_COLOR},
-             hovertemplate: '%{y}: %{x:.3g}<extra></extra>',
-             marker: {symbol: 'circle', size: 8, color: MEASURED_COLOR}},
+             marker: {symbol: 'triangle-left', size: 10, color: LIMIT_COLOR,
+                      opacity: limits.map(r => dim(r) ? 0.25 : 1)}},
+            ...[true, false].map(faded => {
+                const rows = measured.filter(r => dim(r) === faded);
+                return {type: 'scatter', mode: 'markers', name: 'Measured',
+                        opacity: faded ? 0.25 : 1, showlegend: !faded,
+                        x: rows.map(r => r.measured.value),
+                        y: rows.map(r => r.label),
+                        error_x: {type: 'data', symmetric: false,
+                                  array: rows.map(r => r.measured.err_plus),
+                                  // keep the lower bar on a log axis
+                                  arrayminus: rows.map(r => Math.min(r.measured.err_minus,
+                                                                     0.999 * r.measured.value)),
+                                  color: MEASURED_COLOR},
+                        hovertemplate: '%{y}: %{x:.3g}<extra></extra>',
+                        marker: {symbol: 'circle', size: 8, color: MEASURED_COLOR}};
+            }),
         ];
     }
 
@@ -251,8 +263,20 @@ const bgplots = (function(){
                 Math.log10(Math.max(...points)) + pad];
     }
 
-    function drawBudget(plot, data, threshold, title, range){
-        const total = data.rows.reduce((sum, r) => sum + rowSize(r), 0);
+    function unionRange(a, b){
+        if(!a || !b)
+            return a || b;
+        return [Math.min(a[0], b[0]), Math.max(a[1], b[1])];
+    }
+
+    /* Draw `data.rows` into `plot`, hiding rows below `threshold` of the
+     * total of the top level (depth 0) rows. Rows in `highlight` are
+     * shaded, and rows with `selected` false are faded. Returns whether
+     * anything was drawn
+     */
+    function drawBudget(plot, data, threshold, title, range, highlight){
+        const total = data.rows.filter(r => !r.depth)
+                               .reduce((sum, r) => sum + rowSize(r), 0);
         const rows = data.rows.filter(r => rowSize(r) > 0
                                       && rowSize(r) >= threshold * total);
         // clear plotly's state along with any message
@@ -262,6 +286,13 @@ const bgplots = (function(){
             plot.appendChild(el('p', {'class': 'text-secondary', text: 'No contributions'}));
             return false;
         }
+        const shapes = [];
+        rows.forEach((r, i) => {
+            if(highlight && highlight(r))
+                shapes.push({type: 'rect', xref: 'paper', x0: 0, x1: 1, yref: 'y',
+                             y0: i - 0.5, y1: i + 0.5, layer: 'below',
+                             fillcolor: '#fff3cd', line: {width: 0}});
+        });
         const layout = {
             title: {text: title, font: {size: 14}},
             margin: {t: 30, r: 10, l: 10},
@@ -270,22 +301,65 @@ const bgplots = (function(){
                     exponentformat: 'power', gridcolor: '#ddd', range: range},
             yaxis: {type: 'category', automargin: true, autorange: 'reversed',
                     categoryorder: 'array', categoryarray: rows.map(r => r.label)},
+            // clicking anywhere along a row picks it
+            hovermode: 'y',
+            shapes: shapes,
             legend: {orientation: 'h', y: -0.15},
             showlegend: false,
         };
-        Plotly.react(plot, budgetTraces(rows), layout, CONFIG);
+        Plotly.react(plot, budgetTraces(rows, r => r.selected === false), layout, CONFIG);
         return true;
     }
 
-    /* Budget breakdowns of one component, one panel per groupby. `url` is
-     * the budget.json endpoint, `scalars` the result names to choose from.
-     * All panels share one x range, covering every row before the
-     * threshold hides any, and zoom and pan together.
+    const GROUP_TITLES = {component: 'component', isotope: 'isotope',
+                          material: 'material', category: 'source category'};
+
+    /* Text for a scalar_json value */
+    function formatValue(v, units){
+        if(!v)
+            return '0';
+        const u = units ? ' ' + units : '';
+        if(v.is_limit)
+            return `< ${v.upper_limit.toPrecision(3)}${u}`;
+        return `${v.value.toPrecision(3)} (+${v.err_plus.toPrecision(2)}`
+             + ` −${v.err_minus.toPrecision(2)})${u}`;
+    }
+
+    /* Labels shown on the y axis: indented by depth, and unique, since
+     * they are plotly's categories
      */
-    function budget(div, url, groupbys, scalars){
+    function displayRows(rows){
+        const seen = new Set();
+        return rows.map(r => {
+            let label = r.depth ? '\u00a0\u00a0'.repeat(r.depth) + '↳ ' + r.label
+                                : r.label;
+            while(seen.has(label))
+                label += '\u200b';
+            seen.add(label);
+            return Object.assign({}, r, {name: r.label, label: label});
+        });
+    }
+
+    function sameKey(a, b){
+        return JSON.stringify(a) === JSON.stringify(b);
+    }
+
+    /* Filterable budget breakdowns of one component, one panel per groupby,
+     * with a panel of the filters and the total passing them. `url` is the
+     * dashboard.json endpoint, `scalars` the result names to choose from.
+     *
+     * Clicking a row keeps only its SourceTerms, ctrl-clicking removes
+     * them, and shift-clicking collects several rows until shift is
+     * released. Each panel is filtered by the other panels' selections,
+     * and shades or fades its own. Assemblies can be drilled into. All
+     * sums, with their correlated uncertainties, are done by the server.
+     * The state is kept in the URL's hash. All panels share one x range,
+     * and zoom and pan together.
+     */
+    function dashboard(div, url, groupbys, scalars){
         if(typeof div === 'string')
             div = document.getElementById(div);
-        const id = div.id || 'budget';
+        const id = div.id || 'dashboard';
         const select = el('select', {'class': 'form-select form-select-sm w-auto',
                                      id: id + '_scalar', 'aria-label': 'result to plot'},
                           scalars.map(name => el('option', {value: name, text: name})));
@@ -296,21 +370,42 @@ const bgplots = (function(){
             el('label', {'for': select.id, text: 'Result'}), select,
             el('label', {'class': 'ms-3', 'for': threshold.id, text: 'Hide below'}), threshold,
             el('span', {text: '% of total'})]);
-        const panels = groupbys.map(groupby => el('div', {'class': 'col-lg-4 bgplot',
+        const info = el('div', {'class': 'dashboard-info'});
+        const breadcrumb = el('ol', {'class': 'breadcrumb mb-1 small'});
+        const drill = el('div', {'class': 'dashboard-drill small'});
+        const panels = groupbys.map(groupby => el('div', {'class': 'bgplot',
                                                           'data-groupby': groupby}));
-        div.replaceChildren(controls, el('div', {'class': 'row'}, panels));
+        const columns = panels.map((panel, i) => el('div', {'class': 'col-xl-6'},
+            groupbys[i] === 'component' ? [breadcrumb, drill, panel] : [panel]));
+        div.replaceChildren(controls, el('div', {'class': 'row'}, [
+            el('div', {'class': 'col-lg-3'}, [info]),
+            el('div', {'class': 'col-lg-9'}, [el('div', {'class': 'row'}, columns)])]));
         div.panels = panels;
+
+        // filters: {root: [placement ids], <groupby>: [{key, exclude, label}]}
+        let filters = {root: []};
+        const hash = new URLSearchParams(location.hash.slice(1));
+        if(scalars.includes(hash.get('scalar')))
+            select.value = hash.get('scalar');
+        try {
+            filters = Object.assign(filters, JSON.parse(hash.get('filters')) || {});
+        } catch(e) {
+            // ignore a garbled hash
+        }
         const cache = {};
-        // the shared range: the full extent of the current scalar, or a zoom
+        let current = null, request = 0, pending = false;
+        // the shared range: the extent of everything shown, or a zoom
         let fullRange = null, range = null, syncing = false;
 
-        function load(scalar){
-            if(!cache[scalar]){
+        function load(){
+            const params = {scalar: select.value, filters: JSON.stringify(filters)};
+            const key = JSON.stringify(params);
+            if(!cache[key]){
                 const sep = url.includes('?') ? '&' : '?';
-                cache[scalar] = Promise.all(groupbys.map(groupby => getJSON(
-                    url + sep + new URLSearchParams({scalar: scalar, groupby: groupby}))));
+                cache[key] = getJSON(url + sep + new URLSearchParams(params));
+                cache[key].catch(() => delete cache[key]);
             }
-            return cache[scalar];
+            return cache[key];
         }
 
         // apply one panel's zoom to the others
@@ -333,23 +428,193 @@ const bgplots = (function(){
                    .finally(() => { syncing = false; });
         }
 
+        function entries(groupby){
+            return filters[groupby] || [];
+        }
+
+        /* Change the filters for a click on `row` of `groupby` */
+        function pick(groupby, row, event){
+            if(row.key === null)
+                return;
+            const entry = {key: row.key, exclude: !!(event.ctrlKey || event.metaKey),
+                           label: row.name};
+            const others = entries(groupby).filter(e => !sameKey(e.key, entry.key));
+            if(event.shiftKey){
+                filters[groupby] = others.concat([entry]);
+                pending = true;
+                showInfo();
+                return;
+            }
+            const same = entries(groupby).length === 1 && others.length === 0
+                         && entries(groupby)[0].exclude === entry.exclude;
+            // clicking the only selection again clears it
+            filters[groupby] = same ? [] : [entry];
+            update();
+        }
+
+        function remove(groupby, entry){
+            filters[groupby] = entries(groupby).filter(e => e !== entry);
+            update();
+        }
+
+        function setRoot(key){
+            filters.root = key;
+            // below the new root, only keep component filters inside it
+            filters.component = entries('component').filter(
+                e => e.key.length > key.length && sameKey(e.key.slice(0, key.length), key));
+            update();
+        }
+
+        function reset(){
+            filters = {root: []};
+            update();
+        }
+
+        function link(text, onclick, attrs){
+            const a = el('a', Object.assign({href: '#', text: text}, attrs || {}));
+            a.addEventListener('click', event => {
+                event.preventDefault();
+                onclick();
+            });
+            return a;
+        }
+
+        function showInfo(){
+            const children = [];
+            if(current){
+                const t = current.total;
+                children.push(
+                    el('p', {'class': 'mb-1'}, [
+                        el('strong', {text: `${current.count}`}),
+                        el('span', {text: ` of ${current.ntotal} source terms pass all filters`})]),
+                    el('p', {'class': 'mb-1 dashboard-total'}, [
+                        el('strong', {text: 'Total: '}),
+                        el('span', {text: formatValue(t.all, current.units)})]));
+                if(t.measured && t.limit)
+                    children.push(el('p', {'class': 'mb-1 small text-secondary', text:
+                        `measured ${formatValue(t.measured, current.units)}, `
+                        + `limits ${formatValue(t.limit, current.units)}`}));
+            }
+            const active = el('ul', {'class': 'list-unstyled mb-1 dashboard-filters'});
+            groupbys.forEach(groupby => entries(groupby).forEach(entry => {
+                const remover = link('✕', () => remove(groupby, entry),
+                                     {'class': 'text-danger ms-1', title: 'remove this filter'});
+                active.appendChild(el('li', {}, [
+                    el('span', {'class': 'text-secondary', text: GROUP_TITLES[groupby] + ': '}),
+                    el('span', {text: (entry.exclude ? 'not ' : '') + entry.label}),
+                    remover]));
+            }));
+            const anyFilters = filters.root.length
+                               || groupbys.some(groupby => entries(groupby).length);
+            children.push(el('h5', {'class': 'mt-3', text: 'Filters'}));
+            if(pending)
+                children.push(el('p', {'class': 'small text-secondary',
+                                       text: 'Release shift to apply'}));
+            if(anyFilters)
+                children.push(active, link('reset all', reset, {'class': 'dashboard-reset'}));
+            else
+                children.push(el('p', {'class': 'text-secondary', text: 'None'}));
+            const help = el('details', {'class': 'mt-3 small'}, [
+                el('summary', {text: 'How to filter'}),
+                el('ul', {}, [
+                    el('li', {text: 'Click a row to keep only its contributions, or again to undo'}),
+                    el('li', {text: 'Ctrl-click a row to remove its contributions'}),
+                    el('li', {text: 'Hold shift to pick several rows, applied when shift is released'}),
+                    el('li', {text: 'Each chart is filtered by the others; its own selection is shaded'}),
+                    el('li', {text: 'Select one assembly to show what is inside it'})])]);
+            children.push(help);
+            info.replaceChildren(...children);
+        }
+
+        function showNavigation(data){
+            // only once drilled down
+            const crumbs = data.breadcrumb.length > 1 ? data.breadcrumb : [];
+            breadcrumb.replaceChildren(...crumbs.map((crumb, i) => {
+                const last = i === crumbs.length - 1;
+                return el('li', {'class': 'breadcrumb-item' + (last ? ' active' : '')},
+                          [last ? el('span', {text: crumb.label})
+                                : link(crumb.label, () => setRoot(crumb.key))]);
+            }));
+            // drill into a single selected assembly shown with its children
+            drill.replaceChildren();
+            const selected = entries('component').filter(e => !e.exclude);
+            const rows = data.charts.component || [];
+            if(selected.length !== 1)
+                return;
+            const i = rows.findIndex(r => sameKey(r.key, selected[0].key));
+            if(i >= 0 && !rows[i].depth && rows[i+1] && rows[i+1].depth)
+                drill.appendChild(link(`▸ Show inside ${rows[i].label}`,
+                                       () => setRoot(rows[i].key),
+                                       {'class': 'dashboard-drilldown'}));
+        }
+
         function draw(rescale){
-            load(select.value).then(results => {
+            const mine = ++request;
+            div.classList.add('loading');
+            load().then(data => {
+                if(mine !== request)
+                    return;
+                div.classList.remove('loading');
+                current = data;
+                const results = groupbys.map(groupby => ({
+                    scalar: data.scalar, units: data.units,
+                    rows: displayRows(data.charts[groupby] || [])}));
+                const extent = budgetRange([].concat(...results.map(r => r.rows)));
                 if(rescale){
-                    fullRange = budgetRange([].concat(...results.map(data => data.rows)));
+                    fullRange = extent;
                     range = fullRange;
+                } else if(range === fullRange){
+                    fullRange = range = unionRange(fullRange, extent);
+                } else {
+                    fullRange = unionRange(fullRange, extent);
                 }
                 panels.forEach((panel, i) => {
-                    if(drawBudget(panel, results[i], threshold.value / 100,
-                                  'By ' + groupbys[i], range && range.slice()))
-                        panel.on('plotly_relayout', event => sync(panel, event));
+                    const groupby = groupbys[i];
+                    const own = entries(groupby).length > 0;
+                    const byLabel = new Map(results[i].rows.map(r => [r.label, r]));
+                    if(!drawBudget(panel, results[i], threshold.value / 100,
+                                   'By ' + GROUP_TITLES[groupby], range && range.slice(),
+                                   own ? (r => r.selected) : null))
+                        return;
+                    panel.on('plotly_relayout', event => sync(panel, event));
+                    panel.on('plotly_click', event => {
+                        const point = event.points && event.points[0];
+                        const row = point && byLabel.get(point.y);
+                        if(row)
+                            pick(groupby, row, event.event || {});
+                    });
                 });
-            }).catch(error => panels.forEach(panel => showError(panel, error)));
+                showInfo();
+                showNavigation(data);
+            }).catch(error => {
+                if(mine !== request)
+                    return;
+                div.classList.remove('loading');
+                panels.forEach(panel => showError(panel, error));
+            });
         }
-        select.addEventListener('change', () => draw(true));
+
+        function update(){
+            pending = false;
+            const params = new URLSearchParams({scalar: select.value,
+                                                filters: JSON.stringify(filters)});
+            history.replaceState(null, '', '#' + params);
+            draw(false);
+        }
+
+        document.addEventListener('keyup', event => {
+            if(event.key === 'Shift' && pending)
+                update();
+        });
+        select.addEventListener('change', () => {
+            history.replaceState(null, '', '#' + new URLSearchParams(
+                {scalar: select.value, filters: JSON.stringify(filters)}));
+            draw(true);
+        });
         threshold.addEventListener('change', () => draw(false));
+        showInfo();
         whenVisible(div, () => draw(true));
     }
 
-    return {spectrum: spectrum, budget: budget};
+    return {spectrum: spectrum, dashboard: dashboard};
 })();

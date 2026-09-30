@@ -11,3 +11,6 @@ nav img { max-height: 50px; }
 div.required-field label::after, th.required-field::after {content: " *"; color: red; font-weight:bold;}
 
 li.breadcrumb-item.active {font-weight: bold; }
+
+/* results dashboard: waiting for the server */
+.loading .bgplot {opacity: 0.5; transition: opacity 0.2s}

@@ -49,9 +49,9 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
         <h3>Budget</h3>
         <p>Contributions to the background of {{ g.object.name }}
         {%- if g.relativeto is defined %} as placed in {{ g.relativeto.name }}{% endif %},
-        grouped by source isotope, material and component. Measured values are shown
-        as red points with 1&sigma; errors, upper limits as blue arrows from the 90%
-        upper limit.</p>
+        grouped by component, material, source isotope and source category. Measured
+        values are shown as red points with 1&sigma; errors, upper limits as blue
+        arrows from the 90% upper limit. Click the rows to filter the other charts.</p>
         {% if scalars %}
         <div id="budgetplot" class="plotcontainer"></div>
         {% else %}
@@ -72,8 +72,8 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 {{ super() }}
 {{ utils.plotscripts() }}
 {%- if scalars %}
-<script>bgplots.budget('budgetplot', {{ url_for('.budget_json', object=g.object, relativeto=g.get('relativeto')) | tojson }},
-                       {{ ['isotope', 'material', 'component'] | tojson }}, {{ scalars | tojson }});</script>
+<script>bgplots.dashboard('budgetplot', {{ url_for('.dashboard_json', object=g.object, relativeto=g.get('relativeto')) | tojson }},
+                          {{ ['component', 'material', 'isotope', 'category'] | tojson }}, {{ scalars | tojson }});</script>
 {%- endif %}
 <script>bgplots.spectrum('spectrumplot', {{ url_for('.spectra_json', object=g.object, relativeto=g.get('relativeto')) | tojson }});</script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>

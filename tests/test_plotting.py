@@ -211,7 +211,7 @@ class TestPlots(AppTestCase):
             'id="spectrumplot"')]
         self.assertEqual(order, sorted(order))
         self.assertIn('<tr class="component depth1">', page)
-        self.assertIn('bgplots.budget(', page)
+        self.assertIn('bgplots.dashboard(', page)
         self.assertIn('bgplots.spectrum(', page)
         self.assertIn('plotly-basic.min.js', page)
         # relative to a parent assembly
