@@ -88,16 +88,13 @@ const bgplots = (function(){
         return [x, y];
     }
 
-    /* log10 y range covering the values, upper errors and upper limits of
-     * histograms `hists`, padded, or null if none are positive. Lower errors
-     * may run off the bottom
+    /* log10 y range covering the values and upper limits of histograms
+     * `hists`, padded, or null if none are positive. Lower errors may run
+     * off the bottom
      */
     function spectrumRange(hists){
         const points = [];
-        hists.forEach(h => h.value.forEach((v, i) => {
-            const limit = h.is_limit && h.is_limit[i];
-            points.push(...(limit ? [h.upper_limit[i]] : [v, v + h.err_plus[i]]));
-        }));
+        hists.forEach(h => h.value.forEach((v, i) => points.push(v, h.upper_limit[i])));
         const positive = points.filter(v => v > 0);
         if(!positive.length)
             return null;
@@ -106,8 +103,9 @@ const bgplots = (function(){
     }
 
     /* Traces for one histogram: a step line for measured bins and, if
-     * `band`, a shaded band of their errors, which also covers upper limit
-     * bins from zero to their one-sided 1 sigma limit. Lower edges at or
+     * `band`, a shaded band for every bin from its lower error (zero for
+     * upper limits) to its one-sided 1 sigma upper limit, so a measurement
+     * plus a limit is never drawn below the limit alone. Lower edges at or
      * below zero are drawn at `floor`, e.g. below a log axis. Without a
      * band, upper limit bins are a dashed step at the limit
      */
@@ -125,8 +123,7 @@ const bgplots = (function(){
                 const lo = limit(i) ? 0 : h.value[i] - h.err_minus[i];
                 return lo > 0 ? lo : floor;
             });
-            const [, high] = steps(h, all, i => limit(i) ? h.upper_limit[i]
-                                                         : h.value[i] + h.err_plus[i]);
+            const [, high] = steps(h, all, i => h.upper_limit[i]);
             // one closed polygon, high then low
             traces.unshift(
                 {x: bx.concat(bx.slice().reverse()), y: high.concat(low.slice().reverse()),

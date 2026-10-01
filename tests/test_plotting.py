@@ -1,7 +1,8 @@
 """ Plot data: serializing results, and the pages drawing them """
 import unittest
 import numpy as np
-from bgexplorer.application.plotting import histogram_json, scalar_json
+from bgexplorer.application.plotting import (histogram_json, scalar_json,
+                                             ONE_SIGMA_CL)
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.budget import (available_scalars, BudgetFilter,
                                       spectrum_breakdown)
@@ -42,6 +43,23 @@ class TestSerialize(unittest.TestCase):
         self.assertGreater(h['upper_limit'][0], 0)
         self.assertEqual(h['upper_limit'][0], h['upper_limit'][2])
         self.assertEqual(h['value'][0], 0)
+        # every bin's upper limit is its one-sided 1 sigma limit: a hit plus
+        # a limit is never below the limit alone
+        limit = AsymmetricUncertainty.fromlimit(np.array([3., 3., 3.]))
+        hit = AsymmetricUncertainty(np.array([0., 0.01, 1.]),
+                                    np.array([0., 0.003, 0.1]),
+                                    np.array([0., 0.003, 0.1]))
+        h = histogram_json(Histogram((limit + hit) * units('dru'),
+                                     np.arange(4.) * units.keV))
+        self.assertEqual(h['is_limit'], [True, False, False])
+        self.assertAlmostEqual(h['upper_limit'][0],
+                               AsymmetricUncertainty.fromlimit(3.).ppf(ONE_SIGMA_CL))
+        self.assertGreaterEqual(h['upper_limit'][1], h['upper_limit'][0])
+        self.assertGreater(h['upper_limit'][2], h['upper_limit'][1])
+        # and for a plain measurement, value + err_plus
+        h = histogram_json(spectrum())
+        np.testing.assert_allclose(
+            h['upper_limit'], np.add(h['value'], h['err_plus']))
         # plain values have no limits
         h = histogram_json(Histogram(np.array([0., 1.]), np.arange(3.)))
         self.assertEqual(h['is_limit'], [False, False])

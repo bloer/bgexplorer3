@@ -34,8 +34,10 @@ def _tolist(a) -> list:
 def histogram_json(hist: Histogram, display_unit=None) -> dict:
     """ Bin edges, values and asymmetric errors of `hist` as lists, converted
     to `display_unit` if given. Bins that are upper limits (as for
-    AsymmetricUncertainty.isupperlimit) have `is_limit` set and their one-sided
-    1 sigma (84.13%) `upper_limit` given
+    AsymmetricUncertainty.isupperlimit) have `is_limit` set. `upper_limit`
+    is every bin's one-sided 1 sigma (84.13%) upper limit: value + err_plus
+    for symmetric errors, rising smoothly to the limit of a pure upper limit
+    as a limit dominates the upper error
     """
     values = hist.hist
     if display_unit is not None and hasattr(values, 'to'):
