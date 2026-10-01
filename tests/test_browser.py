@@ -304,14 +304,20 @@ class TestPlotsInBrowser(BrowserTestCase):
 
     def assertDrawn(self, page):
         """ Once any animation settles, every panel draws exactly its
-        data: one marker and error bar per point, and no leftovers
+        data: one marker and error bar per point, in its row, and no
+        leftovers
         """
         page.wait_for_function("""() => document.getElementById('budgetplot')
             .panels.every(p => !p._fullLayout || [...p.querySelectorAll(
                 '.scatterlayer .trace')].every(g => {
-                const n = p.data[g.__data__[0].trace.index].x.length;
-                return g.querySelectorAll('.point').length === n
-                    && g.querySelectorAll('.errorbar path.xerror').length === n;
+                const trace = p.data[g.__data__[0].trace.index];
+                const n = trace.x.length, ya = p._fullLayout.yaxis;
+                const points = [...g.querySelectorAll('.point')];
+                return points.length === n
+                    && g.querySelectorAll('.errorbar path.xerror').length === n
+                    && points.every(pt => Math.abs(
+                        +pt.getAttribute('transform').split(',')[1].replace(')', '')
+                        - ya.l2p(p._rowids.indexOf(trace.y[pt.__data__.i]))) < 2);
             }))""", timeout=3000)
 
     def table_rows(self, page):
@@ -322,6 +328,10 @@ class TestPlotsInBrowser(BrowserTestCase):
             .classList.contains('loading')""", timeout=5000)
         return page.locator('#resultstable tbody td:first-child').all_inner_texts()
 
+    def yranges(self, page):
+        return page.evaluate("""() => document.getElementById('budgetplot')
+            .panels.map(p => p._fullLayout.yaxis.range)""")
+
     def info(self, page):
         return page.locator('#budgetplot .dashboard-info').inner_text()
 
@@ -330,6 +340,7 @@ class TestPlotsInBrowser(BrowserTestCase):
         url = self.url('component.results', object=a2)
         page = self.open_dashboard(url)
         self.assertIn('2 of 2 source terms', self.info(page))
+        yranges = self.yranges(page)
         self.assertEqual(self.rows(page, 'component'), ['a1', 'c2', 'c1'])
         self.assertEqual(self.rows(page, 'material'), ['steel', 'copper'])
         self.assertEqual(self.table_rows(page), ['a2', 'a1', 'c1', 'c2'])
@@ -356,6 +367,9 @@ class TestPlotsInBrowser(BrowserTestCase):
         self.assertIn('Filtered total:', self.info(page))
         self.assertIn('Unfiltered total:', self.info(page))
         self.assertEqual(self.values(page, 'isotope'), ['Th232'])
+        # the rows don't move, though K40's is now empty
+        self.assertDrawn(page)
+        self.assertEqual(self.yranges(page), yranges)
         # with the same rows
         self.assertEqual(self.rows(page, 'isotope'), ['K40', 'Th232'])
         # but its own panel still shows both, with copper shaded

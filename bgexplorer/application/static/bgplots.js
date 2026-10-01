@@ -474,7 +474,9 @@ const bgplots = (function(){
             xaxis: {type: 'log', title: {text: data.scalar + unitLabel(data.units)},
                     exponentformat: 'power', gridcolor: '#ddd', range: range},
             // the labels are clicked on to filter, so keep them uncovered
-            yaxis: {type: 'category', automargin: true, autorange: 'reversed',
+            // a fixed range, top row first: autorange would follow the rows
+            // with values, and move them while filtering
+            yaxis: {type: 'category', automargin: true, range: [ids.length - 0.5, -0.5],
                     fixedrange: true, categoryorder: 'array', categoryarray: ids,
                     tickmode: 'array', tickvals: ids,
                     ticktext: rows.map(r => tickText(r, highlight && highlight(r), drillable))},
