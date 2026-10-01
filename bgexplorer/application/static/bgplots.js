@@ -354,6 +354,12 @@ const bgplots = (function(){
                     x: rows.map(r => r.value.value),
                     y: rows.map(r => r.id),
                     customdata: rows.map(r => [r.value.err_plus, r.value.err_minus]),
+                    // TODO: the upper bar is value + err_plus, the usual 1 sigma
+                    // error, but limits are drawn at their 90% upper limit. So
+                    // a value plus a large limit (e.g. brass in the qis example)
+                    // can reach less far than the limit alone. Consider drawing
+                    // both at the same quantile, as the spectra do (see
+                    // histogram_json's upper_limit)
                     error_x: {type: 'data', symmetric: false,
                               array: rows.map(r => r.value.err_plus),
                               // keep the lower bar on a log axis
