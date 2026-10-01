@@ -73,7 +73,7 @@ def populate_example(version_tag='examples-qis', clean: bool = False,
         Assay(name='Al-Si bonding wire', sources=dict(
             U238='107 mBq/kg', Th232='370 mBq/kg', K40='101 mBq/kg')),
         Assay(name="brass", sources=dict(
-            U238='4.9 mBq/kg', Th232='3.5 mBq/kg', K40='40 mBq/kg', Cs137='2.6 mBq/kg', Activation='6.61 mBq/kg', Pb210='40 mBq/kg'),
+            U238='< 4.9 mBq/kg', Th232='< 3.5 mBq/kg', K40='< 40 mBq/kg', Cs137='2.6 mBq/kg', Activation='6.61 mBq/kg', Pb210='40 mBq/kg'),
             ),
         Assay(name='mumetal', sources=dict(
             U238='20 mBq/kg', Th232='7 mBq/kg', K40='15 mBq/kg')),
@@ -88,7 +88,7 @@ def populate_example(version_tag='examples-qis', clean: bool = False,
         Assay(name='SMA connector', sources=dict(
             U238='23 Bq/kg', Th232='1.8 Bq/kg')),
         Assay(name='semirigid coax cable', sources=dict(
-            U238='0.4 mBq/kg', Th232='0.15 mBq/kg')),
+            U238='< 0.4 mBq/kg', Th232='< 0.15 mBq/kg')),
         Assay(name='indium', sources=dict(
             In115='249.63 Bq/kg')),
         Assay(name='isolator', sources=dict(
