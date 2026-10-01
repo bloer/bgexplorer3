@@ -595,6 +595,16 @@ class VersionedReferenceField(ReferenceField):
         return super().to_mongo(document)
 
 
+def ref_id(ref):
+    """ The stored id of a reference, which may not be dereferenced yet """
+    if isinstance(ref, VersionedDocument):
+        return ref.original_id
+    if isinstance(ref, Document):
+        return ref.id
+    # DBRef or plain id
+    return getattr(ref, 'id', ref)
+
+
 def get_active_version(instance) -> Optional[str]:
     """ Get the active_version of `instance`. For EmbeddedDocuments, walk up
     the chain of owners to the root VersionedDocument. Returns None if no

@@ -127,6 +127,26 @@
             </tbody>
         </table>
         {% endif %}
+        {% if g.object.location_overrides %}
+        <h4>Hit efficiency location overrides</h4>
+        <table class="table table-sm table-hover" id="locationoverrides">
+            <thead>
+                <tr>{% if g.object.children %}<th>Placement</th>{% endif %}<th>Spec</th><th>Source</th><th>Location</th></tr>
+            </thead>
+            <tbody class="table-group-divider">
+                {% for override in g.object.location_overrides %}
+                <tr>
+                    {%- if g.object.children %}
+                    <td>{% for placement in g.object.children if placement.id == override.placement %}{{ placement.name }}{% else %}all children{% endfor %}</td>
+                    {%- endif %}
+                    <td>{% if override.spec %}<a href="{{ url_for('emissionspec.view', object=override.spec) }}">{{ override.spec.name }}</a>{% else %}any{% endif %}</td>
+                    <td>{{ override.source or 'any' }}</td>
+                    <td>{{ override.location }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
     </div>
 
 

@@ -114,6 +114,70 @@ class TestComponentPages(AppTestCase):
                          self.c1.original_id)
         self.assertEqual(Assembly.select_version('main').count(), 1)
 
+    def test_location_overrides(self):
+        """ overrides are edited in a table, and change SourceTerm locations
+        """
+        c1url = self.url('component.edit', 'b', object=self.c1)
+        html = self.html(self.client.get(c1url))
+        self.assertIn('id="location_overrides"', html)
+        self.assertIn(f'value="{self.e1.original_id}"', html)
+        response = self.client.post(c1url, data={
+            '_listfields': 'location_overrides',
+            'location_overrides.id': ['', ''],
+            'location_overrides.spec': [str(self.e1.original_id), ''],
+            'location_overrides.source': ['', 'Co60'],
+            'location_overrides.location': ['c1 surface', 'elsewhere'],
+        })
+        self.assertEqual(response.status_code, 302)
+        c1 = Component.select_version('b').get(name='c1')
+        self.assertEqual([(o.spec and o.spec.name, o.source, o.location)
+                          for o in c1.location_overrides],
+                         [('e1', None, 'c1 surface'),
+                          (None, 'Co60', 'elsewhere')])
+        st = SourceTerm.select_version('b').get(assemblyRoot=c1)
+        self.assertEqual(st.location, 'c1 surface')
+        html = self.html(self.client.get(
+            self.url('component.view', 'b', object=c1)))
+        self.assertIn('id="locationoverrides"', html)
+        html = self.html(self.client.get(
+            self.url('component.sourceterms', 'b', object=c1)))
+        self.assertIn('title="override on c1"', html)
+
+        # an assembly's overrides pick a placement
+        a1 = Assembly.select_version('b').get(name='a1')
+        a1url = self.url('component.edit', 'b', object=a1)
+        html = self.html(self.client.get(a1url))
+        self.assertIn(f'data-placement="{a1.children[0].id}"', html)
+        response = self.client.post(a1url, data={
+            '_listfields': 'location_overrides',
+            'location_overrides.id': [''],
+            'location_overrides.placement': [str(a1.children[0].id)],
+            'location_overrides.spec': [''],
+            'location_overrides.source': ['K40'],
+            'location_overrides.location': ['a1 spot'],
+        })
+        self.assertEqual(response.status_code, 302)
+        a1 = Assembly.select_version('b').get(name='a1')
+        self.assertEqual(a1.location_overrides[0].placement,
+                         a1.children[0].id)
+        # but c1's own override is closer to the leaf
+        st = SourceTerm.select_version('b').get(assemblyRoot=a1)
+        self.assertEqual(st.location, 'c1 surface')
+
+        # an override for nothing in particular is an error
+        response = self.client.post(c1url, data={
+            '_listfields': 'location_overrides',
+            'location_overrides.id': [''],
+            'location_overrides.spec': [''],
+            'location_overrides.source': [''],
+            'location_overrides.location': ['nowhere'],
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Choose a spec or source', self.html(response))
+        # main is untouched
+        self.assertEqual(Component.select_version('main').get(name='c1')
+                         .location_overrides, [])
+
     def import_file(self, version, data, filename):
         return self.client.post(
             self.url('component.import_', version),

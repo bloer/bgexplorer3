@@ -166,6 +166,8 @@ def update_hiteff(sender, document, **kwargs):
         source__name=hiteff.source,
         location=hiteff.location,
         )
+    if hiteff.material:
+        matches = matches(material=hiteff.material)
     for st in matches(hiteffs__ne=hiteff):
         st.hiteffs.append(hiteff)
         # do save instead of push to force recalculation of livetimes

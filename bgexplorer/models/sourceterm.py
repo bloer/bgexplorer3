@@ -8,6 +8,7 @@ from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
 from .verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedQuerySet, VersionedListField,
                      VersionedEmbeddedDocumentListField)
+from .verdoc import ref_id as _ref_id
 from .component import Component, Placement, Assembly
 from .emissionspec import EmissionSpec, EmissionSource, Multiplier
 from .fields import QuantityField, UncertainQuantityField, HistogramField
@@ -34,6 +35,8 @@ class SourceTerm(VersionedDocument):
     # These are used to find hiteffs
     location = StringField()
     location_auto = BooleanField(default=True)
+    # describes which component, placement, or override set location
+    location_origin = StringField()
     # used to calculate results
     weight = FloatField(default=1)
     rate_multiplier = QuantityField(default=1)
@@ -73,15 +76,46 @@ class SourceTerm(VersionedDocument):
 
     def set_location(self):
         """ Update the `location` attribute if it is auto """
-        # location is set by the component or placement closest to the leaf
         if self.location_auto:
-            for placement in reversed(self.assemblyPath):
-                self.location = (placement.component.location or
-                                 placement.location)
-                if self.location:
-                    break
-            self.location = self.location or self.assemblyRoot.location
+            self.location, self.location_origin = self.resolve_location()
         return self.location
+
+    def resolve_location(self) -> Tuple[str, str]:
+        """ Find the location to match HitEfficiencies against, and a
+        description of where it came from.
+
+        The component or placement closest to the leaf wins. At each level,
+        a component's location_overrides for our spec/source come before its
+        location, and its parent's overrides for that placement before the
+        placement's location. Falls back to the component name.
+        """
+        name = self.source.name
+        path = self.assemblyPath
+        parents = [self.assemblyRoot] + [p.component for p in path[:-1]]
+        for placement, parent in zip(reversed(path), reversed(parents)):
+            component = placement.component
+            if found := component.find_location_override(self.spec, name):
+                return found.location, f"override on {component.name}"
+            if component.location:
+                return component.location, f"component {component.name}"
+            if found := parent.find_location_override(self.spec, name,
+                                                      placement.id):
+                return (found.location,
+                        f"override on {parent.name} for {placement.name}")
+            if placement.location:
+                return (placement.location,
+                        f"placement {parent.name}/{placement.name}")
+        root = self.assemblyRoot
+        if found := root.find_location_override(self.spec, name):
+            return found.location, f"override on {root.name}"
+        if root.location:
+            return root.location, f"component {root.name}"
+        return self.component.name, "component name"
+
+    @property
+    def location_overridden(self) -> bool:
+        return (not self.location_auto or
+                (self.location_origin or '').startswith('override'))
 
 
     def clean(self):
@@ -93,8 +127,6 @@ class SourceTerm(VersionedDocument):
         self.weight = reduce(operator.mul,
                              (p.weight for p in self.assemblyPath), 1)
         self.rate_multiplier = self.source.multiplier.getvalue(self.component)
-        # default to componentName for location queries if location isn't set
-        # TODO: should use root rather than component?
         self.componentName = self.component.name
         self.assemblyPathStr = '/'.join([self.assemblyRoot.name] +
                                         [p.name for p in self.assemblyPath])
@@ -111,7 +143,7 @@ class SourceTerm(VersionedDocument):
     def hiteffs_query(self) -> VersionedQuerySet:
         hits = HitEfficiency.select_version(self.active_version)(
             source=self.source.name,
-            location=self.location or self.componentName,
+            location=self.location,
             material__in=(None, self.material),
             )
         return hits
@@ -157,6 +189,7 @@ class SourceTerm(VersionedDocument):
                            set__assemblyPath=self.assemblyPath,
                            set__source=self.source,
                            set__location=self.location,
+                           set__location_origin=self.location_origin,
                            set__weight=self.weight,
                            set__rate_multiplier=self.rate_multiplier,
                            set__componentName=self.component.name,
@@ -476,16 +509,6 @@ def clear_results_cache():
     """ Empty every ResultsCache """
     for cache in ResultsCache.instances:
         cache.clear()
-
-
-def _ref_id(ref):
-    """ The stored id of a reference, which may not be dereferenced yet """
-    if isinstance(ref, VersionedDocument):
-        return ref.original_id
-    if isinstance(ref, Document):
-        return ref.id
-    # DBRef or plain id
-    return getattr(ref, 'id', ref)
 
 
 def load_hiteffs(sourceterms: Iterable[SourceTerm], spectra: bool = True

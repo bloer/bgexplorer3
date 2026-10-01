@@ -5,13 +5,16 @@ from mongoengine import (EmbeddedDocument, StringField, DateField,
                          URLField, ObjectIdField,
                          PULL, NULLIFY, IntField)
 from bson import ObjectId
+from typing import Optional
 
 from .verdoc import (VersionedDocument, VersionedReferenceField,
-                     VersionedListField, VersionedEmbeddedDocumentListField)
+                     VersionedListField, VersionedEmbeddedDocumentListField,
+                     ref_id)
 from .fields import QuantityField, AttachmentsField
 from .emissionspec import EmissionSpec, EmissionSource
 from .cosmogenic import ActivatedMaterial
 from .common import units, validate_unique_ids
+from .isotope import compare_source_names
 
 
 class PurchaseInfo(EmbeddedDocument):
@@ -32,6 +35,41 @@ class HistoryEntry(DynamicEmbeddedDocument):
     duration = QuantityField(units='h')
     worker = StringField()
     comment = StringField()
+
+
+class LocationOverride(EmbeddedDocument):
+    """ Use `location` to find HitEfficiencies for the sources of a component
+    from `spec`, and/or named `source`, instead of the component's location.
+    On an Assembly, `placement` limits it to that child Placement, ahead of
+    the placement's location. Blank `spec` or `source` match any.
+    """
+    id = ObjectIdField(required=True, default=ObjectId)
+    placement = ObjectIdField()
+    spec = VersionedReferenceField(EmissionSpec, endpoint='emissionspec')
+    source = StringField(help_text="Source name, e.g. Pb210; blank for any")
+    location = StringField(
+        required=True,
+        label="Hit Efficiency Location",
+        help_text="Key to match against locations in HitEfficieny database",
+        autocomplete="hitefflocations",
+    )
+
+    def matches(self, spec, source_name: str, placement_id=None) -> bool:
+        """ Does this apply to sources named `source_name` from `spec` (None
+        for a component's own sources), for the component itself or, if
+        `placement_id`, for that child placement?
+        """
+        myspec = ref_id(self._data.get('spec'))
+        return (self.placement == placement_id and
+                (myspec is None or myspec == ref_id(spec)) and
+                (not self.source or
+                 compare_source_names(self.source, source_name)))
+
+    @property
+    def specificity(self) -> int:
+        """ Higher wins when more than one override matches """
+        return (2 * (self._data.get('spec') is not None) +
+                bool(self.source))
 
 
 def _noslash(value):
@@ -74,6 +112,7 @@ class Component(VersionedDocument):
         ActivatedMaterial, reverse_delete_rule=NULLIFY,
         endpoint='activatedmaterial',
         help_text="Cosmogenic activation rates for this component")
+    location_overrides = VersionedEmbeddedDocumentListField(LocationOverride)
 
     meta = {'allow_inheritance': True}
 
@@ -92,6 +131,33 @@ class Component(VersionedDocument):
     def clean(self):
         super().clean()
         validate_unique_ids(self.sources, 'sources')
+        validate_unique_ids(self.location_overrides, 'location_overrides')
+        # overrides for specs or placements that were removed go with them
+        specs = {None: self._data.get('specs') or []}
+        for placement in getattr(self, 'children', None) or []:
+            specs[placement.id] = placement.component._data.get('specs') or []
+        self.location_overrides = [
+            o for o in self.location_overrides
+            if o.placement in specs and
+            (o._data.get('spec') is None or ref_id(o._data.get('spec')) in
+             {ref_id(spec) for spec in specs[o.placement]})]
+        for i, override in enumerate(self.location_overrides):
+            if (override.placement is None and override.source is None and
+                    override._data.get('spec') is None):
+                raise ValidationError(
+                    "Choose a spec or source to override, or set the "
+                    "component's location instead",
+                    field_name=f'location_overrides.{i}.location')
+
+    def find_location_override(self, spec, source_name: str,
+                               placement_id=None
+                               ) -> Optional[LocationOverride]:
+        """ The most specific of our location_overrides matching sources
+        named `source_name` from `spec`, for us or for child `placement_id`
+        """
+        matches = [o for o in self.location_overrides
+                   if o.matches(spec, source_name, placement_id)]
+        return max(matches, key=lambda o: o.specificity, default=None)
 
     def find_parents(self):
         """ Locate all Assemblies with a Placement pointing to this component

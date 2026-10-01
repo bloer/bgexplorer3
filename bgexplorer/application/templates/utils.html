@@ -21,8 +21,11 @@
         <td>{% if sourceterm.spec %}<a href="{{ url_for('emissionspec.view', object=sourceterm.spec) }}">{{ sourceterm.spec.name }}</a>{%- endif -%}</td>
         <td>{{ sourceterm.source.name }}: {{ sourceterm.source.rate | printquantity }}</td>
         <td>{{ sourceterm.emissionrate.to_reduced_units() | printquantity }}</td>
-        <td {%- if not sourceterm.location_auto %} class="manual" {%- endif -%}>{{ sourceterm.location }}</td>
-        <td {%- if not sourceterm.hiteffs_auto %} class="manual" {%- endif -%}> {{ print_hiteffs(sourceterm) }}</td>
+        <td {%- if sourceterm.location_overridden %} class="manual" {%- endif %} title="{{ sourceterm.location_origin or '' }}">{{ sourceterm.location }}</td>
+        <td {%- if not sourceterm.hiteffs_auto %} class="manual" {%- endif -%}>
+            {%- if sourceterm.hiteffs %} {{ print_hiteffs(sourceterm) }}
+            {%- else %}<span class="text-secondary">no match for {{ sourceterm.source.name }} at {{ sourceterm.location }}</span>{% endif -%}
+        </td>
     </tr>
 {%- endmacro -%}
 

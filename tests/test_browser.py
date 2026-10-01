@@ -528,6 +528,63 @@ class TestReferencePicker(BrowserTestCase):
         self.assertIsNone(self.material())
 
 
+class TestLocationOverrideEditor(BrowserTestCase):
+    def setUp(self):
+        super().setUp()
+        vc.create_version('main')
+        self.becu = EmissionSpec(name='BeCu', sources=dict(
+            U238='1 mBq/kg')).save()
+        self.radon = EmissionSpec(name='radon', sources=dict(
+            Pb210='1 mBq/kg')).save()
+        inner = Component(name='inner', mass='1 kg', location='Inside',
+                          specs=[self.becu]).save()
+        package = Component(name='package', mass='1 kg', location='Package',
+                            specs=[self.becu, self.radon]).save()
+        self.a1 = Assembly(name='a1', components=[inner, package]).save()
+
+    def test_placement_filters_specs(self):
+        page = self.open(self.url('component.edit', object=self.a1))
+        page.click('#locationoverrides button:text-is("Add")')
+        row = page.locator('#location_overrides tbody tr').last
+        spec = row.locator('select.overridespec')
+
+        def shown():
+            return spec.locator('option').evaluate_all(
+                "options => options.filter(o => !o.hidden)"
+                ".map(o => o.textContent.trim())")
+        self.assertEqual(shown(), ['any', 'BeCu (inner)', 'BeCu (package)',
+                                   'radon (package)'])
+        row.locator('select.overrideplacement').select_option(
+            label='package')
+        self.assertEqual(shown(), ['any', 'BeCu (package)',
+                                   'radon (package)'])
+        spec.select_option(label='radon (package)')
+        # a spec of another placement is cleared when it's hidden
+        row.locator('select.overrideplacement').select_option(label='inner')
+        self.assertEqual(shown(), ['any', 'BeCu (inner)'])
+        self.assertEqual(spec.input_value(), '')
+
+        row.locator('select.overrideplacement').select_option(
+            label='package')
+        spec.select_option(label='radon (package)')
+        row.locator('input[name="location_overrides.location"]').fill(
+            'Package Outer Surface')
+        page.click('#mainform button[type=submit] >> nth=0')
+        page.wait_for_url(self.base + self.url('component.view',
+                                               object=self.a1))
+        a1 = Assembly.objects.get(name='a1')
+        override = a1.location_overrides[0]
+        self.assertEqual(override.placement, a1.children[1].id)
+        self.assertEqual(override.spec.name, 'radon')
+
+        # reopening keeps the choices, filtered
+        page.goto(self.base + self.url('component.edit', object=self.a1))
+        self.assertEqual(spec.locator('option:checked').inner_text().strip(),
+                         'radon (package)')
+        self.assertEqual(shown(), ['any', 'BeCu (package)',
+                                   'radon (package)'])
+
+
 class TestRadiopuritySpinner(BrowserTestCase):
     def setUp(self):
         super().setUp()
