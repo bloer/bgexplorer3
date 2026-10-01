@@ -87,7 +87,8 @@
     {{ overriderow() }}
 </template>
 <div class="d-flex justify-content-between">
-    <div class="form-text">Find hit efficiencies at a different location for some sources.
+    <div class="form-text">Find hit efficiencies at a different location for the sources of a spec and/or with a source name.
+        To move all sources, set the {{ 'placement' if isassembly else 'component' }} location instead.
         {%- if isassembly %} Placement overrides apply ahead of the placement's location, but a child's own location wins.{% endif %}
         Save to choose newly added specs.</div>
     <button class="btn btn-primary" type="button" data-tableid="location_overrides" data-templateid="location_overrides_template" onClick="addDynamicTableRow(this); filterOverrideSpecs();">Add</button>

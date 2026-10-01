@@ -536,6 +536,8 @@ class TestLocationOverrideEditor(BrowserTestCase):
             U238='1 mBq/kg')).save()
         self.radon = EmissionSpec(name='radon', sources=dict(
             Pb210='1 mBq/kg')).save()
+        HitEfficiency(source='Pb210', location='Package Outer Surface'
+                      ).save()
         inner = Component(name='inner', mass='1 kg', location='Inside',
                           specs=[self.becu]).save()
         package = Component(name='package', mass='1 kg', location='Package',
@@ -554,6 +556,10 @@ class TestLocationOverrideEditor(BrowserTestCase):
                 ".map(o => o.textContent.trim())")
         self.assertEqual(shown(), ['any', 'BeCu (inner)', 'BeCu (package)',
                                    'radon (package)'])
+        # locations autocomplete in added rows too
+        page.wait_for_function(
+            "document.querySelector('#location_overrides tbody tr:last-child"
+            " datalist').options.length > 0")
         row.locator('select.overrideplacement').select_option(
             label='package')
         self.assertEqual(shown(), ['any', 'BeCu (package)',

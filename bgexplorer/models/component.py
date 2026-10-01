@@ -141,12 +141,12 @@ class Component(VersionedDocument):
             if o.placement in specs and
             (o._data.get('spec') is None or ref_id(o._data.get('spec')) in
              {ref_id(spec) for spec in specs[o.placement]})]
+        # for everything, the component or placement location does that
         for i, override in enumerate(self.location_overrides):
-            if (override.placement is None and override.source is None and
-                    override._data.get('spec') is None):
+            if not override.source and override._data.get('spec') is None:
                 raise ValidationError(
                     "Choose a spec or source to override, or set the "
-                    "component's location instead",
+                    "component or placement location instead",
                     field_name=f'location_overrides.{i}.location')
 
     def find_location_override(self, spec, source_name: str,

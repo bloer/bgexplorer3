@@ -174,6 +174,16 @@ class TestComponentPages(AppTestCase):
         })
         self.assertEqual(response.status_code, 400)
         self.assertIn('Choose a spec or source', self.html(response))
+        # including for one placement, which is the placement's location
+        response = self.client.post(a1url, data={
+            '_listfields': 'location_overrides',
+            'location_overrides.id': [''],
+            'location_overrides.placement': [str(a1.children[0].id)],
+            'location_overrides.spec': [''],
+            'location_overrides.source': [''],
+            'location_overrides.location': ['nowhere'],
+        })
+        self.assertEqual(response.status_code, 400)
         # main is untouched
         self.assertEqual(Component.select_version('main').get(name='c1')
                          .location_overrides, [])
