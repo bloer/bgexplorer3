@@ -1,8 +1,13 @@
 """ Convert results to plain JSON for the plotly charts in bgplots.js """
+from math import erf, sqrt
 from typing import Optional
 import numpy as np
 from ..models.common import units as unitreg
 from ..models.histogram import Histogram
+
+
+# the confidence level of a one-sided 1 sigma upper limit, about 84.13%
+ONE_SIGMA_CL = (1 + erf(1 / sqrt(2))) / 2
 
 
 def unit_str(unit) -> str:
@@ -29,8 +34,8 @@ def _tolist(a) -> list:
 def histogram_json(hist: Histogram, display_unit=None) -> dict:
     """ Bin edges, values and asymmetric errors of `hist` as lists, converted
     to `display_unit` if given. Bins that are upper limits (as for
-    AsymmetricUncertainty.isupperlimit) have `is_limit` set and their 90%
-    `upper_limit` given
+    AsymmetricUncertainty.isupperlimit) have `is_limit` set and their one-sided
+    1 sigma (84.13%) `upper_limit` given
     """
     values = hist.hist
     if display_unit is not None and hasattr(values, 'to'):
@@ -39,7 +44,8 @@ def histogram_json(hist: Histogram, display_unit=None) -> dict:
     m = getattr(values, 'm', values)
     value, lo, hi = _parts(m)
     is_limit = (value == 0) & (lo == 0) & (hi > 0)
-    upper = np.broadcast_to(m.ppf(0.9), value.shape) if hasattr(m, 'ppf') \
+    upper = np.broadcast_to(m.ppf(ONE_SIGMA_CL), value.shape) \
+        if hasattr(m, 'ppf') \
         else value
     return dict(bins=_tolist(getattr(bins, 'm', bins)),
                 value=_tolist(value), err_minus=_tolist(lo),

@@ -88,56 +88,56 @@ const bgplots = (function(){
         return [x, y];
     }
 
-    /* Traces for one histogram: a step line with a shaded error band for
-     * measured bins, and a dashed step at the 90% upper limit with a
-     * down-pointing marker for upper limit bins
+    /* log10 y range covering the values, upper errors and upper limits of
+     * histograms `hists`, padded, or null if none are positive. Lower errors
+     * may run off the bottom
      */
-    function spectrumTraces(name, h, color, logy, band = true){
+    function spectrumRange(hists){
+        const points = [];
+        hists.forEach(h => h.value.forEach((v, i) => {
+            const limit = h.is_limit && h.is_limit[i];
+            points.push(...(limit ? [h.upper_limit[i]] : [v, v + h.err_plus[i]]));
+        }));
+        const positive = points.filter(v => v > 0);
+        if(!positive.length)
+            return null;
+        return [Math.log10(Math.min(...positive)) - 0.2,
+                Math.log10(Math.max(...positive)) + 0.2];
+    }
+
+    /* Traces for one histogram: a step line for measured bins and, if
+     * `band`, a shaded band of their errors, which also covers upper limit
+     * bins from zero to their one-sided 1 sigma limit. Lower edges at or
+     * below zero are drawn at `floor`, e.g. below a log axis. Without a
+     * band, upper limit bins are a dashed step at the limit
+     */
+    function spectrumTraces(name, h, color, floor = 0, band = true){
         const limit = i => h.is_limit && h.is_limit[i];
         const measured = i => !limit(i);
-        const smallest = Math.min(...h.value.filter(v => v > 0));
-        const floor = (logy && isFinite(smallest)) ? smallest / 100 : null;
         const [x, y] = steps(h, measured, i => h.value[i]);
-        const [, low] = steps(h, measured, i => {
-            const lo = h.value[i] - h.err_minus[i];
-            return (logy && !(lo > 0)) ? floor : lo;
-        });
-        const [, high] = steps(h, measured, i => h.value[i] + h.err_plus[i]);
-        // the band: each run of bins as a closed polygon, high then low
-        const bandx = [], bandy = [];
-        let start = 0;
-        for(let j = 0; j <= x.length; ++j){
-            if(j < x.length && x[j] !== null)
-                continue;
-            if(j > start){
-                bandx.push(...x.slice(start, j), ...x.slice(start, j).reverse(), null);
-                bandy.push(...high.slice(start, j), ...low.slice(start, j).reverse(), null);
-            }
-            start = j + 1;
-        }
         const traces = [
             {x: x, y: y, name: name, legendgroup: name, mode: 'lines', connectgaps: false,
              line: {color: color, width: 1.5}},
         ];
-        if(band)
+        if(band){
+            const all = () => true;
+            const [bx, low] = steps(h, all, i => {
+                const lo = limit(i) ? 0 : h.value[i] - h.err_minus[i];
+                return lo > 0 ? lo : floor;
+            });
+            const [, high] = steps(h, all, i => limit(i) ? h.upper_limit[i]
+                                                         : h.value[i] + h.err_plus[i]);
+            // one closed polygon, high then low
             traces.unshift(
-                {x: bandx, y: bandy, mode: 'lines', fill: 'toself', fillcolor: color + '40',
+                {x: bx.concat(bx.slice().reverse()), y: high.concat(low.slice().reverse()),
+                 mode: 'lines', fill: 'toself', fillcolor: color + '40',
                  line: {width: 0}, legendgroup: name, showlegend: false, hoverinfo: 'skip'});
-        const limits = h.value.map((v, i) => i).filter(limit);
-        if(limits.length){
+        } else if(h.value.some((v, i) => limit(i))){
             const [ulx, uly] = steps(h, limit, i => h.upper_limit[i]);
             traces.push(
                 {x: ulx, y: uly, mode: 'lines', connectgaps: false, legendgroup: name,
                  showlegend: false, hoverinfo: 'skip',
                  line: {color: color, width: 1, dash: 'dash'}});
-            // without a band, the dashed line is enough
-            if(band)
-                traces.push({x: limits.map(i => (h.bins[i] + h.bins[i+1]) / 2),
-                             y: limits.map(i => h.upper_limit[i]),
-                             mode: 'markers', legendgroup: name, showlegend: false,
-                             name: name + ' upper limits',
-                             hovertemplate: '%{x}: < %{y:.3g} (90% UL)<extra>' + name + '</extra>',
-                             marker: {symbol: 'triangle-down', size: 9, color: color}});
         }
         return traces;
     }
@@ -211,20 +211,24 @@ const bgplots = (function(){
                                         : 'No spectra');
             if(!plot._fullLayout)
                 plot.replaceChildren();
+            const hists = [data.total].concat(data.curves.map(c => c.value),
+                                              data.other ? [data.other] : []);
+            const range = logy.checked ? spectrumRange(hists) : null;
+            const floor = range ? 10 ** (range[0] - 1) : 0;
             const traces = spectrumTraces(filtered ? 'Filtered total' : 'Total', data.total,
-                                          TOTAL_COLOR, logy.checked);
+                                          TOTAL_COLOR, floor);
             data.curves.forEach(c => traces.push(...spectrumTraces(
-                String(c.label), c.value, COLORS[c.rank % COLORS.length], logy.checked, false)));
+                String(c.label), c.value, COLORS[c.rank % COLORS.length], floor, false)));
             if(data.other)
-                traces.push(...spectrumTraces('other', data.other, OTHER_COLOR,
-                                              logy.checked, false));
+                traces.push(...spectrumTraces('other', data.other, OTHER_COLOR, floor, false));
             const layout = {
                 height: SPECTRUM_HEIGHT,
                 margin: {t: 20, r: 10},
                 xaxis: {title: {text: 'Energy' + unitLabel(data.total.binsunit)},
                         type: logx.checked ? 'log' : 'linear'},
                 yaxis: {title: {text: unitLabel(data.total.units).trim()},
-                        type: logy.checked ? 'log' : 'linear', exponentformat: 'power'},
+                        type: logy.checked ? 'log' : 'linear', exponentformat: 'power',
+                        range: range || undefined},
                 showlegend: data.curves.length > 0,
             };
             Plotly.react(plot, traces, layout, CONFIG);
@@ -295,9 +299,11 @@ const bgplots = (function(){
 
         function draw(){
             const selected = Array.from(select.selectedOptions).map(o => o.value);
+            const range = logy.checked ? spectrumRange(selected.map(name => data[name])) : null;
+            const floor = range ? 10 ** (range[0] - 1) : 0;
             const traces = [];
             selected.forEach((name, i) => traces.push(
-                ...spectrumTraces(name, data[name], COLORS[i % COLORS.length], logy.checked)));
+                ...spectrumTraces(name, data[name], COLORS[i % COLORS.length], floor)));
             const first = data[selected[0]] || {};
             const layout = {
                 height: SPECTRUM_HEIGHT,
@@ -305,7 +311,8 @@ const bgplots = (function(){
                 xaxis: {title: {text: 'Energy' + unitLabel(first.binsunit)},
                         type: logx.checked ? 'log' : 'linear'},
                 yaxis: {title: {text: unitLabel(first.units).trim()},
-                        type: logy.checked ? 'log' : 'linear', exponentformat: 'power'},
+                        type: logy.checked ? 'log' : 'linear', exponentformat: 'power',
+                        range: range || undefined},
                 showlegend: selected.length > 1,
             };
             Plotly.react(plot, traces, layout, CONFIG);

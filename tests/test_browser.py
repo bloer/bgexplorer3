@@ -12,6 +12,7 @@ import unittest
 from unittest import mock
 import numpy as np
 from werkzeug.serving import make_server
+from bgexplorer.application.plotting import ONE_SIGMA_CL
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.common import units
 from bgexplorer.models.component import Component, Assembly, Placement
@@ -427,16 +428,21 @@ class TestPlotsInBrowser(BrowserTestCase):
         self.wait_plot(page, '#spectrumplot')
         traces = page.evaluate("""() => document.querySelector(
             '#spectrumplot .js-plotly-plot').data.map(t => ({
-                name: t.name, x: t.x, y: t.y,
-                symbol: t.marker && t.marker.symbol}))""")
-        # s1 = [1, 2, 0, 4, 5, 0]: bins 2 and 5 are limits
-        (markers,) = [t for t in traces if t['symbol'] == 'triangle-down']
-        self.assertEqual(markers['x'], [2.5, 5.5])
-        self.assertTrue(all(y > 0 for y in markers['y']))
+                name: t.name, x: t.x, y: t.y, fill: t.fill, mode: t.mode}))""")
+        # s1 = [1, 2, 0, 4, 5, 0]: bins 2 and 5 are limits, only shaded
+        self.assertFalse([t for t in traces if 'markers' in t['mode']])
         (line,) = [t for t in traces if t['name'] == 's1']
         # each measured bin is a full step, broken at the limits
         self.assertEqual(line['x'], [0, 1, 1, 2, None, 3, 4, 4, 5, None])
         self.assertEqual(line['y'][:4], [1, 1, 2, 2])
+        # the band runs over every bin, up to the limits' 1 sigma limit
+        (band,) = [t for t in traces if t['fill'] == 'toself']
+        n = len(band['x']) // 2
+        self.assertEqual(band['x'][:n], [0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6])
+        hist = self.hiteff.spectra['s1'].hist.m
+        self.assertAlmostEqual(band['y'][4], hist[2].ppf(ONE_SIGMA_CL))
+        self.assertGreater(band['y'][4], 0)
+        self.assertLess(band['y'][4], hist[2].ppf(0.9))
 
 
 class TestEmissionSpecEditor(BrowserTestCase):
