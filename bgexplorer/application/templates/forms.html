@@ -1,10 +1,13 @@
 {% macro formscripts() %}
 <!-- scripts for interactive forms -->
 <script>
+    // one request per url, shared by every datalist that uses it
+    const datalistOptions = {};
     function loadDatalist(dlist){
-        fetch(dlist.dataset.url)
-        .then(response => response.json())
-        .then(options => {
+        const url = dlist.dataset.url;
+        datalistOptions[url] = datalistOptions[url] ||
+            fetch(url).then(response => response.json());
+        datalistOptions[url].then(options => {
             options.forEach(value => {
                 var option = document.createElement('option');
                 option.value = value;
@@ -18,6 +21,8 @@
         const tbody = document.querySelector("#"+caller.dataset.tableid+" tbody");
         const template = document.getElementById(caller.dataset.templateid);
         const clone = template.content.cloneNode(true);
+        // datalists in templates weren't there to load with the page
+        clone.querySelectorAll('datalist[data-url]').forEach(loadDatalist);
         tbody.appendChild(clone);
         // if clone contains a referenceSelector button, click it
         setTimeout(function(){
