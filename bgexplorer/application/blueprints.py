@@ -4,6 +4,8 @@ from bson import ObjectId
 from io import BytesIO
 from ..models.sourceterm import find_sourceterms, CalculatedResults
 from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
+                             spectrum_breakdown, spectrum_names,
+                             cached_filtered,
                              BudgetFilter)
 from ..models.component import Component, Assembly
 from ..models.emissionspec import EmissionSpec
@@ -359,6 +361,51 @@ class CollectionViews(flask.Blueprint):
                 spectra[(cfg and cfg.display_name) or name] = \
                     histogram_json(hist, cfg and cfg.display_unit)
             return flask.jsonify(spectra)
+
+        @self.get('/<objid>/spectrum.json')
+        def spectrum_json():
+            """ One spectrum's total for the `filters` in BudgetFilter JSON
+            format, and optionally its largest parts by `groupby`
+            """
+            args = flask.request.args
+            names = spectrum_names(flask.g.active_version)
+            name = args.get('spectrum') or (names[0][0] if names else '')
+            groupby = args.get('groupby') or None
+            if names and name not in dict(names):
+                return flask.jsonify(error=dict(
+                    message=f"Unknown spectrum '{name}'")), 400
+            config = get_settings(flask.g.active_version)\
+                .hiteffdbconfig.display_spectra
+            unit = name in config and config[name].display_unit or None
+            relativeto = flask.g.get('relativeto')
+
+            def hist_json(hist):
+                return hist and histogram_json(hist, unit)
+
+            def calculate():
+                result = spectrum_breakdown(flask.g.object, name, filters,
+                                            relativeto, groupby=groupby)
+                return dict(
+                    spectrum=name, groupby=groupby,
+                    count=result['count'], ntotal=result['ntotal'],
+                    total=hist_json(result['total']),
+                    curves=[dict(key=list(c['key'])
+                                 if isinstance(c['key'], tuple) else c['key'],
+                                 label=c['label'], rank=c['rank'],
+                                 value=hist_json(c['value']))
+                            for c in result['curves']],
+                    other=hist_json(result['other']))
+            try:
+                filters = BudgetFilter.from_json(args.get('filters'))
+                # evaluating the sums is most of the work, so keep the JSON
+                data = cached_filtered(flask.g.object, filters, relativeto,
+                                       ('spectrum.json', name, groupby,
+                                        unit and str(unit)), calculate)
+            except (ValueError, PintError) as e:
+                return flask.jsonify(error=dict(message=str(e))), 400
+            return flask.jsonify(
+                spectra=[dict(key=key, name=label) for key, label in names],
+                **data)
 
         @self.get('/<objid>/dashboard.json')
         def dashboard_json():

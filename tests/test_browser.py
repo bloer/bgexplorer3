@@ -150,12 +150,57 @@ class TestPlotsInBrowser(BrowserTestCase):
                 self.check_contains(page, '#spectrumplot', SPECTRUM_SVG)
                 self.check_below(page, SPECTRUM_SVG, '#otherversions')
 
+    def wait_spectrum(self, page):
+        page.wait_for_function("""() => {
+            const div = document.getElementById('spectrumplot');
+            return div.plot && !div.classList.contains('loading')
+                && (div.plot._fullLayout || div.plot.textContent);}""",
+            timeout=10000)
+        page.wait_for_timeout(200)
+
+    def spectrum_names(self, page):
+        """ The names of the curves in the spectrum's legend """
+        return page.evaluate("""() => document.getElementById('spectrumplot')
+            .plot.data.filter(t => t.showlegend !== false).map(t => t.name)""")
+
     def test_component_spectra_layout(self):
-        page = self.open(self.url('component.results', object=self.c1))
+        page = self.open(self.url('component.results', object=self.a1))
         self.wait_plot(page, '#spectrumplot')
-        for step in self.switch_spectra(page):
-            with self.subTest(step=step):
+        self.wait_spectrum(page)
+        self.assertEqual(self.spectrum_names(page), ['Total'])
+        steps = [('#spectrumplot_spectrum', 's2'),
+                 ('#spectrumplot_groupby', 'isotope'),
+                 ('#spectrumplot_logx', None), ('#spectrumplot_logy', None)]
+        for selector, value in steps:
+            with self.subTest(step=selector):
+                if value is None:
+                    page.locator(selector).click()
+                else:
+                    page.select_option(selector, value)
+                self.wait_spectrum(page)
                 self.check_contains(page, '#spectrumplot', SPECTRUM_SVG)
+        # only c1's Th232 has spectra
+        self.assertEqual(self.spectrum_names(page), ['Total', 'Th232'])
+
+    def test_spectrum_filters(self):
+        a2 = Assembly(name='a2', children=[Placement(component=self.a1)]).save()
+        page = self.open_dashboard(self.url('component.results', object=a2))
+        page.select_option('#spectrumplot_groupby', 'material')
+        self.wait_spectrum(page)
+        self.assertEqual(self.spectrum_names(page), ['Total', 'copper'])
+        # the spectrum follows the dashboard's filters
+        self.click_row(page, 'material', 'copper')
+        self.wait_spectrum(page)
+        self.assertEqual(self.spectrum_names(page),
+                         ['Filtered total', 'copper'])
+        # c2's steel has no spectra
+        self.click_row(page, 'material', 'steel')
+        self.wait_spectrum(page)
+        self.assertIn('Nothing passing the filters',
+                      page.locator('#spectrumplot').inner_text())
+        self.click_row(page, 'material', 'steel')
+        self.wait_spectrum(page)
+        self.assertEqual(self.spectrum_names(page), ['Total', 'copper'])
 
     def ranges(self, page):
         """ The x range of each budget panel, None for ones without a plot """

@@ -48,11 +48,15 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 {% block scripts %}
 {{ super() }}
 {{ utils.plotscripts() }}
+<script>
 {%- if scalars %}
-<script>bgplots.dashboard('budgetplot', {{ url_for('.dashboard_json', object=g.object, relativeto=g.get('relativeto')) | tojson }},
-                          {{ ['component', 'material', 'isotope', 'category'] | tojson }}, {{ scalars | tojson }},
-                          {table: {id: 'resultstable', url: {{ url_for('.results_table', object=g.object, relativeto=g.get('relativeto')) | tojson }}}});</script>
+const dashboard = bgplots.dashboard('budgetplot', {{ url_for('.dashboard_json', object=g.object, relativeto=g.get('relativeto')) | tojson }},
+    {{ ['component', 'material', 'isotope', 'category'] | tojson }}, {{ scalars | tojson }},
+    {table: {id: 'resultstable', url: {{ url_for('.results_table', object=g.object, relativeto=g.get('relativeto')) | tojson }}}});
+{%- else %}
+const dashboard = null;
 {%- endif %}
-<script>bgplots.spectrum('spectrumplot', {{ url_for('.spectra_json', object=g.object, relativeto=g.get('relativeto')) | tojson }});</script>
+bgplots.spectrumBreakdown('spectrumplot', {{ url_for('.spectrum_json', object=g.object, relativeto=g.get('relativeto')) | tojson }}, dashboard);
+</script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 {% endblock %}

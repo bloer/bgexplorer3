@@ -3,11 +3,13 @@ import unittest
 import numpy as np
 from bgexplorer.application.plotting import histogram_json, scalar_json
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
-from bgexplorer.models.budget import available_scalars
+from bgexplorer.models.budget import (available_scalars, BudgetFilter,
+                                      spectrum_breakdown)
 from bgexplorer.models.common import units
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.histogram import Histogram
+from bgexplorer.models.sourceterm import CalculatedResults
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models import versioncontrol as vc
 from tests.test_app_components import AppTestCase
@@ -86,6 +88,74 @@ class TestPlots(AppTestCase):
         self.a2 = Assembly(name='a2', children=[
             Placement(component=self.a1)]).save()
 
+    def assertSameHist(self, value, expected):
+        np.testing.assert_allclose(value.hist.m.nominal_value,
+                                   expected.hist.m.nominal_value)
+        np.testing.assert_allclose(value.hist.m.ppf(0.9),
+                                   expected.hist.m.ppf(0.9))
+
+    def test_spectrum_breakdown(self):
+        p_a1 = str(self.a2.children[0].id)
+        result = spectrum_breakdown(self.a2, 's1')
+        # c1's Th232 and K40 have it, c2 doesn't
+        self.assertEqual((result['count'], result['ntotal']), (2, 2))
+        self.assertSameHist(result['total'], CalculatedResults.for_object(
+            self.a2, save=False, cache=False).spectra['s1'])
+        self.assertEqual(result['curves'], [])
+        self.assertIsNone(result['other'])
+        self.assertIsNone(spectrum_breakdown(self.a2, 'nope')['total'])
+
+        # a single group left over isn't "other"
+        result = spectrum_breakdown(self.a2, 's1', groupby='isotope')
+        curves = {c['key']: c for c in result['curves']}
+        self.assertEqual(set(curves), {'Th232', 'K40'})
+        self.assertIsNone(result['other'])
+        # ranked by their (approximate) means, so the K40 limit is larger
+        self.assertEqual([c['key'] for c in result['curves']],
+                         ['K40', 'Th232'])
+        self.assertEqual([c['rank'] for c in result['curves']], [0, 1])
+        th = spectrum_breakdown(self.a2, 's1', BudgetFilter(
+            dict(isotope=[('Th232', False)])), groupby='isotope')
+        self.assertSameHist(th['total'], curves['Th232']['value'])
+        # which keeps its unfiltered rank
+        self.assertEqual([(c['key'], c['rank']) for c in th['curves']],
+                         [('Th232', 1)])
+        # the rest are summed
+        top = spectrum_breakdown(self.a2, 's1', groupby='isotope', top=0)
+        self.assertEqual(top['curves'], [])
+        self.assertSameHist(top['other'], result['total'])
+
+        result = spectrum_breakdown(self.a2, 's1', groupby='component')
+        self.assertEqual([(c['key'], c['label']) for c in result['curves']],
+                         [((p_a1,), 'a1')])
+        result = spectrum_breakdown(self.a2, 's1', BudgetFilter(root=[p_a1]),
+                                    groupby='component')
+        self.assertEqual([c['label'] for c in result['curves']], ['c1'])
+        with self.assertRaises(ValueError):
+            spectrum_breakdown(self.a2, 's1', groupby='nope')
+
+    def test_spectrum_json(self):
+        url = self.url('component.spectrum_json', object=self.a2)
+        data = self.client.get(url).get_json()
+        self.assertEqual(data['spectra'], [dict(key='s1', name='s1')])
+        self.assertEqual(data['spectrum'], 's1')
+        self.assertEqual(len(data['total']['bins']), 5)
+        self.assertEqual(data['total']['binsunit'], 'keV')
+        self.assertEqual(data['curves'], [])
+        data = self.client.get(url, query_string=dict(
+            groupby='isotope', filters='{"isotope": [{"key": "K40"}]}'
+        )).get_json()
+        self.assertEqual((data['count'], data['ntotal']), (1, 2))
+        self.assertEqual([(c['label'], c['rank']) for c in data['curves']],
+                         [('K40', 0)])
+        self.assertTrue(all(data['curves'][0]['value']['is_limit']))
+        for query in (dict(spectrum='nope'), dict(groupby='nope'),
+                      dict(filters='nope')):
+            with self.subTest(query=query):
+                response = self.client.get(url, query_string=query)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('message', response.get_json()['error'])
+
     def test_available_scalars(self):
         self.assertEqual(available_scalars('main'), ['v1'])
 
@@ -120,7 +190,7 @@ class TestPlots(AppTestCase):
         self.assertEqual(order, sorted(order))
         self.assertIn('<tr class="component depth1">', page)
         self.assertIn('bgplots.dashboard(', page)
-        self.assertIn('bgplots.spectrum(', page)
+        self.assertIn('bgplots.spectrumBreakdown(', page)
         self.assertIn('plotly-basic.min.js', page)
         # relative to a parent assembly
         response = self.client.get(self.url('component.results',

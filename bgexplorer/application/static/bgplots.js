@@ -8,6 +8,9 @@ const bgplots = (function(){
                     '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
     const MEASURED_COLOR = '#d62728';
     const LIMIT_COLOR = '#1f4fd6';
+    // spectrum totals, and the sum of the parts not shown
+    const TOTAL_COLOR = '#212529';
+    const OTHER_COLOR = '#adb5bd';
     // responsive plots fill their div's height, so layouts must set one or
     // the div collapses after the first redraw and the plot overflows it
     const CONFIG = {responsive: true, displaylogo: false};
@@ -89,7 +92,7 @@ const bgplots = (function(){
      * measured bins, and a dashed step at the 90% upper limit with a
      * down-pointing marker for upper limit bins
      */
-    function spectrumTraces(name, h, color, logy){
+    function spectrumTraces(name, h, color, logy, band = true){
         const limit = i => h.is_limit && h.is_limit[i];
         const measured = i => !limit(i);
         const smallest = Math.min(...h.value.filter(v => v > 0));
@@ -113,24 +116,28 @@ const bgplots = (function(){
             start = j + 1;
         }
         const traces = [
-            {x: bandx, y: bandy, mode: 'lines', fill: 'toself', fillcolor: color + '40',
-             line: {width: 0}, legendgroup: name, showlegend: false, hoverinfo: 'skip'},
             {x: x, y: y, name: name, legendgroup: name, mode: 'lines', connectgaps: false,
              line: {color: color, width: 1.5}},
         ];
+        if(band)
+            traces.unshift(
+                {x: bandx, y: bandy, mode: 'lines', fill: 'toself', fillcolor: color + '40',
+                 line: {width: 0}, legendgroup: name, showlegend: false, hoverinfo: 'skip'});
         const limits = h.value.map((v, i) => i).filter(limit);
         if(limits.length){
             const [ulx, uly] = steps(h, limit, i => h.upper_limit[i]);
             traces.push(
                 {x: ulx, y: uly, mode: 'lines', connectgaps: false, legendgroup: name,
                  showlegend: false, hoverinfo: 'skip',
-                 line: {color: color, width: 1, dash: 'dash'}},
-                {x: limits.map(i => (h.bins[i] + h.bins[i+1]) / 2),
-                 y: limits.map(i => h.upper_limit[i]),
-                 mode: 'markers', legendgroup: name, showlegend: false,
-                 name: name + ' upper limits',
-                 hovertemplate: '%{x}: < %{y:.3g} (90% UL)<extra>' + name + '</extra>',
-                 marker: {symbol: 'triangle-down', size: 9, color: color}});
+                 line: {color: color, width: 1, dash: 'dash'}});
+            // without a band, the dashed line is enough
+            if(band)
+                traces.push({x: limits.map(i => (h.bins[i] + h.bins[i+1]) / 2),
+                             y: limits.map(i => h.upper_limit[i]),
+                             mode: 'markers', legendgroup: name, showlegend: false,
+                             name: name + ' upper limits',
+                             hovertemplate: '%{x}: < %{y:.3g} (90% UL)<extra>' + name + '</extra>',
+                             marker: {symbol: 'triangle-down', size: 9, color: color}});
         }
         return traces;
     }
@@ -146,6 +153,123 @@ const bgplots = (function(){
             div.replaceChildren(el('div', {'class': 'spinner-border', role: 'status'}));
             getJSON(url).then(data => drawSpectra(div, data))
                         .catch(error => showError(div, error));
+        });
+    }
+
+    /* Plot one spectrum served by `url` (spectrum.json) into `div`: its
+     * total, with its uncertainty, and optionally its largest parts by a
+     * groupby, with the rest as "other". Each part keeps its color while
+     * filtering. If `dash` is a dashboard, the spectrum follows its
+     * filters. Data are fetched when the div first becomes visible.
+     */
+    function spectrumBreakdown(div, url, dash){
+        if(typeof div === 'string')
+            div = document.getElementById(div);
+        const id = div.id || 'spectrum';
+        const select = el('select', {'class': 'form-select form-select-sm w-auto',
+                                     id: id + '_spectrum', 'aria-label': 'spectrum to show'});
+        const groupby = el('select', {'class': 'form-select form-select-sm w-auto',
+                                      id: id + '_groupby', 'aria-label': 'break down by'},
+            [['', 'total only'], ['component', 'by component'], ['isotope', 'by isotope'],
+             ['material', 'by material'], ['category', 'by source category']]
+                .map(([value, text]) => el('option', {value: value, text: text})));
+        const [logx, logxdiv] = toggle(id + '_logx', 'log x', false);
+        const [logy, logydiv] = toggle(id + '_logy', 'log y', true);
+        const plot = el('div', {'class': 'bgplot'});
+        const controls = el('div', {'class': 'd-flex gap-2 align-items-center mb-2'}, [
+            el('label', {'for': select.id, text: 'Spectrum'}), select,
+            el('label', {'class': 'ms-2', 'for': groupby.id, text: 'Show'}), groupby,
+            el('div', {'class': 'ms-2'}, [logxdiv]), logydiv]);
+        div.replaceChildren(controls, plot);
+        div.plot = plot;
+
+        const cache = {};
+        let filters = JSON.stringify({root: []}), filtered = false;
+        let started = false, request = 0, data = null;
+
+        function load(){
+            const params = {spectrum: select.value, groupby: groupby.value, filters: filters};
+            const key = JSON.stringify(params);
+            if(!cache[key]){
+                const sep = url.includes('?') ? '&' : '?';
+                cache[key] = getJSON(url + sep + new URLSearchParams(params));
+                cache[key].catch(() => delete cache[key]);
+            }
+            return cache[key];
+        }
+
+        function message(text){
+            Plotly.purge(plot);
+            plot.replaceChildren(el('p', {'class': 'text-secondary', text: text}));
+        }
+
+        function draw(){
+            if(!data)
+                return;
+            if(!data.total)
+                return message(filtered ? 'Nothing passing the filters has this spectrum'
+                                        : 'No spectra');
+            if(!plot._fullLayout)
+                plot.replaceChildren();
+            const traces = spectrumTraces(filtered ? 'Filtered total' : 'Total', data.total,
+                                          TOTAL_COLOR, logy.checked);
+            data.curves.forEach(c => traces.push(...spectrumTraces(
+                String(c.label), c.value, COLORS[c.rank % COLORS.length], logy.checked, false)));
+            if(data.other)
+                traces.push(...spectrumTraces('other', data.other, OTHER_COLOR,
+                                              logy.checked, false));
+            const layout = {
+                height: SPECTRUM_HEIGHT,
+                margin: {t: 20, r: 10},
+                xaxis: {title: {text: 'Energy' + unitLabel(data.total.binsunit)},
+                        type: logx.checked ? 'log' : 'linear'},
+                yaxis: {title: {text: unitLabel(data.total.units).trim()},
+                        type: logy.checked ? 'log' : 'linear', exponentformat: 'power'},
+                showlegend: data.curves.length > 0,
+            };
+            Plotly.react(plot, traces, layout, CONFIG);
+        }
+
+        function update(){
+            const mine = ++request;
+            div.classList.add('loading');
+            load().then(result => {
+                if(mine !== request)
+                    return;
+                div.classList.remove('loading');
+                if(!result.spectra.length){
+                    controls.remove();
+                    data = null;
+                    return message('No spectra');
+                }
+                if(!select.options.length){
+                    select.replaceChildren(...result.spectra.map(
+                        s => el('option', {value: s.key, text: s.name})));
+                    select.value = result.spectrum;
+                }
+                data = result;
+                draw();
+            }).catch(error => {
+                if(mine !== request)
+                    return;
+                div.classList.remove('loading');
+                showError(plot, error);
+            });
+        }
+
+        [select, groupby].forEach(input => input.addEventListener('change', update));
+        [logx, logy].forEach(input => input.addEventListener('change', draw));
+        if(dash)
+            dash.onFilter((f, json) => {
+                filters = json;
+                filtered = !!(f.root && f.root.length) || Object.keys(f).some(
+                    key => key !== 'root' && f[key].length);
+                if(started)
+                    update();
+            });
+        whenVisible(div, () => {
+            started = true;
+            update();
         });
     }
 
@@ -757,5 +881,5 @@ const bgplots = (function(){
         });
     }
 
-    return {spectrum: spectrum, dashboard: dashboard};
+    return {spectrum: spectrum, spectrumBreakdown: spectrumBreakdown, dashboard: dashboard};
 })();
