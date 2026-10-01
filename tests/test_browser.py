@@ -268,6 +268,14 @@ class TestPlotsInBrowser(BrowserTestCase):
                     && g.querySelectorAll('.errorbar path.xerror').length === n;
             }))""", timeout=3000)
 
+    def table_rows(self, page):
+        """ The component column of the contributions table, once it has
+        caught up with the filters
+        """
+        page.wait_for_function("""() => !document.getElementById('resultstable')
+            .classList.contains('loading')""", timeout=5000)
+        return page.locator('#resultstable tbody td:first-child').all_inner_texts()
+
     def info(self, page):
         return page.locator('#budgetplot .dashboard-info').inner_text()
 
@@ -278,6 +286,9 @@ class TestPlotsInBrowser(BrowserTestCase):
         self.assertIn('2 of 2 source terms', self.info(page))
         self.assertEqual(self.rows(page, 'component'), ['a1', 'c2', 'c1'])
         self.assertEqual(self.rows(page, 'material'), ['steel', 'copper'])
+        self.assertEqual(self.table_rows(page), ['a2', 'a1', 'c1', 'c2'])
+        table = page.locator('#resultstable')
+        self.assertNotIn('budget filters', table.inner_text())
 
         self.assertIn('Total:', self.info(page))
         self.assertNotIn('Unfiltered', self.info(page))
@@ -307,6 +318,9 @@ class TestPlotsInBrowser(BrowserTestCase):
             f"() => {self.panel_js('material')}.layout.shapes.length")
         self.assertEqual(shapes, 1)
         self.assertIn('copper', page.evaluate('() => location.hash'))
+        # the table follows
+        self.table_rows(page)
+        self.assertIn('Only the 1 of 2 source terms', table.inner_text())
 
         # ctrl-click removes copper instead
         self.click_row(page, 'material', 'copper', ['Control'])
@@ -318,6 +332,8 @@ class TestPlotsInBrowser(BrowserTestCase):
         self.wait_dashboard(page)
         self.assertIn('2 of 2 source terms', self.info(page))
         self.assertDrawn(page)
+        self.table_rows(page)
+        self.assertNotIn('budget filters', table.inner_text())
         self.assertEqual(self.rows(page, 'isotope'), ['K40', 'Th232'])
 
         # shift-clicks are applied together when shift is released
@@ -339,6 +355,7 @@ class TestPlotsInBrowser(BrowserTestCase):
             ['drill down'])
         self.click_row(page, 'component', 'a1', drill=True)
         self.assertEqual(self.rows(page, 'component'), ['c2', 'c1'])
+        self.assertEqual(self.table_rows(page), ['a1', 'c1', 'c2'])
         crumbs = page.locator('#budgetplot .breadcrumb')
         self.assertEqual(crumbs.inner_text().split(), ['a2', 'a1'])
         # and back out

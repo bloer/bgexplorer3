@@ -7,8 +7,9 @@ import json
 from collections import defaultdict
 from typing import List, NamedTuple, Optional, Tuple
 from .component import Component, Assembly
-from .sourceterm import (CalculatedResults, SourceTerm, find_sourceterms,
-                         load_hiteffs, _cache_key, _cached, _ref_id)
+from .sourceterm import (CalculatedResults, SourceTerm, ResultsCache,
+                         find_sourceterms, load_hiteffs, _cache_key, _cached,
+                         _ref_id)
 from .settings import get_settings
 from .histogram import Histogram
 from .common import units as unitreg
@@ -18,6 +19,9 @@ NO_MATERIAL = '(no material)'
 NO_CATEGORY = '(uncategorized)'
 # levels of children shown in the dashboard's component breakdown
 COMPONENT_DEPTH = 2
+# filtered breakdowns, kept apart from the per-term values they are summed
+# from, which are slower to calculate
+_filtered_cache = ResultsCache(256)
 
 
 def available_scalars(version: str) -> List[str]:
@@ -42,12 +46,12 @@ def display_unit(version: str, scalar: str):
 
 
 class Term(NamedTuple):
-    """ One SourceTerm's value of a scalar, and its key for each groupby.
-    The component key is the path of placement ids (as strings) from the
-    object being broken down
+    """ One SourceTerm's value of each scalar it has, and its key for each
+    groupby. The component key is the path of placement ids (as strings)
+    from the object being broken down
     """
     sourceterm: SourceTerm
-    value: object
+    values: dict
     keys: dict
 
 
@@ -62,11 +66,11 @@ def _component_path(st: SourceTerm, child_ids: set) -> Tuple[str, ...]:
     return ()
 
 
-def term_values(obj: Component, scalar: str,
+def term_values(obj: Component,
                 relativeto: Optional[Assembly] = None) -> List[Term]:
-    """ The value of `scalar` for each SourceTerm of `obj` (optionally only
-    as placed in `relativeto`) that has one. Kept in memory until any data
-    in the version changes, and shared, so must not be modified
+    """ The scalar values of each SourceTerm of `obj` (optionally only as
+    placed in `relativeto`) that has any. Kept in memory until any data in
+    the version changes, and shared, so must not be modified
     """
     def calculate():
         sourceterms = list(find_sourceterms(obj, relativeto))
@@ -75,18 +79,19 @@ def term_values(obj: Component, scalar: str,
         terms = []
         for st in sourceterms:
             part = CalculatedResults._calculate(st, hiteffs, spectra=False)
-            value = part and part[0].get(scalar)
-            if value is None or isinstance(value, Histogram):
+            values = {name: value for name, value in (part or ({},))[0].items()
+                      if value is not None and not isinstance(value, Histogram)}
+            if not values:
                 continue
             category = st.source.category
             keys = dict(component=_component_path(st, child_ids),
                         isotope=st.source.name,
                         material=st.material or NO_MATERIAL,
                         category=category.value if category else NO_CATEGORY)
-            terms.append(Term(st, value, keys))
+            terms.append(Term(st, values, keys))
         return terms
     key = _cache_key(obj, 'terms', _ref_id(obj),
-                     relativeto and _ref_id(relativeto), scalar)
+                     relativeto and _ref_id(relativeto))
     return _cached(key, calculate)
 
 
@@ -231,15 +236,15 @@ class _Group:
     def _add(total, value):
         return value if total is None else total + value
 
-    def add(self, term: Term):
-        self.value = self._add(self.value, term.value)
+    def add(self, value):
+        self.value = self._add(self.value, value)
 
-    def include(self, term: Term, selected: bool, passing: bool):
-        """ Add `term` to the unfiltered sum, and to the sum if `passing` """
-        self.unfiltered = self._add(self.unfiltered, term.value)
+    def include(self, value, selected: bool, passing: bool):
+        """ Add `value` to the unfiltered sum, and to the sum if `passing` """
+        self.unfiltered = self._add(self.unfiltered, value)
         self.selected |= selected
         if passing:
-            self.add(term)
+            self.add(value)
 
 
 def _convert(value, unit):
@@ -270,7 +275,7 @@ def _rows(groups: dict, labels: dict, unit) -> List[dict]:
     return rows
 
 
-def _component_rows(terms: List[Term], filters: BudgetFilter,
+def _component_rows(terms: List[Term], scalar: str, filters: BudgetFilter,
                     chart_root: Component, depth: int, unit) -> List[dict]:
     """ Rows for each child of `chart_root` (at path `filters.root`), each
     followed by rows for its own children down to `depth` levels, from
@@ -288,7 +293,8 @@ def _component_rows(terms: List[Term], filters: BudgetFilter,
         selected = filters.passes('component', term.keys['component'])
         passing = filters.matches(term.keys, skip='component')
         for level in {min(len(path), 1), min(len(path), depth)}:
-            groups[path[:level]].include(term, selected, passing)
+            groups[path[:level]].include(term.values[scalar], selected,
+                                         passing)
     labels = {path: names[path][0] if path in names
               else path[-1] if path else chart_root.name
               for path in groups}
@@ -316,7 +322,7 @@ def _unit(terms: List[Term], version: str, scalar: str, unit):
         unit = unitreg.Unit(unit) if unit else None
     unit = unit or display_unit(version, scalar)
     if unit is None and terms:
-        unit = terms[0].value.to_reduced_units().u
+        unit = terms[0].values[scalar].to_reduced_units().u
     return unit
 
 
@@ -326,6 +332,13 @@ def _check_args(obj: Component, scalar: str, groupbys):
             raise ValueError(f"groupby must be one of {', '.join(GROUPBY)}")
     if scalar not in available_scalars(obj.active_version):
         raise ValueError(f"Unknown scalar '{scalar}'")
+
+
+def _filtered_key(obj: Component, filters: BudgetFilter,
+                  relativeto: Optional[Assembly], *args) -> Optional[tuple]:
+    """ Key in the filtered results cache """
+    return _cache_key(obj, _ref_id(obj), relativeto and _ref_id(relativeto),
+                      json.dumps(filters.todict(), sort_keys=True), *args)
 
 
 def dashboard(obj: Component, scalar: str,
@@ -350,11 +363,20 @@ def dashboard(obj: Component, scalar: str,
     limit if everything in it is. The component rows are described in
     `_component_rows`.
     Raises ValueError for an unknown groupby, scalar or root.
+    Results are kept in memory until any data in the version changes, and
+    shared, so must not be modified.
     """
-    _check_args(obj, scalar, groupbys)
     filters = filters or BudgetFilter()
+    key = _filtered_key(obj, filters, relativeto, 'dashboard', scalar,
+                        unit and str(unit), tuple(groupbys), depth)
+    return _filtered_cache.get(key, lambda: _dashboard(
+        obj, scalar, filters, relativeto, unit, groupbys, depth))
+
+
+def _dashboard(obj, scalar, filters, relativeto, unit, groupbys, depth):
+    _check_args(obj, scalar, groupbys)
     chart_root, breadcrumb = _resolve_root(obj, filters.root)
-    terms = term_values(obj, scalar, relativeto)
+    terms = [t for t in term_values(obj, relativeto) if scalar in t.values]
     unit = _unit(terms, obj.active_version, scalar, unit)
 
     root = filters.root
@@ -362,13 +384,14 @@ def dashboard(obj: Component, scalar: str,
     charts = {}
     for groupby in groupbys:
         if groupby == 'component':
-            charts[groupby] = _component_rows(below, filters, chart_root,
-                                              depth, unit)
+            charts[groupby] = _component_rows(below, scalar, filters,
+                                              chart_root, depth, unit)
             continue
         groups = defaultdict(_Group)
         for term in below:
             key = term.keys[groupby]
-            groups[key].include(term, filters.passes(groupby, key),
+            groups[key].include(term.values[scalar],
+                                filters.passes(groupby, key),
                                 filters.matches(term.keys, skip=groupby))
         charts[groupby] = _rows(groups, {}, unit)
 
@@ -376,11 +399,74 @@ def dashboard(obj: Component, scalar: str,
     unfiltered = _Group()
     count = 0
     for term in terms:
-        unfiltered.add(term)
+        unfiltered.add(term.values[scalar])
         if filters.matches(term.keys):
-            total.add(term)
+            total.add(term.values[scalar])
             count += 1
     return dict(scalar=scalar, units=unit, count=count, ntotal=len(terms),
                 total=_convert(total.value, unit),
                 unfiltered=_convert(unfiltered.value, unit),
                 breadcrumb=breadcrumb, charts=charts)
+
+
+def table_columns(version: str) -> List[Tuple[str, str]]:
+    """ (scalar, display name) for each scalar configured to be displayed
+    in `version`'s contributions table
+    """
+    config = get_settings(version).hiteffdbconfig.display_scalars
+    return [(key, entry.display_name or key)
+            for key, entry in config.items() if not entry.hide]
+
+
+def table(obj: Component, filters: Optional[BudgetFilter] = None,
+          relativeto: Optional[Assembly] = None,
+          depth: int = COMPONENT_DEPTH) -> dict:
+    """ The contributions table of `obj` (optionally only as placed in
+    `relativeto`): the sums of each displayed scalar for the SourceTerms
+    passing all of `filters`, for the component at `filters.root` and its
+    placements down to `depth` levels below it.
+
+    Returns dict(columns, rows, count, ntotal): columns of dict(key, name,
+    units), and rows of dict(label, depth, values), where values maps each
+    column's key to its sum in its units, or None. The first row is the
+    root's total, followed by its placements in order, each followed by its
+    own. count of ntotal SourceTerms with values pass the filters.
+    Results are kept in memory until any data in the version changes, and
+    shared, so must not be modified. Raises ValueError for an unknown root.
+    """
+    filters = filters or BudgetFilter()
+    key = _filtered_key(obj, filters, relativeto, 'table', depth)
+    return _filtered_cache.get(key, lambda: _table(obj, filters, relativeto,
+                                                   depth))
+
+
+def _table(obj, filters, relativeto, depth):
+    chart_root, breadcrumb = _resolve_root(obj, filters.root)
+    terms = term_values(obj, relativeto)
+    version = obj.active_version
+    columns = [dict(key=key, name=name,
+                    units=_unit([t for t in terms if key in t.values],
+                                version, key, None))
+               for key, name in table_columns(version)]
+    root = filters.root
+    sums = defaultdict(dict)
+    count = 0
+    for term in terms:
+        if not filters.matches(term.keys):
+            continue
+        count += 1
+        path = term.keys['component'][len(root):]
+        for level in {0, min(len(path), 1), min(len(path), depth)}:
+            group = sums[path[:level]]
+            for name, value in term.values.items():
+                group[name] = _Group._add(group.get(name), value)
+
+    def values(path):
+        group = sums.get(path, {})
+        return {c['key']: _convert(group.get(c['key']), c['units'])
+                for c in columns}
+    rows = [dict(label=breadcrumb[-1][1], depth=0, values=values(()))]
+    rows += [dict(label=name, depth=len(path), values=values(path))
+             for path, (name, children)
+             in _placement_names(chart_root, depth).items()]
+    return dict(columns=columns, rows=rows, count=count, ntotal=len(terms))

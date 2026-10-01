@@ -413,13 +413,51 @@ class CalculatedResults(Document):
         return result
 
 
-# In-memory LRU cache of calculated results. Keys start with the version's
-# cache token, which changes whenever any data in the version changes, so
-# entries never need invalidating and it is safe with multiple processes.
+class ResultsCache:
+    """ In-memory LRU cache of calculated results. Keys start with the
+    version's cache token, which changes whenever any data in the version
+    changes, so entries never need invalidating and it is safe with multiple
+    processes. Results are shared, so must not be modified
+    """
+    instances = []
+
+    def __init__(self, size: int):
+        self.size = size
+        self._entries = OrderedDict()
+        self._lock = threading.Lock()
+        ResultsCache.instances.append(self)
+
+    def get(self, key: Optional[tuple], calculate):
+        """ Return the cached result for `key`, or else calculate and cache
+        it. `key` None isn't cached
+        """
+        if key is None:
+            return calculate()
+        with self._lock:
+            result = self._entries.get(key, _MISSING)
+            if result is not _MISSING:
+                self._entries.move_to_end(key)
+                return result
+        # if the data change while calculating, the result is stored with
+        # the old token and never used
+        result = calculate()
+        with self._lock:
+            self._entries[key] = result
+            while len(self._entries) > self.size:
+                self._entries.popitem(last=False)
+        return result
+
+    def clear(self):
+        with self._lock:
+            self._entries.clear()
+
+    def __len__(self):
+        return len(self._entries)
+
+
 RESULTS_CACHE_SIZE = 128
-_results_cache = OrderedDict()
-_results_cache_lock = threading.Lock()
 _MISSING = object()
+_results_cache = ResultsCache(RESULTS_CACHE_SIZE)
 
 
 def _cache_key(obj, *args) -> Optional[tuple]:
@@ -430,29 +468,14 @@ def _cache_key(obj, *args) -> Optional[tuple]:
 
 
 def _cached(key: Optional[tuple], calculate):
-    """ Return the cached result for `key` or else calculate and cache it.
-    Results are shared, so must not be modified
-    """
-    if key is None:
-        return calculate()
-    with _results_cache_lock:
-        result = _results_cache.get(key, _MISSING)
-        if result is not _MISSING:
-            _results_cache.move_to_end(key)
-            return result
-    # if the data change while calculating, the result is stored with the
-    # old token and never used
-    result = calculate()
-    with _results_cache_lock:
-        _results_cache[key] = result
-        while len(_results_cache) > RESULTS_CACHE_SIZE:
-            _results_cache.popitem(last=False)
-    return result
+    """ Return the result for `key` from the shared results cache """
+    return _results_cache.get(key, calculate)
 
 
 def clear_results_cache():
-    with _results_cache_lock:
-        _results_cache.clear()
+    """ Empty every ResultsCache """
+    for cache in ResultsCache.instances:
+        cache.clear()
 
 
 def _ref_id(ref):

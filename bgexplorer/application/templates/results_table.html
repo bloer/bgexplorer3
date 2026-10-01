@@ -1,0 +1,21 @@
+{# The contributions table for budget.table's `table`, filtered like the budget plots #}
+{% if filtered %}
+<p class="text-secondary small mb-1 results-table-filtered">Only the {{ table.count }} of {{ table.ntotal }}
+source terms passing the budget filters below.</p>
+{% endif %}
+<table class="table table-sm table-hover">
+    <thead>
+        <tr><th>Component</th>{% for column in table.columns %}<th>{{ column.name }} [{{ unit_str(column.units) }}]</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+        {% for row in table.rows %}
+        <tr class="component depth{{ row.depth }}">
+            <td>{{ row.label }}</td>
+            {% for column in table.columns %}
+            {% set val = row['values'][column.key] %}
+            <td>{% if val is not none %}{{ '\({:LS}\)'.format(val.m) }}{% endif %}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>

@@ -3,7 +3,7 @@ import mongoengine as me
 from bson import ObjectId
 from io import BytesIO
 from ..models.sourceterm import find_sourceterms, CalculatedResults
-from ..models.budget import (available_scalars, GROUPBY, dashboard,
+from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
                              BudgetFilter)
 from ..models.component import Component, Assembly
 from ..models.emissionspec import EmissionSpec
@@ -20,6 +20,7 @@ from ..models.histogram import Histogram
 from pint.errors import PintError
 from .plotting import histogram_json, scalar_json, unit_str
 import json
+import markupsafe
 
 
 def get_or_404(queryset, objid):
@@ -405,11 +406,30 @@ class CollectionViews(flask.Blueprint):
                             for path, label in result['breadcrumb']],
                 charts=charts)
 
+        @self.get('/<objid>/results_table')
+        def results_table():
+            """ The contributions table for the `filters` in BudgetFilter
+            JSON format
+            """
+            try:
+                filters = BudgetFilter.from_json(
+                    flask.request.args.get('filters'))
+                result = table(flask.g.object, filters,
+                               relativeto=flask.g.get('relativeto'))
+            except ValueError as e:
+                return markupsafe.escape(str(e)), 400
+            return flask.render_template(
+                'results_table.html', table=result, unit_str=unit_str,
+                filtered=bool(filters.entries or filters.root))
+
         @self.get('/<objid>/results')
         def results():
             return flask.render_template(
                 'results_component.html', groupby=GROUPBY,
-                scalars=available_scalars(flask.g.active_version))
+                scalars=available_scalars(flask.g.active_version),
+                table=table(flask.g.object,
+                            relativeto=flask.g.get('relativeto')),
+                unit_str=unit_str)
 
     def _create_spectra_endpoints(self):
         """ Import, rename and delete the spectra of a HitEfficiency. Each

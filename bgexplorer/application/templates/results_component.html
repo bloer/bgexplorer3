@@ -10,37 +10,13 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 {% endblock %}
 
 
-{% macro printscalar(calcresult, key, cfg) %}
-{% set val = calcresult.scalars[key] %}
-{% if val is not none %}
-{{ '\({:LS}\)'.format(val.to(cfg.display_unit).m) }}
-{% endif %}
-{% endmacro %}
-
-
 {% block pagecontent %}
 <div class="row mb-3">
     <div class="col">
         <h3>Background Contributions</h3>
-        {% set scalarscfg = settings.hiteffdbconfig.display_scalars.items() %}
-        <table class="table table-sm table-hover">
-            <thead>
-                <tr><th>Component</th>{% for key, entry in scalarscfg %}<th>{{ entry.display_name or key }} [{{ entry.display_unit or '' }}]</th>{% endfor %}</tr>
-            </thead>
-            <tbody>
-                {% set calcresults = get_tree_calculations(g.object) %}
-                {% for placement in [{'component': g.object, 'weight': 1, 'name': g.object.name}] recursive %}
-                {% set calcresult = calcresults.get(placement.component.original_id) %}
-                <tr class="component depth{{ loop.depth0 }}">
-                    <td>{{ placement.name }}</td>
-                    {% for key, entry in scalarscfg if calcresult %}
-                    <td>{{ printscalar(calcresult, key, entry) }}</td>
-                    {% endfor %}
-                </tr>
-                {{ loop(placement.component.children) }}
-                {% endfor %}
-            </tbody>
-        </table>
+        <div id="resultstable">
+            {% with filtered=false %}{% include "results_table.html" %}{% endwith %}
+        </div>
     </div>
 </div>
 
@@ -49,9 +25,10 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
         <h3>Budget</h3>
         <p>Contributions to the background of {{ g.object.name }}
         {%- if g.relativeto is defined %} as placed in {{ g.relativeto.name }}{% endif %},
-        grouped by component, material, source isotope and source category. Measured
-        values are shown as red points with 1&sigma; errors, upper limits as blue
-        arrows from the 90% upper limit. Click the rows to filter the other charts.</p>
+        grouped by component, material, source isotope and source category. Values are
+        shown as red points with 1&sigma; errors, and upper limits as blue lines ending
+        at the 90% upper limit. Click the labels to filter the other charts and the
+        contributions table.</p>
         {% if scalars %}
         <div id="budgetplot" class="plotcontainer"></div>
         {% else %}
@@ -73,7 +50,8 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 {{ utils.plotscripts() }}
 {%- if scalars %}
 <script>bgplots.dashboard('budgetplot', {{ url_for('.dashboard_json', object=g.object, relativeto=g.get('relativeto')) | tojson }},
-                          {{ ['component', 'material', 'isotope', 'category'] | tojson }}, {{ scalars | tojson }});</script>
+                          {{ ['component', 'material', 'isotope', 'category'] | tojson }}, {{ scalars | tojson }},
+                          {table: {id: 'resultstable', url: {{ url_for('.results_table', object=g.object, relativeto=g.get('relativeto')) | tojson }}}});</script>
 {%- endif %}
 <script>bgplots.spectrum('spectrumplot', {{ url_for('.spectra_json', object=g.object, relativeto=g.get('relativeto')) | tojson }});</script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>

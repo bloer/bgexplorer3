@@ -420,8 +420,13 @@ const bgplots = (function(){
      * sums, with their correlated uncertainties, are done by the server.
      * The state is kept in the URL's hash. All panels share one x range,
      * and zoom and pan together.
+     *
+     * Other views follow the filters through the returned object's
+     * `onFilter(callback)`, which calls `callback(filters, json)` now and
+     * after each change. `options.table: {id, url}` is a contributions
+     * table to keep filtered this way (see `filteredTable`).
      */
-    function dashboard(div, url, groupbys, scalars){
+    function dashboard(div, url, groupbys, scalars, options){
         if(typeof div === 'string')
             div = document.getElementById(div);
         const id = div.id || 'dashboard';
@@ -458,6 +463,7 @@ const bgplots = (function(){
             // ignore a garbled hash
         }
         const cache = {};
+        const listeners = [];
         let current = null, request = 0, pending = false;
         // the shared range: the extent of everything shown, or a zoom
         let fullRange = null, range = null, syncing = false;
@@ -660,12 +666,18 @@ const bgplots = (function(){
             });
         }
 
+        function notify(){
+            const json = JSON.stringify(filters);
+            listeners.forEach(callback => callback(filters, json));
+        }
+
         function update(){
             pending = false;
             const params = new URLSearchParams({scalar: select.value,
                                                 filters: JSON.stringify(filters)});
             history.replaceState(null, '', '#' + params);
             draw(false);
+            notify();
         }
 
         // filter by clicking the y axis labels, not the plot, which zooms
@@ -693,6 +705,56 @@ const bgplots = (function(){
         threshold.addEventListener('change', () => draw(false));
         showInfo();
         whenVisible(div, () => draw(true));
+        const controller = {
+            onFilter(callback){
+                listeners.push(callback);
+                callback(filters, JSON.stringify(filters));
+            },
+        };
+        if(options && options.table)
+            filteredTable(options.table.id, options.table.url, controller);
+        return controller;
+    }
+
+    /* Keep the contributions table in `div` filtered like `dash`, by
+     * replacing it with the HTML from `url` for each change. The page
+     * draws it unfiltered
+     */
+    function filteredTable(div, url, dash){
+        if(typeof div === 'string')
+            div = document.getElementById(div);
+        let shown = JSON.stringify({root: []}), request = 0;
+        dash.onFilter((filters, json) => {
+            if(json === shown)
+                return;
+            shown = json;
+            const mine = ++request;
+            div.classList.add('loading');
+            const sep = url.includes('?') ? '&' : '?';
+            fetch(url + sep + new URLSearchParams({filters: json}))
+                .then(response => response.text().then(text => {
+                    if(!response.ok)
+                        throw new Error(text || response.statusText);
+                    return text;
+                }))
+                .then(html => {
+                    if(mine !== request)
+                        return;
+                    div.innerHTML = html;
+                    if(window.MathJax && MathJax.typesetPromise)
+                        MathJax.typesetPromise([div]).catch(() => {});
+                })
+                .catch(error => {
+                    if(mine !== request)
+                        return;
+                    shown = null;
+                    div.replaceChildren(el('p', {'class': 'text-danger', text: error.message}));
+                })
+                .finally(() => {
+                    if(mine === request)
+                        div.classList.remove('loading');
+                });
+        });
     }
 
     return {spectrum: spectrum, dashboard: dashboard};

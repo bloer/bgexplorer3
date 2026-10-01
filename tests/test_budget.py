@@ -1,11 +1,12 @@
 """ Filtered budget breakdowns for the results dashboard """
 import unittest
 from bgexplorer.models.budget import (BudgetFilter, dashboard, NO_CATEGORY,
-                                      term_values)
+                                      table, term_values)
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
                                             SourceCategory)
 from bgexplorer.models.hiteff import HitEfficiency
+from bgexplorer.models.settings import get_settings, HitEffConfig
 from bgexplorer.models.sourceterm import CalculatedResults, find_sourceterms
 from bgexplorer.models import versioncontrol as vc
 from tests.test_app_components import AppTestCase
@@ -249,11 +250,94 @@ class TestDashboard(AppTestCase):
         self.assertEqual(self.labels(rows), [('c1', 0), ('c2 label', 0)])
 
     def test_cache(self):
-        terms = term_values(self.a2, 'v1')
-        self.assertIs(term_values(self.a2, 'v1'), terms)
+        terms = term_values(self.a2)
+        self.assertIs(term_values(self.a2), terms)
+        # every scalar of each term at once
+        self.assertEqual({tuple(t.values) for t in terms}, {('v1',)})
+        # and each filtered result
+        text = '{"material": [{"key": "copper"}]}'
+        result = dashboard(self.a2, 'v1', BudgetFilter.from_json(text))
+        self.assertIs(dashboard(self.a2, 'v1', BudgetFilter.from_json(text)),
+                      result)
+        self.assertIsNot(dashboard(self.a2, 'v1'), result)
+        self.assertIs(table(self.a2), table(self.a2))
         self.c3.mass = '2 kg'
         self.c3.save()
-        self.assertIsNot(term_values(self.a2, 'v1'), terms)
+        self.assertIsNot(term_values(self.a2), terms)
+        self.assertIsNot(dashboard(self.a2, 'v1', BudgetFilter.from_json(text)),
+                         result)
+
+    def show_columns(self):
+        settings = get_settings('main')
+        settings.hiteffdbconfig.display_scalars = dict(
+            v1=HitEffConfig(display_name='Value', display_unit='mdru'),
+            hidden=HitEffConfig(hide=True))
+        settings.save()
+
+    def test_table(self):
+        self.show_columns()
+        result = table(self.a2)
+        self.assertEqual([(c['key'], c['name'], str(c['units']))
+                          for c in result['columns']],
+                         [('v1', 'Value', 'mdru')])
+        self.assertEqual((result['count'], result['ntotal']), (4, 4))
+        # the root's total, then two levels of placements in order
+        rows = result['rows']
+        self.assertEqual(self.labels(rows), [
+            ('a2', 0), ('a1', 1), ('c1', 2), ('c2 label', 2), ('c3', 1)])
+        values = [row['values']['v1'] for row in rows]
+        self.assertSame(values[0], self.total(self.a2))
+        self.assertSame(values[1], self.total(self.a1, self.a2))
+        self.assertAlmostEqual(values[2].to('mdru').m.nominal_value, 4000.)
+
+        # only what passes every filter, including the component's
+        result = table(self.a2, BudgetFilter(dict(
+            material=[('copper', False)], component=[((self.p_a1,), False)])))
+        self.assertEqual(result['count'], 2)
+        values = [row['values']['v1'] for row in result['rows']]
+        self.assertSame(values[0], self.total(self.c1, self.a2))
+        self.assertSame(values[2], values[0])
+        self.assertEqual([v is None for v in values],
+                         [False, False, False, True, True])
+        result = table(self.a2, BudgetFilter(dict(
+            component=[((self.p_c3,), False)])))
+        self.assertEqual([row['values']['v1'] is None
+                          for row in result['rows']],
+                         [False, True, True, True, False])
+
+        # below a drilled down root
+        result = table(self.a2, BudgetFilter(root=[self.p_a1]))
+        self.assertEqual(self.labels(result['rows']), [
+            ('a1', 0), ('c1', 1), ('c2 label', 1)])
+        self.assertSame(result['rows'][0]['values']['v1'],
+                        self.total(self.a1, self.a2))
+        with self.assertRaises(ValueError):
+            table(self.a2, BudgetFilter(root=['nope']))
+        # a plain component is a single row
+        self.assertEqual(self.labels(table(self.c1)['rows']), [('c1', 0)])
+
+    def test_table_html(self):
+        self.show_columns()
+        page = self.html(self.client.get(self.url('component.results',
+                                                  object=self.a2)))
+        self.assertIn('<th>Value [mdru]</th>', page)
+        self.assertIn('<tr class="component depth2">', page)
+        self.assertNotIn('passing the budget filters', page)
+        self.assertIn('resultstable', page)
+        url = self.url('component.results_table', object=self.a2)
+        page = self.html(self.client.get(url, query_string=dict(
+            filters='{"material": [{"key": "copper"}]}')))
+        self.assertIn('Only the 2 of 4', page)
+        self.assertNotIn('<html', page)
+        total = self.total(self.c1, self.a2).to('mdru').m
+        self.assertIn('{:LS}'.format(total), page)
+        response = self.client.get(url, query_string=dict(filters='nope'))
+        self.assertEqual(response.status_code, 400)
+        # relative to a parent assembly
+        page = self.html(self.client.get(self.url(
+            'component.results_table', object=self.a1, relativeto=self.a2)))
+        self.assertIn('c2 label', page)
+        self.assertNotIn('c3', page)
 
     def test_json(self):
         url = self.url('component.dashboard_json', object=self.a2)

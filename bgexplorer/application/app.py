@@ -12,7 +12,6 @@ from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
 from ..models.cosmogenic import ActivatedMaterial
-from ..models.sourceterm import CalculatedResults
 from ..models.fields import get_fromstr
 from .common import pretty_date
 from .blueprints import CollectionViews
@@ -132,17 +131,6 @@ def create_app(config_file=None, config=None):
     def all_source_names():
         return (EmissionSpec.select_version(flask.g.active_version)
                 .distinct('sources.name'))
-
-    @app.template_global()
-    def get_calculation(obj, relativeto=None):
-        return CalculatedResults.for_object(obj, relativeto, save=True)
-
-    @app.template_global()
-    def get_tree_calculations(root, spectra=False):
-        """ results for root and all its subcomponents relative to root,
-        keyed by component original_id
-        """
-        return CalculatedResults.for_tree(root, spectra=spectra)
 
     @app.template_filter('sourcesort')
     def source_sort_val(rate):
