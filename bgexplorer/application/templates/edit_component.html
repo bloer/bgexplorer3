@@ -144,7 +144,10 @@
         {%- if not isassembly %}
         <fieldset class="col-sm-12 col-md-6">
             <legend>Radiation specifications</legend>
-            {{ dynamictable(g.object, 'specs', plainref=true) }}
+            {% call(spec) dynamictable(g.object, 'specs', plainref=true) -%}
+            {%- if spec.owner %}<span class="badge text-bg-secondary owned me-1" title="Belongs to this component">own</span>{% endif -%}
+            {%- endcall %}
+            <div class="form-text">Specs that belong to this component are created from its summary page.</div>
         </fieldset>
         <fieldset class="col-sm-12 col-md-6">
             <legend>Cosmogenic activation</legend>

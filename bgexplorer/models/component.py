@@ -132,6 +132,7 @@ class Component(VersionedDocument):
         super().clean()
         validate_unique_ids(self.sources, 'sources')
         validate_unique_ids(self.location_overrides, 'location_overrides')
+        self.check_owned_specs()
         # overrides for specs or placements that were removed go with them
         specs = {None: self._data.get('specs') or []}
         for placement in getattr(self, 'children', None) or []:
@@ -148,6 +149,85 @@ class Component(VersionedDocument):
                     "Choose a spec or source to override, or set the "
                     "component or placement location instead",
                     field_name=f'location_overrides.{i}.location')
+
+    def check_owned_specs(self) -> None:
+        """ Raise ValidationError if a spec owned by another component is
+        attached to us
+        """
+        for spec in self.specs:
+            # missing specs stay DBRefs
+            owner = ref_id(getattr(spec, '_data', {}).get('owner'))
+            if owner is not None and owner != self.original_id:
+                raise ValidationError(
+                    f"{spec.name} belongs to another component",
+                    field_name='specs')
+
+    def add_owned_spec(self, spec: EmissionSpec) -> EmissionSpec:
+        """ Save `spec` as belonging to us and attach it. We must already
+        be saved
+        """
+        if self.original_id is None:
+            raise ValueError("Save the component before adding its own specs")
+        if spec.original_id is None:
+            # not the default version
+            spec.version_tags = [self.active_version]
+            spec.active_version = self.active_version
+        elif spec.active_version != self.active_version:
+            raise ValueError(f"{spec.name} is in another version")
+        spec.owner = self
+        spec.save()
+        self.specs.append(spec)
+        self.save()
+        return spec
+
+    def make_specific(self, spec: EmissionSpec) -> EmissionSpec:
+        """ Replace the shared `spec` with a copy belonging to us, e.g. to
+        track an exposure that started as a nominal estimate. Location
+        overrides follow the copy. Returns the saved copy
+        """
+        copy = spec.clone(owner=self, name=f"{spec.name} ({self.name})")
+        copy.save()
+        self._replace_spec(spec, copy)
+        self.save()
+        return copy
+
+    def _replace_spec(self, old, new) -> None:
+        """ Swap `old` for `new` in specs and location_overrides """
+        oldid = ref_id(old)
+        self.specs = [new if ref_id(s) == oldid else s for s in self.specs]
+        for override in self.location_overrides:
+            if ref_id(override._data.get('spec')) == oldid:
+                override.spec = new
+
+    def clone(self, **overrides) -> 'Component':
+        """ See VersionedDocument.clone. Specs we own are copied too, and
+        saved along with the copy, since they can only belong to one
+        component
+        """
+        copy = super().clone(**overrides)
+        # placements get new ids
+        placements = {old.id: new.id for old, new in
+                      zip(getattr(self, 'children', None) or [],
+                          getattr(copy, 'children', None) or [])}
+        for override in copy.location_overrides:
+            if override.placement is not None:
+                override.placement = placements.get(override.placement)
+        copy._pending_specs = []
+        for spec in self.specs:
+            if ref_id(spec._data.get('owner')) == self.original_id:
+                # so the copies of our specs can refer to it before it's saved
+                copy.original_id = copy.original_id or ObjectId()
+                specclone = spec.clone(owner=copy)
+                specclone.original_id = ObjectId()
+                copy._replace_spec(spec, specclone)
+                copy._pending_specs.append(specclone)
+        return copy
+
+    def save(self, *args, **kwargs):
+        # copies of our own specs made by clone, which must exist first
+        for spec in self.__dict__.pop('_pending_specs', None) or []:
+            spec.save()
+        return super().save(*args, **kwargs)
 
     def find_location_override(self, spec, source_name: str,
                                placement_id=None

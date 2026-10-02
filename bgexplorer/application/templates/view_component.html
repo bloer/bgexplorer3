@@ -28,14 +28,32 @@
 {% endblock %}
 
 
+{% macro speccontrols(spec) %}
+    {%- if spec.owner %}
+    <span class="badge text-bg-secondary owned" title="Belongs to this component">own</span>
+    {%- elif can_edit %}
+    <form method="POST" action="{{ url_for('.make_specific', object=g.object, specid=spec.original_id) }}" class="d-inline makespecific">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-sm btn-outline-secondary py-0" title="Replace with a copy that only this component uses, e.g. to track its own exposure">make specific</button>
+    </form>
+    {%- endif %}
+{% endmacro %}
+
 {% macro printspec(spec, cls) %}
+    {%- set specname -%}
+    {% if cls == 'spec' %}<a href="{{ url_for('emissionspec.view', object=spec) }}">{{ spec.name }}</a> {{ speccontrols(spec) }}{% else %}self{% endif %}
+    {%- endset -%}
     {% for source in spec.sources %}
                 <tr class="source {% if source.generated_from %}autogen{% endif %}">
-                    {% if loop.index0 == 0 %}<td class="{{ cls }}" rowspan="{{ spec.sources|length }}">{% if cls == 'spec' %}<a href="{{ url_for('emissionspec.view', object=spec) }}">{{ spec.name }}</a>{% else %}self{% endif %}</td> {% endif %}
+                    {% if loop.index0 == 0 %}<td class="{{ cls }}" rowspan="{{ spec.sources|length }}">{{ specname }}</td> {% endif %}
                     <td>{{ source.name }}</td>
                     <td>{{ source.category.name or '' }}</td>
                     <td>{{ source.rate | printquantity }}</td>
                 </tr>
+    {% else %}
+    {%- if cls == 'spec' %}
+                <tr class="source"><td class="spec">{{ specname }}</td><td colspan="3" class="text-secondary">no sources</td></tr>
+    {%- endif %}
     {% endfor %}
 {% endmacro %}
 
@@ -113,6 +131,16 @@
     </div>
 
     <div id="specs" class="col-md-6">
+        {%- if can_edit and 'children' not in g.object._fields %}
+        <div class="dropdown float-end" id="newownspec">
+            <button class="btn btn-sm btn-outline-success dropdown-toggle" type="button" data-bs-toggle="dropdown">New spec for this component</button>
+            <ul class="dropdown-menu">
+                {%- for typename in spectypes %}
+                <li><a class="dropdown-item" href="{{ url_for('emissionspec.edit', type=typename | lower, owner=g.object.original_id) }}">{{ typename }}</a></li>
+                {%- endfor %}
+            </ul>
+        </div>
+        {%- endif %}
         {% if g.object.specs or g.object.sources %}
         <h4>Radiation sources</h4>
         <table class="table table-sm table-hover">

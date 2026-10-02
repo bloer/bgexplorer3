@@ -9,7 +9,7 @@ from .common import units, validate_unique_ids
 from .isotope import (concentration_to_rate, rate_to_concentration,
                       get_isotope, compare_source_names)
 from .fields import UncertainQuantityField, AttachmentsField
-from .verdoc import VersionedDocument
+from .verdoc import VersionedDocument, VersionedReferenceField
 from . import settings
 from collections.abc import Mapping
 
@@ -153,9 +153,14 @@ class EmissionSpec(VersionedDocument):
                   "own")
     sources = EmbeddedDocumentListField(EmissionSource)
     attachments = AttachmentsField()
+    # specs belonging to one component, e.g. its own exposure history, are
+    # only attached to it and hidden from lists of shared specs
+    owner = VersionedReferenceField('Component', endpoint='component',
+                                    help_text="The only component that uses "
+                                              "this spec")
 
     meta = {'allow_inheritance': True,
-            'indexes': ['sources.name'],
+            'indexes': ['sources.name', 'owner'],
             }
 
     # __slots__ = ['sourcemap']

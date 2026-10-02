@@ -30,6 +30,9 @@
 <div class="row mb-3">
     <div class="col-md-6 col-lg-4">
         <h2>Info</h2>
+        {%- if g.object.owner %}
+        <p id="owner">Belongs to <a href="{{ url_for('component.view', object=g.object.owner) }}">{{ g.object.owner.name }}</a></p>
+        {%- endif %}
         {{ utils.print_document(g.object, ['name', 'description', 'comment', 'category', 'multiplier', 'radiopurityid']) }}
         {%- if g.object.extra_metadata %}
         <h4>Extra metadata</h4>

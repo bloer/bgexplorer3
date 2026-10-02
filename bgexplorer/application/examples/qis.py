@@ -147,11 +147,16 @@ def populate_example(version_tag='examples-qis', clean: bool = False,
         Component(name='HEMT', mass='0.017 kg', location='4K Stage', specs=[Assay.objects.get(name='HEMT')]),
         Component(name='cryo filters', mass='0.015 kg', location='Package Connector Outside', specs=[Assay.objects.get(name='K&L filter')]),
         Component(name='cryo attenuator', mass='0.005 kg', location='Mixing Chamber Stage', specs=[Assay.objects.get(name='attenuator')]),
-        Component(name='Environment', location='Environment', sources=[EmissionSource(name='Gammaflux', rate='7.02095 1/cm**2/s', multiplier='none', category='environment')]),
+        Component(name='Environment', location='Environment'),
     ]
     for component in components:
         component.version_tags = [version_tag]
         component.save()
+    # the environment is its own source, so it has a spec of its own
+    Component.select_version(version_tag).get(name='Environment')\
+        .add_owned_spec(EmissionSpec(
+            name='Environmental gammas', category='environment',
+            multiplier='none', sources=dict(Gammaflux='7.02095 1/cm**2/s')))
 
     def placements(children):
         return [Placement(component=Component.select_version(version_tag).get(name=child),

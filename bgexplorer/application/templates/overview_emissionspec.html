@@ -14,6 +14,11 @@
 {% block pageheader %}
 <div class="col-5"><h1>Radiation sources</h1></div>
 <div class="col-7 d-flex justify-content-end align-items-center">
+    {%- if request.args.owned %}
+    <a class="btn btn-outline-secondary me-1" id="toggleowned" href="{{ url_for('.overview') }}" title="Only list specs shared between components">Hide component-specific</a>
+    {%- else %}
+    <a class="btn btn-outline-secondary me-1" id="toggleowned" href="{{ url_for('.overview', owned=1) }}" title="Also list specs that belong to one component">Show component-specific</a>
+    {%- endif %}
     {%- if can_edit %}
     <a class="btn btn-success me-1" id="newemissionspec" href="{{ url_for('.edit') }}">New Emission Spec</a>
     {%- for subclass in doc_cls._subclasses[1:] %}
@@ -70,7 +75,8 @@
 {% call datatable.render(headers) %}
     {% for spec in data %}
     <tr class="spec{% if spec.sample is defined %} assay{% endif %}" data-id="{{ spec.id }}" data-original_id="{{ spec.original_id }}">
-        <td><a href="{{ url_for('.view', object=spec) }}">{{ spec.name }}</a> {{ spec.description or '' }} </td>
+        <td><a href="{{ url_for('.view', object=spec) }}">{{ spec.name }}</a> {{ spec.description or '' }}
+            {%- if spec.owner %} <span class="badge text-bg-secondary owned" title="Belongs to {{ spec.owner.name }}">{{ spec.owner.name }}</span>{% endif %} </td>
         <td>{{ sample(spec) }}</td>
         {% for sourcename in sourcenames %}
         {{ sourcerate(spec, sourcename) }}

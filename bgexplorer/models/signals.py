@@ -22,6 +22,11 @@ def delete_component(sender, document, **kwargs):
     qs(assemblyPath__component=component).delete()
     qs(assemblyRoot=component).delete()
 
+    # specs that only it uses go with it
+    for spec in EmissionSpec.select_version(component.active_version)(
+            owner=component):
+        spec.delete()
+
     # find all Assemblies referencing us and remove from children
     qs = Assembly.select_version(component.active_version)
     for parent in qs(children__component=component):

@@ -44,6 +44,9 @@
     <div class="row mb-3">
         <fieldset class="col-sm-12 col-md-6">
             <legend>Basic Info</legend>
+            {%- if g.object.owner %}
+            <p id="owner">Belongs to <a href="{{ url_for('component.view', object=g.object.owner) }}">{{ g.object.owner.name }}</a></p>
+            {%- endif %}
             {%- for fieldname in basefields[:-1] -%}
             {{ formfield(g.object, fieldname) }}
             {%- endfor -%}
@@ -73,7 +76,8 @@
     </fieldset>
     {#- fields of subclasses, e.g. Assay #}
     <div class="row mb-3">
-    {%- for fieldname in g.object._fields_ordered if fieldname not in basefields -%}
+    {#- owner is set by the component, see Component.add_owned_spec #}
+    {%- for fieldname in g.object._fields_ordered if fieldname not in basefields + ['owner'] -%}
     {%- set field = g.object._fields[fieldname] -%}
     {%- set kind = field_kind(field) -%}
     {%- set label = (field.label or field.verbose_name or fieldname) | replace('_', ' ') | title -%}

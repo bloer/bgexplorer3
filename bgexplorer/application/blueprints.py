@@ -110,6 +110,10 @@ class CollectionViews(flask.Blueprint):
             impact = [dict(text="Removed from these assemblies:",
                            docs=list(obj.find_parents()),
                            endpoint='component')]
+            if owned := list(EmissionSpec.select_version(
+                    obj.active_version)(owner=obj)):
+                impact.append(dict(text="Its own specs are deleted:",
+                                   docs=owned, endpoint='emissionspec'))
             if isinstance(obj, Assembly):
                 impact.append(dict(text="Its children are kept."))
             return impact
@@ -180,8 +184,12 @@ class CollectionViews(flask.Blueprint):
         @self.get('/')
         def overview():
             data = self.queryset
+            # specs belonging to one component are only listed on request
+            if (self.clsname == 'emissionspec' and
+                    not flask.request.args.get('owned')):
+                data = data(owner=None)
             return flask.render_template(f'overview_{self.clsname}.html',
-                                         cls=self.doc_cls, data=self.queryset)
+                                         cls=self.doc_cls, data=data)
 
         @self.get('/api/<objid>')
         @self.loads(*self.deferred_fields)
@@ -194,7 +202,12 @@ class CollectionViews(flask.Blueprint):
             components = []
             if self.clsname == 'emissionspec':
                 components = Component.select_version(flask.g.active_version)(specs=flask.g.object)
-            return flask.render_template(f'view_{self.clsname}.html', components=components)
+            # types of spec a component can create for itself
+            spectypes = [name.rsplit('.', 1)[-1]
+                         for name in EmissionSpec._subclasses]
+            return flask.render_template(f'view_{self.clsname}.html',
+                                         components=components,
+                                         spectypes=spectypes)
 
         @self.route('/new', methods=['GET', 'POST'])
         @self.route('/<objid>/edit', methods=['GET', 'POST'])
@@ -202,8 +215,14 @@ class CollectionViews(flask.Blueprint):
             check_writable(flask.g.active_version)
             req = flask.request
             errors = {}
+            owner = None
             if 'object' not in flask.g:
                 flask.g.object = self.new_document(req.args.get('type'))
+                # a new spec for one component, see Component.add_owned_spec
+                if ownerid := req.args.get('owner'):
+                    owner = get_or_404(Component.select_version(
+                        flask.g.active_version), ownerid)
+                    flask.g.object.owner = owner
             if req.method == 'POST':
                 obj = flask.g.object
                 # generated emission sources the user edits become overrides
@@ -214,11 +233,17 @@ class CollectionViews(flask.Blueprint):
                     obj.mark_overrides(edited_rows(shown, req.form, 'sources'))
                 if not errors:
                     try:
-                        obj.save()
+                        if owner:
+                            owner.add_owned_spec(obj)
+                        else:
+                            obj.save()
                     except me.ValidationError as e:
                         errors = validation_fields(e)
                     else:
                         flask.flash(f"Successfully saved {obj}", 'success')
+                        if owner:
+                            return flask.redirect(flask.url_for(
+                                'component.view', object=owner))
                         return flask.redirect(flask.url_for('.view',
                                                             object=obj))
             return flask.render_template(f'edit_{self.clsname}.html',
@@ -338,6 +363,26 @@ class CollectionViews(flask.Blueprint):
             self._create_spectra_endpoints()
         if issubclass(self.doc_cls, Component):
             self._create_plot_endpoints()
+
+        if issubclass(self.doc_cls, Component):
+            @self.post('/<objid>/makespecific/<specid>')
+            def make_specific(specid):
+                """ Replace a shared spec with a copy of our own """
+                check_writable(flask.g.active_version)
+                component = flask.g.object
+                spec = next((s for s in component.specs
+                             if str(getattr(s, 'original_id', '')) == specid),
+                            None)
+                if spec is None:
+                    flask.abort(404, "No such spec on this component")
+                if spec.owner is not None:
+                    flask.abort(400, f"{spec.name} already belongs to "
+                                     f"{component.name}")
+                copy = component.make_specific(spec)
+                flask.flash(f"{component.name} now has its own copy of "
+                            f"{spec.name}", 'success')
+                return flask.redirect(flask.url_for('emissionspec.edit',
+                                                    object=copy))
 
         @self.get('/<objid>/sourceterms')
         def sourceterms():

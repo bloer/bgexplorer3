@@ -188,6 +188,70 @@ class TestComponentPages(AppTestCase):
         self.assertEqual(Component.select_version('main').get(name='c1')
                          .location_overrides, [])
 
+    def test_owned_specs(self):
+        """ a component can create specs of its own, or copy a shared one """
+        html = self.html(self.client.get(self.url('component.view', 'b',
+                                                  object=self.c1)))
+        self.assertIn('id="newownspec"', html)
+        self.assertIn('class="d-inline makespecific"', html)
+        url = self.url('emissionspec.edit', 'b', type='emissionspec',
+                       owner=self.c1.original_id)
+        self.assertIn(f'Belongs to', self.html(self.client.get(url)))
+        response = self.client.post(url, data={
+            'name': 'c1 own', '_listfields': 'sources', 'sources.id': '',
+            'sources.name': 'Co60', 'sources.rate': '1 mBq/kg'})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(self.url('component.view', 'b', object=self.c1),
+                      response.headers['Location'])
+        c1 = Component.select_version('b').get(name='c1')
+        self.assertEqual([s.name for s in c1.specs], ['e1', 'c1 own'])
+        own = c1.specs[1]
+        self.assertEqual(own.owner.original_id, c1.original_id)
+        self.assertEqual(own.version_tags, ['b'])
+
+        # owned specs are only listed on request, and not in the picker
+        overview = self.url('emissionspec.overview', 'b')
+        link = '>c1 own</a>'
+        self.assertNotIn(link, self.html(self.client.get(overview)))
+        self.assertNotIn(link, self.html(self.client.get(
+            self.url('emissionspec.overview', 'b', embedded=1))))
+        self.assertIn(link, self.html(self.client.get(
+            self.url('emissionspec.overview', 'b', owned=1))))
+
+        # editing the component keeps them, and marks them
+        html = self.html(self.client.get(self.url('component.edit', 'b',
+                                                  object=c1)))
+        self.assertIn('owned', html)
+        self.assertNotIn('name="owner"', self.html(self.client.get(
+            self.url('emissionspec.edit', 'b', object=own))))
+
+        # make e1 specific
+        response = self.client.post(self.url(
+            'component.make_specific', 'b', object=c1,
+            specid=self.e1.original_id))
+        self.assertEqual(response.status_code, 302)
+        c1 = Component.select_version('b').get(name='c1')
+        self.assertEqual([(s.name, s.owner.name) for s in c1.specs],
+                         [('e1 (c1)', 'c1'), ('c1 own', 'c1')])
+        self.assertIn(self.url('emissionspec.edit', 'b', object=c1.specs[0]),
+                      response.headers['Location'])
+        # but not twice
+        self.assertEqual(self.client.post(self.url(
+            'component.make_specific', 'b', object=c1,
+            specid=c1.specs[0].original_id)).status_code, 400)
+        # main is untouched
+        self.assertEqual([s.name for s in Component.select_version('main')
+                          .get(name='c1').specs], ['e1'])
+
+        # deleting the component deletes them
+        html = self.html(self.client.get(self.url('component.delete', 'b',
+                                                  object=c1)))
+        self.assertIn('Its own specs are deleted', html)
+        self.client.post(self.url('component.delete', 'b', object=c1))
+        self.assertEqual(EmissionSpec.select_version('b')(
+            owner__ne=None).count(), 0)
+        self.assertEqual(EmissionSpec.select_version('b').count(), 1)
+
     def import_file(self, version, data, filename):
         return self.client.post(
             self.url('component.import_', version),
