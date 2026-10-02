@@ -1,6 +1,7 @@
 import mongoengine
 from .component import Component, Assembly
 from .emissionspec import EmissionSpec
+from .cosmogenic import ActivatedMaterial, CosmogenicActivation
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, CalculatedResults, find_sourceterms
 from . import settings
@@ -134,6 +135,22 @@ def update_emissionspec(sender, document, **kwargs):
         update_component(sender=None, document=component)
 
 
+def update_activatedmaterial(sender, document, **kwargs):
+    material = document
+    # recalculate the activations of the material, which update their
+    # components in turn
+    for spec in CosmogenicActivation.select_version(
+            material.active_version)(material=material):
+        spec.save()
+
+
+def delete_activatedmaterial(sender, document, **kwargs):
+    # activations can't be calculated without their material
+    for spec in CosmogenicActivation.select_version(
+            document.active_version)(material=document):
+        spec.delete()
+
+
 def clear_results(sourceterm_ids):
     """ Delete the cached CalculatedResults that include any of the
     SourceTerms with the given ids
@@ -207,6 +224,8 @@ def post_save(sender, document, **kwargs):
         update_emissionspec(sender, document, **kwargs)
     elif isinstance(document, HitEfficiency):
         update_hiteff(sender, document, **kwargs)
+    elif isinstance(document, ActivatedMaterial):
+        update_activatedmaterial(sender, document, **kwargs)
 
 
 def pre_delete(sender, document, **kwargs):
@@ -214,6 +233,8 @@ def pre_delete(sender, document, **kwargs):
         delete_component(sender, document, **kwargs)
     elif isinstance(document, HitEfficiency):
         before_delete_hiteff(sender, document, **kwargs)
+    elif isinstance(document, ActivatedMaterial):
+        delete_activatedmaterial(sender, document, **kwargs)
 
 
 def post_delete(sender, document, **kwargs):

@@ -36,6 +36,27 @@
         {{ utils.print_doclist(g.object, 'isotopes', ['isotope', 'activationrate', 'comment']) }}
     </div>
 </div>
+<div class="row mb-3" id="activations">
+    <h2>Activations</h2>
+    {%- if activations %}
+    <table class="table">
+        <thead><tr><th>Name</th><th>Belongs to</th><th>Periods</th></tr></thead>
+        <tbody>
+            {% for spec in activations %}
+            <tr class="activation" data-id="{{ spec.id }}" data-original_id="{{ spec.original_id }}">
+                <td><a href="{{ url_for('emissionspec.view', object=spec) }}">{{ spec.name }}</a></td>
+                <td>{% if spec.owner %}<a href="{{ url_for('component.view', object=spec.owner) }}">{{ spec.owner.name }}</a>{% endif %}</td>
+                <td>{{ spec.periods | length }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {%- else %}
+    <p class="text-secondary">Not used yet. Create a
+        <a href="{{ url_for('emissionspec.edit', type='cosmogenicactivation') }}">CosmogenicActivation</a>
+        spec to calculate its activity for an exposure history.</p>
+    {%- endif %}
+</div>
 {%- if g.object.publication %}
 <div class="row mb-3">
     <div class="col-md-6 col-lg-4">

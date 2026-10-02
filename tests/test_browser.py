@@ -16,7 +16,8 @@ from bgexplorer.application.plotting import ONE_SIGMA_CL
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.common import units
 from bgexplorer.models.component import Component, Assembly, Placement
-from bgexplorer.models.cosmogenic import ActivatedMaterial, CosmogenicIsotope
+from bgexplorer.models.cosmogenic import (ActivatedMaterial, CosmogenicIsotope,
+                                          CosmogenicActivation)
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.hiteff import HitEfficiency
@@ -493,39 +494,48 @@ class TestReferencePicker(BrowserTestCase):
         vc.create_version('main')
         self.cu = ActivatedMaterial(name='Cu', isotopes=[CosmogenicIsotope(
             isotope='Co60', activationrate='97 1/kg/day')]).save()
-        self.c1 = Component(name='c1', mass='1 kg').save()
+        self.spec = CosmogenicActivation(name='a1', material=self.cu).save()
+        ActivatedMaterial(name='Fe', isotopes=[CosmogenicIsotope(
+            isotope='Mn54', activationrate='30 1/kg/day')]).save()
 
     def material(self):
-        return Component.objects.get(name='c1').activated_material
+        return EmissionSpec.objects.get(name='a1').material
 
-    def test_choose_and_clear(self):
-        page = self.open(self.url('component.edit', object=self.c1))
-        picker = page.locator('#activated_material')
-        self.assertEqual(picker.locator('.referencename').inner_text(),
-                         'none')
+    def choose(self, page, picker, name):
         picker.locator('button.referenceSelector').click()
         # bootstrap ignores hide() until the modal has finished opening
         page.wait_for_function("document.getElementById("
                                "'selectReferenceModal').classList"
                                ".contains('show')")
         page.wait_for_timeout(500)
-        page.locator('#selectReferenceModalBody a:text-is("Cu")').click()
+        page.locator(f'#selectReferenceModalBody a:text-is("{name}")').click()
         page.wait_for_selector('#selectReferenceModal', state='hidden')
-        self.assertEqual(picker.locator('.referencename').inner_text(), 'Cu')
-        page.click('#mainform button[type=submit] >> nth=0')
-        page.wait_for_url(self.base + self.url('component.view',
-                                               object=self.c1))
-        self.assertEqual(self.material().name, 'Cu')
 
-        page.goto(self.base + self.url('component.edit', object=self.c1))
+    def test_choose_and_clear(self):
+        url = self.url('emissionspec.edit', object=self.spec)
+        page = self.open(url)
+        picker = page.locator('#material')
         self.assertEqual(picker.locator('.referencename').inner_text(), 'Cu')
+        self.choose(page, picker, 'Fe')
+        self.assertEqual(picker.locator('.referencename').inner_text(), 'Fe')
+        page.click('#mainform button[type=submit] >> nth=0')
+        page.wait_for_url(self.base + self.url('emissionspec.view',
+                                               object=self.spec))
+        self.assertEqual(self.material().name, 'Fe')
+        self.assertEqual([s.name for s in EmissionSpec.objects.get(
+            name='a1').sources], ['Mn54'])
+
+        # a material is required, so clearing it is an error
+        page.goto(self.base + url)
+        self.assertEqual(picker.locator('.referencename').inner_text(), 'Fe')
         picker.locator('button.referenceClear').click()
         self.assertEqual(picker.locator('.referencename').inner_text(),
                          'none')
         page.click('#mainform button[type=submit] >> nth=0')
-        page.wait_for_url(self.base + self.url('component.view',
-                                               object=self.c1))
-        self.assertIsNone(self.material())
+        page.wait_for_selector('#toperror')
+        self.assertEqual(self.material().name, 'Fe')
+        # the form is shown again with a 400, which the console reports
+        self.errors[:] = [e for e in self.errors if '(BAD REQUEST)' not in e]
 
 
 class TestLocationOverrideEditor(BrowserTestCase):

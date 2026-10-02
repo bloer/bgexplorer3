@@ -57,6 +57,10 @@ def get_tau(source: IsotopeType) -> Optional[units.Quantity]:
     if halflife is not None:
         return halflife / _ln2
 
+def decayed_fraction(t: units.Quantity, tau: units.Quantity) -> float:
+    """ Fraction of atoms with mean lifetime `tau` that decay within `t` """
+    return 1 - math.exp(-(t / tau).to('').m)
+
 def concentration_to_rate(source: IsotopeType,
                           concentration: Union[float, units.Quantity],
                           applyabundance: Optional[bool] = None,

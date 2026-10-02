@@ -10,7 +10,7 @@ from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
 from ..models.component import Component, Assembly
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
-from ..models.cosmogenic import ActivatedMaterial
+from ..models.cosmogenic import ActivatedMaterial, CosmogenicActivation
 from ..models.fields import InlineAttachment
 from ..models.importexport import iter_json_documents, import_documents
 from ..models.verdoc import check_writable
@@ -123,10 +123,10 @@ class CollectionViews(flask.Blueprint):
                              obj.active_version)(specs=obj)),
                          endpoint='component')]
         if isinstance(obj, ActivatedMaterial):
-            return [dict(text="Removed from these components:",
-                         docs=list(Component.select_version(
-                             obj.active_version)(activated_material=obj)),
-                         endpoint='component')]
+            return [dict(text="These activations of it are deleted:",
+                         docs=list(CosmogenicActivation.select_version(
+                             obj.active_version)(material=obj)),
+                         endpoint='emissionspec')]
         if isinstance(obj, HitEfficiency):
             count = find_sourceterms(obj).count()
             return [dict(text=f"Removed from {count} source terms, which "
@@ -202,11 +202,16 @@ class CollectionViews(flask.Blueprint):
             components = []
             if self.clsname == 'emissionspec':
                 components = Component.select_version(flask.g.active_version)(specs=flask.g.object)
+            activations = []
+            if self.clsname == 'activatedmaterial':
+                activations = CosmogenicActivation.select_version(
+                    flask.g.active_version)(material=flask.g.object)
             # types of spec a component can create for itself
             spectypes = [name.rsplit('.', 1)[-1]
                          for name in EmissionSpec._subclasses]
             return flask.render_template(f'view_{self.clsname}.html',
                                          components=components,
+                                         activations=activations,
                                          spectypes=spectypes)
 
         @self.route('/new', methods=['GET', 'POST'])

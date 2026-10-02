@@ -12,7 +12,6 @@ from .verdoc import (VersionedDocument, VersionedReferenceField,
                      ref_id)
 from .fields import QuantityField, AttachmentsField
 from .emissionspec import EmissionSpec
-from .cosmogenic import ActivatedMaterial
 from .common import units, validate_unique_ids
 from .isotope import compare_source_names
 
@@ -106,10 +105,6 @@ class Component(VersionedDocument):
                                reverse_delete_rule=PULL,
                                endpoint='emissionspec',
                                ))
-    activated_material = VersionedReferenceField(
-        ActivatedMaterial, reverse_delete_rule=NULLIFY,
-        endpoint='activatedmaterial',
-        help_text="Cosmogenic activation rates for this component")
     location_overrides = VersionedEmbeddedDocumentListField(LocationOverride)
 
     meta = {'allow_inheritance': True}

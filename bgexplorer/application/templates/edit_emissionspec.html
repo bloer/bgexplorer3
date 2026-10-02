@@ -1,6 +1,12 @@
 {% extends "versionbase.html" %}
 {% from "forms.html" import formfield, formscripts, subdocform, dynamictable, maptable, modal with context %}
 {% import "utils.html" as utils %}
+{% import "datatable.html" as datatable %}
+
+{#- the reference picker shows a datatable, e.g. for a CosmogenicActivation's material #}
+{%- block pagestyle %}
+{{ datatable.styles() }}
+{%- endblock pagestyle -%}
 
 {%- set isnew = g.object.original_id is none -%}
 {%- set typename = g.object._class_name.rsplit('.', 1)[-1] -%}
@@ -56,7 +62,7 @@
         <legend>Sources</legend>
         {%- if g.object.COMPUTED_SOURCES %}
         <p class="form-text">These sources are calculated from the fields below when saved.
-            {%- if g.object.periods is defined %} Already know the Pb210 surface activity? Create a plain
+            {%- if typename == 'RadonExposure' %} Already know the Pb210 surface activity? Create a plain
             <a href="{{ url_for('.edit', type='emissionspec') }}">Emission spec</a> with category radon instead.{% endif %}</p>
         <div id="computedsources">
         {{ utils.print_doclist(g.object, 'sources', ['name', 'comment', 'rate', 'multiplier']) }}
@@ -108,6 +114,7 @@
 
 {% block pagescripts %}
 {{ formscripts() }}
+{{ datatable.scripts(initialize=false) }}
 {%- if not g.object.COMPUTED_SOURCES %}
 <script>
     // an edited default becomes an override when saved

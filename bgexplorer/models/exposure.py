@@ -1,5 +1,4 @@
 from enum import Enum
-from math import exp
 from bson import ObjectId
 from mongoengine import (EmbeddedDocument, EmbeddedDocumentListField,
                          EnumField, ObjectIdField, StringField,
@@ -8,18 +7,13 @@ from .emissionspec import (EmissionSpec, EmissionSource, Multiplier,
                            SourceCategory)
 from .fields import QuantityField, UncertainQuantityField
 from .common import units
-from .isotope import get_tau
+from .isotope import get_tau, decayed_fraction as _decayed
 
 _tau_rn222 = get_tau('Rn222')
 _tau_pb210 = get_tau('Pb210')
 
 SURFACES = (Multiplier.surface, Multiplier.inner_surface,
             Multiplier.outer_surface)
-
-
-def _decayed(t, tau) -> float:
-    """ Fraction of atoms with mean lifetime `tau` that decay within `t` """
-    return 1 - exp(-(t / tau).to('').m)
 
 
 class RadonMode(Enum):
@@ -84,22 +78,17 @@ class RadonExposure(EmissionSpec):
         if self.multiplier not in SURFACES:
             raise ValidationError("Radon plates out on a surface",
                                   field_name='multiplier')
-        # keep the id so correlations and anything keyed to it stay the same
-        old = [s for s in self.sources if not s.generated_from]
-        sources = [s for s in self.sources if s.generated_from]
+        sources = []
         # incomplete periods are reported by field validation
         if self.periods and all(p.radonlevel is not None and
                                 p.duration is not None and
                                 p.columnheight is not None
                                 for p in self.periods):
             total = sum((p.duration for p in self.periods), 0 * units.day)
-            source = EmissionSource(
+            sources.append(EmissionSource(
                 name='Pb210', category=SourceCategory.radon,
                 multiplier=self.multiplier, rate=self.pb210_rate(),
                 comment=f"Radon plate-out over {len(self.periods)} "
-                        f"period(s), {total:~.3g} total")
-            if old:
-                source.id = old[0].id
-            sources.insert(0, source)
-        self.sources = sources
+                        f"period(s), {total:~.3g} total"))
+        self._set_computed_sources(sources)
         super().clean()
