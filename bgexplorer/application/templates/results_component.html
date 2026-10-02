@@ -27,8 +27,10 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
         {%- if g.relativeto is defined %} as placed in {{ g.relativeto.name }}{% endif %},
         grouped by component, material, source isotope and source category. Values are
         shown as red points with 1&sigma; errors, and upper limits as blue lines ending
-        at the 90% upper limit. Click the labels to filter the other charts and the
-        contributions table.</p>
+        at the 90% upper limit. These are different confidence levels, so a value that
+        includes a large limit, e.g. a measurement summed with a limit, can have an
+        error bar that reaches less far than that limit drawn on its own. Click the
+        labels to filter the other charts and the contributions table.</p>
         {% if scalars %}
         <div id="budgetplot" class="plotcontainer"></div>
         {% else %}
