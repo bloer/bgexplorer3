@@ -338,11 +338,16 @@ class TestSerializeExpressions(unittest.TestCase):
             z + AsymmetricUncertainty(1, 1)
         with self.assertRaises(CorrelationsNotLoaded):
             AsymmetricUncertainty(1, 1) + z
+        # scaling by constants is fine, e.g. to convert units
+        for scaled, s0 in ((z * 2, 8), (z / 2, 2), (-z, 4), (z + 1, 4)):
+            self.assertAlmostEqual(scaled.s0, s0)
+            self.assertFalse(scaled.correlations_loaded)
+        self.assertAlmostEqual((z * units('kg')).to('g').m.s0, 4000)
         with self.assertRaises(CorrelationsNotLoaded):
-            z * 2
-        # without correlations it's fine
+            (z * 2) + AsymmetricUncertainty(1, 1)
+        # and so is anything when ignoring correlations
         with AsymmetricUncertainty.ignore_correlations():
-            self.assertAlmostEqual((z * 2).s0, 8)
+            self.assertAlmostEqual((z + AsymmetricUncertainty(0, 3)).s0, 5)
 
 
 def json_terms(value):

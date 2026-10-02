@@ -106,7 +106,8 @@ class EmissionSource(EmbeddedDocument):
     name = StringField(required=True)
     comment = StringField()
     category = EnumField(SourceCategory)
-    rate = UncertainQuantityField(allownone=True)
+    # computed rates stay correlated with what they're computed from
+    rate = UncertainQuantityField(allownone=True, expressions='inline')
     multiplier = EnumField(Multiplier)
     particle = StringField()
     spectrum = StringField()

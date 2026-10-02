@@ -11,7 +11,7 @@ import io
 import re
 from collections.abc import Mapping
 
-from .asymmetric import AsymmetricUncertainty
+from .asymmetric import AsymmetricUncertainty, LinearExpression
 from .arrays import encode_array, decode_array, is_encoded_array
 from .histogram import Histogram
 from .common import units as unitreg
@@ -96,10 +96,26 @@ def as_leaf(value):
     """ `value`, with its magnitude a new leaf if it was calculated from
     others. Values stored without their correlations become new variables
     """
+    if isinstance(value, AsymmetricUncertainty):
+        return (value if value.isleaf else
+                AsymmetricUncertainty(value.mode, value.s0, value.s1))
     m = getattr(value, 'm', None)
     if not isinstance(m, AsymmetricUncertainty) or m.isleaf:
         return value
     return pint.Quantity(AsymmetricUncertainty(m.mode, m.s0, m.s1), value.u)
+
+
+class RawDictField(BaseField):
+    """ A dict stored as is. Unlike DictField, bytes in it (e.g. encoded
+    arrays) aren't converted to lists
+    """
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault('default', dict)
+        super().__init__(*args, **kwargs)
+
+    def validate(self, value):
+        if not isinstance(value, Mapping):
+            self.error(f"Value must be a dict, got {type(value)}")
 
 
 def utostr(unit):
@@ -151,14 +167,26 @@ class QuantityField(BaseField):
                    None to that value
         convert: if True, convert provided value to units
         forceasym: if True, force the value to be an AsymmetricUncertainty
+        expressions: how to store an AsymmetricUncertainty calculated from
+                     others. None: as a new independent variable. 'inline':
+                     with the expression it was calculated from, so it's
+                     loaded correlated with them. 'separate': marked as
+                     calculated, and loaded without its correlations; the
+                     document stores the expression elsewhere
     """
+    EXPRESSIONS = (None, 'inline', 'separate')
+
     def __init__(self, *args,
                  units: Optional[UnitType] = None,
                  allownone: Union[bool, int, float] = True,
                  convert: bool = False,
                  forceasym: bool = False,
+                 expressions: Optional[str] = None,
                  **kwargs):
         super().__init__(*args, **kwargs)
+        if expressions not in self.EXPRESSIONS:
+            raise ValueError(f"expressions must be one of {self.EXPRESSIONS}")
+        self.expressions = expressions
         if not hasattr(units, 'dimensionality') and units is not None:
             units = unitreg(units)
         self.units = units
@@ -226,7 +254,18 @@ class QuantityField(BaseField):
         if isinstance(value, Mapping):
             value = decompress(value)
             units = value.pop('units', units)
-            if 'sigma' in value:
+            derived = value.pop('derived', False)
+            expr = value.pop('expr', None)
+            if derived:
+                # calculated from other variables
+                if expr is not None:
+                    value = AsymmetricUncertainty(
+                        value['value'], value['sigma'], value.get('sigmaup'),
+                        expression=LinearExpression.from_terms(expr))
+                else:
+                    value = AsymmetricUncertainty.without_correlations(
+                        value['value'], value['sigma'], value.get('sigmaup'))
+            elif 'sigma' in value:
                 value = AsymmetricUncertainty(**value)
             else:
                 value = value['value']
@@ -242,7 +281,8 @@ class QuantityField(BaseField):
         if self.convert:
             value.ito(self.units)
 
-        return as_leaf(with_id(value, stored_id))
+        value = with_id(value, stored_id)
+        return value if self.expressions else as_leaf(value)
 
     def to_mongo(self, value):
         if _fromstr := get_fromstr(value):
@@ -253,10 +293,19 @@ class QuantityField(BaseField):
             return value
         result = dict(value=value.m)
         if isinstance(value.m, AsymmetricUncertainty):
-            result = as_leaf(value).m.todict()
+            result = self._au_to_mongo(value.m)
         if not value.dimensionless:
             result['units'] = utostr(value.u)
         return compress(result)
+
+    def _au_to_mongo(self, au: AsymmetricUncertainty) -> dict:
+        if au.isleaf or not self.expressions:
+            return as_leaf(au).todict()
+        result = au.todict()
+        result['derived'] = True
+        if self.expressions == 'inline':
+            result['expr'] = au.serialize_expression()
+        return result
 
     def validate(self, value):
         if value is None and self.allownone:

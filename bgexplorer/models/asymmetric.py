@@ -650,12 +650,30 @@ class AsymmetricUncertainty:
     def average(self, other, weight1=1, weight2=1):
         return (self*weight1).addtreatzero(other*weight2)/(weight1 + weight2)
 
+    def _constant_op(self, op, other):
+        """ For a value loaded without its correlations, `op(self, other)`
+        for a constant `other`, which is also without them. None if that
+        doesn't apply
+        """
+        if (self.correlations_loaded or self.get_ignore_correlations() or
+                isinstance(other, AsymmetricUncertainty) or
+                hasattr(other, 'dimensionality')):
+            return None
+        with self.ignore_correlations():
+            result = op(self, other)
+        return AsymmetricUncertainty.without_correlations(
+            result.mode, result.s0, result.s1)
+
     def __neg__(self):
         if self.get_ignore_correlations():
             return AsymmetricUncertainty(-self.mode, self.s1, self.s0)
+        if not self.correlations_loaded:
+            return self._constant_op(operator.mul, -1)
         return (self.expression * -1).evaluate()
 
     def __add__(self, other):
+        if (result := self._constant_op(operator.add, other)) is not None:
+            return result
         if self.get_ignore_correlations():
             try:
                 return AsymmetricUncertainty(self.mode + other.mode,
@@ -683,6 +701,8 @@ class AsymmetricUncertainty:
         # we're immutable, so the same variable, e.g. for pint units
         if _isone(other):
             return self
+        if (result := self._constant_op(operator.mul, other)) is not None:
+            return result
 
         if self.get_ignore_correlations():
             # when the multiplier is negative, our error distributions switch
@@ -720,6 +740,9 @@ class AsymmetricUncertainty:
             return other.__class__(self * other.m, other.u)
         if _isone(other):
             return self
+        if (result := self._constant_op(operator.truediv, other)
+                ) is not None:
+            return result
 
         if self.get_ignore_correlations():
             try:

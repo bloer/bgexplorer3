@@ -399,8 +399,10 @@ class CollectionViews(flask.Blueprint):
         """ Data for the spectra and budget plots of a Component """
         @self.get('/<objid>/spectra.json')
         def spectra_json():
+            # only shown, so stored spectra don't need their expressions
             results = CalculatedResults.for_object(
-                flask.g.object, flask.g.get('relativeto'))
+                flask.g.object, flask.g.get('relativeto'),
+                correlations=False)
             config = get_settings(flask.g.active_version)\
                 .hiteffdbconfig.display_spectra
             spectra = {}

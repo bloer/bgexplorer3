@@ -11,7 +11,10 @@ from .verdoc import (VersionedDocument, VersionedReferenceField,
 from .verdoc import ref_id as _ref_id
 from .component import Component, Placement, Assembly
 from .emissionspec import EmissionSpec, EmissionSource, Multiplier
-from .fields import QuantityField, UncertainQuantityField, HistogramField
+from .fields import (QuantityField, UncertainQuantityField, HistogramField,
+                     RawDictField)
+from .asymmetric import AsymmetricUncertainty, LinearExpression
+from .histogram import Histogram
 from .hiteff import HitEfficiency
 from .isotope import concentration_to_rate
 from .common import units, addnone, multnone
@@ -262,29 +265,79 @@ class CalculatedResults(Document):
     """ Cache normalized HitEff results """
     # TODO: should this be a versioned document? it's acting as a cache
     # TODO: how to make sure there are no scalars/rois collisions?
-    scalars = MapField(UncertainQuantityField(allownone=True),
+    scalars = MapField(UncertainQuantityField(allownone=True,
+                                              expressions='separate'),
                        required=False, default=dict)
-    spectra = MapField(HistogramField(allownone=True),
+    spectra = MapField(HistogramField(allownone=True,
+                                      expressions='separate'),
                        required=False, default=dict)
+    # the expressions of the values, which are big for spectra, so that
+    # the values can be loaded without them
+    scalars_expr = RawDictField()
+    spectra_expr = RawDictField()
     sources = SortedListField(ReferenceField(SourceTerm,
                                              reverse_delete_rule=CASCADE))
     meta = {'indexes': ['sources']}
+    EXPR_FIELDS = ('scalars_expr', 'spectra_expr')
+
+    def clean(self):
+        super().clean()
+        for name, values, get in (('scalars_expr', self.scalars, _magnitude),
+                                  ('spectra_expr', self.spectra,
+                                   _hist_magnitude)):
+            exprs = dict(getattr(self, name) or {})
+            for key, value in values.items():
+                au = get(value)
+                # values loaded without theirs keep what's stored
+                if au is not None and au.correlations_loaded:
+                    expr = au.serialize_expression()
+                    if expr is None:
+                        exprs.pop(key, None)
+                    else:
+                        exprs[key] = expr
+            setattr(self, name, exprs)
+
+    def load_correlations(self) -> 'CalculatedResults':
+        """ Give values loaded without their correlations the expressions
+        stored for them. Returns self
+        """
+        for values, exprs, get in ((self.scalars, self.scalars_expr,
+                                    _magnitude),
+                                   (self.spectra, self.spectra_expr,
+                                    _hist_magnitude)):
+            for key, value in values.items():
+                au = get(value)
+                if au is None or au.correlations_loaded or key not in exprs:
+                    continue
+                correlated = AsymmetricUncertainty(
+                    au.mode, au.s0, au.s1,
+                    expression=LinearExpression.from_terms(exprs[key]))
+                if isinstance(value, Histogram):
+                    value.hist = units.Quantity(correlated, value.hist.u)
+                else:
+                    values[key] = units.Quantity(correlated, value.u)
+        return self
 
     @classmethod
     def for_object(cls, obj, relativeto: Optional[Assembly] = None,
                    save: bool = True, spectra: bool = True,
-                   cache: bool = True):
+                   cache: bool = True, correlations: bool = True):
         """ Calculate results for all SourceTerms of `obj`, optionally
         only the part in assembly `relativeto`. If `cache`, results are
         kept in memory until any data in the version changes.
+
+        If not `correlations`, saved results are loaded without their
+        correlations, which is faster when they're only shown.
         """
         def calculate():
             sts = find_sourceterms(obj=obj, relativeto=relativeto)
-            return cls.from_sourceterms(sts, save=save, spectra=spectra)
+            return cls.from_sourceterms(sts, save=save, spectra=spectra,
+                                        correlations=correlations)
         if not cache:
             return calculate()
         key = _cache_key(obj, 'object', type(obj).__name__, _ref_id(obj),
-                         relativeto and _ref_id(relativeto), spectra)
+                         relativeto and _ref_id(relativeto), spectra,
+                         correlations)
         return _cached(key, calculate)
 
     @classmethod
@@ -411,10 +464,20 @@ class CalculatedResults(Document):
                    sources=list(sourceterms)).ito_reduced_units()
 
     @classmethod
-    def from_db(cls, sourceterms: List[SourceTerm]):
+    def from_db(cls, sourceterms: List[SourceTerm],
+                correlations: bool = True
+                ) -> Optional['CalculatedResults']:
+        """ The saved results for exactly `sourceterms`, if any. If not
+        `correlations`, their values are loaded without them, see
+        `AsymmetricUncertainty.without_correlations`
+        """
         ids = list(sorted(st.id for st in sourceterms))
         # can we do this with a match query?
-        return cls.objects(__raw__={'sources': {'$eq': ids}}).first()
+        query = cls.objects(__raw__={'sources': {'$eq': ids}})
+        if not correlations:
+            return query.exclude(*cls.EXPR_FIELDS).first()
+        result = query.first()
+        return result and result.load_correlations()
 
     @classmethod
     def from_sourceterm(cls, sourceterm: SourceTerm, allowcache: bool = True,
@@ -427,17 +490,19 @@ class CalculatedResults(Document):
     @classmethod
     def from_sourceterms(cls, sourceterms: Iterable[SourceTerm],
                          allowcache: bool = True, save: bool = False,
-                         spectra: bool = True,
+                         spectra: bool = True, correlations: bool = True,
                          ) -> Optional['CalculatedResults']:
         """ Calculate the sum of results for all `sourceterms`. Returns None
         if none of them have hiteffs.
 
         If `allowcache`, first look for a saved result in the database. If
         `save`, save the result. If not `spectra`, only calculate scalars;
-        these partial results are never saved.
+        these partial results are never saved. If not `correlations`, saved
+        results are loaded without them.
         """
         sourceterms = list(sourceterms)
-        if allowcache and (result := cls.from_db(sourceterms)) is not None:
+        if allowcache and (result := cls.from_db(sourceterms, correlations)
+                           ) is not None:
             return result
         hiteffs = load_hiteffs(sourceterms, spectra)
         result = cls._sum(sourceterms, (cls._calculate(st, hiteffs, spectra)
@@ -492,6 +557,15 @@ class ResultsCache:
 RESULTS_CACHE_SIZE = 128
 _MISSING = object()
 _results_cache = ResultsCache(RESULTS_CACHE_SIZE)
+
+
+def _magnitude(value) -> Optional[AsymmetricUncertainty]:
+    m = getattr(value, 'm', None)
+    return m if isinstance(m, AsymmetricUncertainty) else None
+
+
+def _hist_magnitude(value) -> Optional[AsymmetricUncertainty]:
+    return _magnitude(getattr(value, 'hist', None))
 
 
 def _cache_key(obj, *args) -> Optional[tuple]:
