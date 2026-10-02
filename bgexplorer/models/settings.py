@@ -105,12 +105,24 @@ def hold_locks(version_tags: Iterable[str], reason: str,
         # a fixed order, so concurrent callers can't each hold half
         for tag in sorted(set(version_tags)):
             tokens[tag] = acquire_lock(tag, reason, user)
-        reset = verdoc.held_locks.set(verdoc.held_locks.get() | set(tokens))
-        try:
-            yield
-        finally:
-            verdoc.held_locks.reset(reset)
+    except BaseException:
+        for tag, token in tokens.items():
+            release_lock(tag, token)
+        raise
+    with holding(tokens):
+        yield
+
+
+@contextlib.contextmanager
+def holding(tokens: dict) -> Iterator[None]:
+    """ Allow writes to the versions locked with {version_tag: token}
+    during the context, then release the locks
+    """
+    reset = verdoc.held_locks.set(verdoc.held_locks.get() | set(tokens))
+    try:
+        yield
     finally:
+        verdoc.held_locks.reset(reset)
         for tag, token in tokens.items():
             release_lock(tag, token)
 

@@ -17,6 +17,7 @@ class EventAction(Enum):
     merge = 'merge'
     merge_rollback = 'merge_rollback'
     clear_lock = 'clear_lock'
+    import_version = 'import_version'
 
 
 class VersionEvent(Document):
@@ -48,6 +49,8 @@ class VersionEvent(Document):
             EventAction.merge_rollback: (f"Merge of {other} into "
                                          f"{self.version} rolled back"),
             EventAction.clear_lock: f"Lock on {self.version} cleared",
+            EventAction.import_version: (f"{self.version} imported from a "
+                                         f"file of {other}"),
         }[self.action]
         return f"{text}: {self.message}" if self.message else text
 
