@@ -3,7 +3,10 @@ from mongoengine import (Document, DateTimeField, StringField, BooleanField,
                          FloatField, EnumField, MapField, URLField,
                          EmbeddedDocumentField, ListField, BinaryField,
                          ValidationError, ObjectIdField)
+from mongoengine.connection import get_db
 from bson import ObjectId
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 from .fields import UnitField, QuantityField
 from . import hiteff
 from . import verdoc
@@ -11,6 +14,7 @@ from .common import units
 from enum import Enum
 from typing import Optional, Iterable, Iterator
 import contextlib
+import secrets
 import datetime
 import logging
 log = logging.getLogger(__name__)
@@ -134,6 +138,23 @@ def get_application_settings() -> 'ApplicationSettings':
     except ApplicationSettings.DoesNotExist:
         log.warning("No ApplicationSettings found, creating default")
         return ApplicationSettings().save()
+
+
+def get_secret_key() -> str:
+    """ The server's generated secret key, created the first time it's
+    needed. It's kept in its own collection, so it's shared by every process
+    using the database, but isn't part of any settings or exports
+    """
+    coll = get_db()['server_secrets']
+    query = {'_id': 'secret_key'}
+    try:
+        doc = coll.find_one_and_update(
+            query, {'$setOnInsert': {'value': secrets.token_hex()}},
+            upsert=True, return_document=ReturnDocument.AFTER)
+    except DuplicateKeyError:
+        # another process created it at the same time
+        doc = coll.find_one(query)
+    return doc['value']
 
 
 class RatioType(Enum):

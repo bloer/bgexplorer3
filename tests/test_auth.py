@@ -1,7 +1,7 @@
 """ Logging in, and what each role can do """
 import flask
 from bgexplorer.application.app import create_app
-from bgexplorer.models.settings import (ApplicationSettings,
+from bgexplorer.models.settings import (ApplicationSettings, get_secret_key,
                                         get_application_settings)
 from bgexplorer.models.users import User, Role
 from bgexplorer.models import versioncontrol as vc
@@ -149,12 +149,15 @@ class TestLogin(AuthTestCase):
         self.assertEqual(self.login('u1', new, client=other).status_code, 302)
 
     def test_secret_key(self):
-        with self.assertRaisesRegex(RuntimeError, 'SECRET_KEY'):
-            create_app(config={'TESTING': False, 'DEBUG': False,
-                               'SECRET_KEY': None})
-        app = create_app(config={'TESTING': True, 'SECRET_KEY': None,
-                                 'MONGODB_URI': TEST_MONGODB_URI})
-        self.assertTrue(app.config['SECRET_KEY'])
+        """ Without a configured key, every app shares a stored one """
+        config = {'TESTING': False, 'DEBUG': False, 'SECRET_KEY': None,
+                  'MONGODB_URI': TEST_MONGODB_URI}
+        key = create_app(config=config).config['SECRET_KEY']
+        self.assertTrue(key)
+        self.assertEqual(create_app(config=config).config['SECRET_KEY'], key)
+        self.assertEqual(get_secret_key(), key)
+        configured = create_app(config=dict(config, SECRET_KEY='abc'))
+        self.assertEqual(configured.config['SECRET_KEY'], 'abc')
 
 
 class TestRoles(AuthTestCase):

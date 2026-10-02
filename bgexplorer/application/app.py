@@ -3,11 +3,11 @@ from flask_bootstrap import Bootstrap5
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.exceptions import HTTPException
 import mongoengine
-import secrets
 import enum
+import logging
 import importlib
 from ..models.settings import (get_settings, get_application_settings,
-                               ApplicationSettings)
+                               get_secret_key, ApplicationSettings)
 from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
@@ -28,6 +28,7 @@ from . import auth
 
 from ..models.asymmetric import AsymmetricUncertainty
 import pint
+log = logging.getLogger(__name__)
 
 
 def create_app(config_file=None, config=None):
@@ -45,18 +46,15 @@ def create_app(config_file=None, config=None):
     app.config.from_prefixed_env()
     if config:
         app.config.update(config)
+    app.db = mongoengine.connect(host=app.config.get('MONGODB_URI'))
     if not app.config.get('SECRET_KEY'):
-        if not (app.debug or app.testing):
-            raise RuntimeError(
-                "SECRET_KEY must be set, e.g. with the FLASK_SECRET_KEY "
-                "environment variable, since it protects logins")
-        # sessions end when the server restarts
-        app.config['SECRET_KEY'] = secrets.token_hex()
+        log.warning("No SECRET_KEY is configured; using the one generated "
+                    "and stored in the database")
+        app.config['SECRET_KEY'] = get_secret_key()
 
     # app extensions
     Bootstrap5(app)
     csrf = CSRFProtect(app)
-    app.db = mongoengine.connect(host=app.config.get('MONGODB_URI'))
 
     # make sure application settings and default version exist
     get_application_settings()

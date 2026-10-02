@@ -14,9 +14,13 @@ ones before them:
 Anyone can view the models without logging in, unless "allow anon view" is
 turned off in the site settings.
 
-The server must have a `SECRET_KEY`, which protects the login sessions, e.g.
-from the `FLASK_SECRET_KEY` environment variable. Keep it secret and the same
-across restarts. Only debug and test servers make a temporary one.
+A `SECRET_KEY` protects the login sessions. If one isn't configured, e.g. with
+the `FLASK_SECRET_KEY` environment variable, the server generates one the first
+time it starts and keeps it in the database's `server_secrets` collection, so
+it stays the same across restarts and is shared by every worker. Anyone who
+can read the database can then forge logins, but they could already add users.
+To end everyone's sessions, delete that document (or change the configured
+key) and restart.
 
 Create the first site admin on the command line; it asks for a password.
 They can then add other users through the web interface. The commands only
