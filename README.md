@@ -64,6 +64,25 @@ fails; the backup is deleted afterwards. If even restoring fails, the backup
 tag is kept and named in the error. An admin can clear a lock that an
 interrupted merge left behind, from the version's overview.
 
+A whole version can be exported to a file, e.g. to move it to another
+server or keep a backup, and imported under a new name: "Export" on its
+overview, "Import a version from a file" on the new-version page, the API
+(`GET /api/v1/versions/<version>/export`, and a multipart
+`POST /api/v1/versions/import` with `file`, `version_tag`, `type` and
+`description`), or the command line:
+
+```sh
+bgexplorer-versions --uri mongodb://HOST/DATABASE export NAME -o NAME.bgx.tar.gz
+bgexplorer-versions --uri mongodb://HOST/DATABASE import NAME.bgx.tar.gz --name NEW [--tag]
+```
+
+The file is a gzipped tar of `manifest.json`, `settings.json` and one JSON
+lines file per collection, in MongoDB Extended JSON. Imported documents get
+new copies, but keep their `original_id`, so references still work and the
+new version can be compared with and merged into versions it came from.
+The whole file is checked before anything is created. SourceTerms aren't
+exported; they are rebuilt on import.
+
 Creating, deleting, importing into and merging versions is recorded in a
 log, shown as the History on each version's overview. There are no commits:
 tags are the only snapshots.
