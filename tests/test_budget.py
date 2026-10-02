@@ -156,7 +156,7 @@ class TestDashboard(AppTestCase):
                 self.assertSame(sum(values[1:], values[0]), result['total'])
         self.assertEqual(
             {row['key'] for row in result['charts']['material']},
-            {'copper', 'steel', '(no material)'})
+            {'copper', 'steel', 'c3'})
         categories = {row['key']: row for row in result['charts']['category']}
         self.assertEqual(set(categories), {'assay', NO_CATEGORY})
         self.assertAlmostEqual(
@@ -186,8 +186,9 @@ class TestDashboard(AppTestCase):
         # but not the material breakdown itself, where the rest are dimmed
         materials = {row['key']: row['selected']
                      for row in result['charts']['material']}
+        # c3 has no material, so is listed by its name
         self.assertEqual(materials, {'copper': True, 'steel': False,
-                                     '(no material)': False})
+                                     'c3': False})
 
         # exclude a component, and everything below it
         f = BudgetFilter(dict(component=[((self.p_a1,), True)]))
@@ -224,8 +225,8 @@ class TestDashboard(AppTestCase):
         self.assertEqual(rows[0]['key'], (self.p_a1, self.p_c1))
         self.assertSame(result['total'], self.total(self.a1, self.a2))
         # the root applies to every breakdown
-        self.assertNotIn('(no material)', {row['key'] for row in
-                                           result['charts']['material']})
+        self.assertNotIn('c3', {row['key'] for row in
+                                result['charts']['material']})
         with self.assertRaises(ValueError):
             dashboard(self.a2, 'v1', BudgetFilter(root=[self.p_c1]))
 

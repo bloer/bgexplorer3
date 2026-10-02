@@ -91,7 +91,9 @@ def term_values(obj: Component, relativeto: Optional[Assembly] = None,
             category = st.source.category
             keys = dict(component=_component_path(st, child_ids),
                         isotope=st.source.name,
-                        material=st.material or NO_MATERIAL,
+                        # a component without a material is listed by name
+                        material=(st.material or st.componentName
+                                  or NO_MATERIAL),
                         category=category.value if category else NO_CATEGORY)
             terms.append(Term(st, values, keys))
         return terms
