@@ -8,7 +8,6 @@ from .common import units as unitreg
 from .histogram import Histogram
 from . import settings
 from enum import Enum
-from itertools import chain
 import logging
 log = logging.getLogger(__name__)
 
@@ -119,17 +118,6 @@ class HitEfficiency(DynamicVersionedDocument):
         'indexes': ['location', 'source', 'version', 'date',
                     'scalars_keys', 'spectra_keys']
     }
-
-    def __init__(self, *args, **kwargs):
-        """ Set an ID on all scalars and spectra to track correlations """
-        super().__init__(*args, **kwargs)
-        for key, val in chain(self.scalars.items(), self.rois.items()):
-            if val is not None:
-                val.m.id = '.'.join([str(self.id), 'v', key])
-        for key, val in self.spectra.items():
-            if val is not None:
-                val.hist.m.id = '.'.join([str(self.id), 's', key])
-        # use a post-init signal?
 
     def check_dbconfig(self, dbconfig):
         """ Make sure we are compatible with the HitEffDBconfig

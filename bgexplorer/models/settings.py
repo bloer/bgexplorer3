@@ -236,22 +236,24 @@ class VersionSettings(Document):
                     continue
                 # get a list of all unique combinations of unit and norm type
                 # for HitEfficiencies in the db
-                # values are stored either as a string, or as a dict with
+                # values are stored as the string a user typed, either
+                # plain or as a dict with 'str' and 'id', or as a dict with
                 # 'units'
                 value = f'${type_}.{k}'
                 isstr = {'$eq': [{'$type': value}, 'string']}
                 unitlist = hiteff.HitEfficiency\
                     .select_version(self.version_tag)\
                     .aggregate([
-                        {'$project': {'norm': 1, 'isstr': isstr,
-                                      'units': {'$cond': [isstr, value,
-                                                          f'{value}.units']}}},
-                        {'$group': {'_id': ['$units', '$norm', '$isstr']}}])
+                        {'$project': {'norm': 1,
+                                      'str': {'$cond': [isstr, value,
+                                                        f'{value}.str']},
+                                      'units': f'{value}.units'}},
+                        {'$group': {'_id': ['$units', '$norm', '$str']}}])
                 for entry in unitlist:
-                    ustr, normstr, isstr = entry['_id']
-                    if isstr:
+                    ustr, normstr, typed = entry['_id']
+                    if typed is not None:
                         val = hiteff.HitEfficiency.scalars.field\
-                            .to_python(ustr)
+                            .to_python(typed)
                         ustr = str(val.u)
                     elif ustr is None:
                         # this hiteff doesn't have this key

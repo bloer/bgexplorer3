@@ -29,7 +29,7 @@ class TestForms(unittest.TestCase):
         self.assertNotEqual(e1.sources[1].id, oldid)
         for source in e1.sources:
             source.clean()
-            self.assertEqual(source.rate.m.id, source.id)
+            self.assertIsNotNone(source.rate.m.id)
 
     def test2_missing_lists(self):
         """ Lists not in the form are left alone, but lists marked as

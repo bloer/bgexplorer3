@@ -79,6 +79,29 @@ def get_fromstr(value) -> Optional[str]:
         return None
 
 
+def with_id(value, id: Optional[str]):
+    """ `value`, with its AsymmetricUncertainty magnitude given leaf `id` """
+    m = getattr(value, 'm', None)
+    if id is None or not isinstance(m, AsymmetricUncertainty) or m.id == id:
+        return value
+    fromstr = get_fromstr(value)
+    result = pint.Quantity(AsymmetricUncertainty(m.mode, m.s0, m.s1, id=id),
+                           value.u)
+    if fromstr:
+        result._fromstr = fromstr
+    return result
+
+
+def as_leaf(value):
+    """ `value`, with its magnitude a new leaf if it was calculated from
+    others. Values stored without their correlations become new variables
+    """
+    m = getattr(value, 'm', None)
+    if not isinstance(m, AsymmetricUncertainty) or m.isleaf:
+        return value
+    return pint.Quantity(AsymmetricUncertainty(m.mode, m.s0, m.s1), value.u)
+
+
 def utostr(unit):
     return '{:~C}'.format(unit)
 
@@ -181,6 +204,8 @@ class QuantityField(BaseField):
 
     def to_python(self, value):
         units = self.units
+        # AsymmetricUncertainties are stored with the id of their variable
+        stored_id = None
 
         if value is None:
             if self.allownone is True:
@@ -192,6 +217,11 @@ class QuantityField(BaseField):
 
         if isinstance(value, str):
             value = self._fromstr(value)
+
+        if isinstance(value, Mapping) and 'str' in value:
+            # as typed by a user
+            stored_id = value.get('id')
+            value = self._fromstr(value['str'])
 
         if isinstance(value, Mapping):
             value = decompress(value)
@@ -212,16 +242,18 @@ class QuantityField(BaseField):
         if self.convert:
             value.ito(self.units)
 
-        return value
+        return as_leaf(with_id(value, stored_id))
 
     def to_mongo(self, value):
         if _fromstr := get_fromstr(value):
+            if isinstance(value.m, AsymmetricUncertainty) and value.m.isleaf:
+                return {'str': _fromstr, 'id': value.m.id}
             return _fromstr
         if value is None:
             return value
         result = dict(value=value.m)
         if isinstance(value.m, AsymmetricUncertainty):
-            result = value.m.todict()
+            result = as_leaf(value).m.todict()
         if not value.dimensionless:
             result['units'] = utostr(value.u)
         return compress(result)

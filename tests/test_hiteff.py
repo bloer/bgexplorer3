@@ -41,11 +41,16 @@ class TestHitEFficiency(unittest.TestCase):
                 spectra = dict(
                     v1=Histogram(AsymmetricUncertainty.fromcounts(np.arange(10))*units('dru/mBq')),
                 ))
+        ids = [h.scalars['v1'].m.id, h.scalars['v2'].m.id,
+               h.spectra['v1'].hist.m.id]
+        self.assertEqual(len(set(ids)), 3)
         h.save()
-        h = HitEfficiency.objects.get()
-        self.assertEqual(h.scalars['v1'].id, '.'.join([str(h.id), 'v', 'v1']))
-        self.assertEqual(h.scalars['v2'].id, '.'.join([str(h.id), 'v', 'v2']))
-        self.assertEqual(h.spectra['v1'].hist.id, '.'.join([str(h.id), 's', 'v1']))
+        # they're the same variables whenever they're loaded
+        for loaded in (HitEfficiency.objects.get(),
+                       HitEfficiency.objects.get()):
+            self.assertEqual([loaded.scalars['v1'].m.id,
+                              loaded.scalars['v2'].m.id,
+                              loaded.spectra['v1'].hist.m.id], ids)
 
     def test_unit_settings(self):
         """ test that unit settings are updated on save and that conflicting

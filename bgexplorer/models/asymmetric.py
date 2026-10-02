@@ -19,11 +19,38 @@ try:
     import pint
 except ImportError:
     pint = None
+try:
+    from bson import ObjectId
+except ImportError:
+    ObjectId = None
+import uuid
 
 NumOrArray = Union[int, float, np.ndarray]
 log = logging.getLogger(__name__)
 
 refloat = re.compile(r'\d+\.?\d*')
+
+
+def new_id() -> str:
+    """ A new id for an independent variable, unique across threads and
+    processes. ObjectIds also record when they were made
+    """
+    return str(ObjectId()) if ObjectId is not None else uuid.uuid4().hex
+
+
+def _isone(value) -> bool:
+    """ Is `value` the plain scalar 1? """
+    return (isinstance(value, (int, float, np.integer, np.floating))
+            and not isinstance(value, bool) and value == 1)
+
+
+def _frozen(value):
+    """ A read-only copy of array `value`, or scalar `value` """
+    if value is None or np.isscalar(value):
+        return value
+    value = np.array(value)
+    value.setflags(write=False)
+    return value
 
 class AsymmetricUncertaintyDistribution(rv_continuous):
     """ Scipy rv_continuous defined by AsymmetricUncertainty data """
@@ -122,11 +149,14 @@ class AsymmetricUncertainty:
     The values (modes and sigmas) may be numpy arrays, and everything should
     work as expected. Slicing is supported.
     Currenly only linear operations (+-*/) are supported. Correlations are
-    handled automatically, e.g. `x + 2 -x = 2 +/- 0`. This works only so long
-    as the object is in memory; i.e. correlation information is not stored
-    when serializing. Therefore, when loading AEs from some source, identical
-    values must refer to the same python object. The easiest way to do this
-    is to memoize the loading function.
+    handled automatically, e.g. `x + 2 -x = 2 +/- 0`. Independent variables
+    ("leaves") are identified by their `id`, which is made when they're
+    created and should be stored with them, so that loaded copies are the
+    same variable. Results of calculations keep the expression of leaves
+    they were calculated from, and have no id.
+
+    AsymmetricUncertainties are immutable, so a leaf's id always stands for
+    the same value.
 
     The class also has methods to get the pdf and ppf (quantile). These are
     calculated assuming a piecewise distribution of the form
@@ -135,7 +165,7 @@ class AsymmetricUncertainty:
     It's important to stress that this PDF definition is NOT compatible with
     the defined behavior for adding these objects!
     """
-    __slots__ = ('_mode', '_s0', '_s1', '_v0', '_v1', '_modesq', 'id',
+    __slots__ = ('_mode', '_s0', '_s1', '_v0', '_v1', '_modesq', '_id',
                  '_expression')
     _minmeanz = 1
 
@@ -156,29 +186,37 @@ class AsymmetricUncertainty:
         """
         if value is None and expression is None:
             raise ValueError("Either value or expression must be provided")
-        self.mode = value
-        self.s0 = sigma
-        self.s1 = sigmaup if sigmaup is not None else sigma
+        sigmaup = sigmaup if sigmaup is not None else sigma
+        if (forceposdef and value is not None and np.isscalar(value) and
+                value < sigma*self._minmeanz):
+            sigma = value / self._minmeanz
+        self._set_values(value, sigma, sigmaup)
+        # only leaves are variables with an identity
+        if id is None and expression is None:
+            id = new_id()
+        self._id = id
+        self._expression = expression
+
+    def _set_values(self, mode, s0, s1):
+        """ Set our values, once. Arrays are copied and made read-only """
+        self._mode = _frozen(mode)
+        self._s0 = _frozen(s0)
+        self._s1 = _frozen(s1)
         self._v0 = None
         self._v1 = None
         self._modesq = None
-        self.id = id
-        self._expression = expression
-        if self._mode is not None:
-            if not np.isscalar(self.mode):
-                self.mode = np.asarray(self.mode)
-                self.s0 = np.asarray(self.s0)
-                self.s1 = np.asarray(self.s1)
-            if (forceposdef and np.isscalar(self.mode) and
-                    self.mode < self.s0*self._minmeanz):
-                self.s0 = self.mode / self._minmeanz
 
     def _evaluate(self):
-        """ evaluate our expression and copy the results """
+        """ evaluate our expression and remember the results """
         result = self._expression.evaluate(lazy=False)
-        self.mode = result.mode
-        self.s0 = result.s0
-        self.s1 = result.s1
+        self._set_values(result.mode, result.s0, result.s1)
+
+    @property
+    def id(self) -> Optional[str]:
+        """ Identifies a leaf, i.e. an independent variable. None for the
+        results of calculations
+        """
+        return self._id
 
     @property
     def mode(self):
@@ -186,19 +224,11 @@ class AsymmetricUncertainty:
             self._evaluate()
         return self._mode
 
-    @mode.setter
-    def mode(self, value):
-        self._mode = value
-
     @property
     def s0(self):
         if self._s0 is None:
             self._evaluate()
         return self._s0
-
-    @s0.setter
-    def s0(self, value):
-        self._s0 = value
 
     @property
     def s1(self):
@@ -206,9 +236,12 @@ class AsymmetricUncertainty:
             self._evaluate()
         return self._s1
 
-    @s1.setter
-    def s1(self, value):
-        self._s1 = value
+    @property
+    def isleaf(self) -> bool:
+        """ Is this an independent variable, rather than the result of a
+        calculation?
+        """
+        return self._expression is None
 
 
 
@@ -281,19 +314,25 @@ class AsymmetricUncertainty:
 
     def serialize(self, compressarrays: bool = True) -> Tuple:
         """ Convert to a tuple for storage """
-        result = (self.mode, self.s0, self.s1)
+        # numpy scalars as plain numbers, which anything can store
+        result = tuple(v.item() if isinstance(v, np.generic) else v
+                       for v in (self.mode, self.s0, self.s1))
         if np.all(self.s0 == self.s1):
-            result = (self.mode, self.s0)
+            result = result[:2]
         if compressarrays and isinstance(result[0], np.ndarray):
             # store the raw array bytes
             result = tuple(encode_array(np.asarray(r)) for r in result)
         return result
 
     def todict(self) -> dict:
-        """ Convert to a dictionary, with keys 'value', 'sigma', and 'sigmaup'
+        """ Convert to a dictionary, with keys 'value', 'sigma', 'sigmaup',
+        and 'id' for leaves
         """
         ser = self.serialize(compressarrays=False)
-        return dict(zip(('value', 'sigma', 'sigmaup'), ser))
+        result = dict(zip(('value', 'sigma', 'sigmaup'), ser))
+        if self.id is not None:
+            result['id'] = self.id
+        return result
 
     @staticmethod
     def serializeq(asym: 'AsymmetricUncertainty', compressarrays: bool = True
@@ -334,11 +373,11 @@ class AsymmetricUncertainty:
         return result
 
     @classmethod
-    def fromlimit(cls, limit: float, quantile: float = 0.9
-                  ) -> 'AsymmetricUncertainty':
+    def fromlimit(cls, limit: float, quantile: float = 0.9,
+                  id: Optional[str] = None) -> 'AsymmetricUncertainty':
         z = norm.isf((1.-quantile)/2.)
         sigmaup = limit / z
-        return cls(0, 0, sigmaup)
+        return cls(0, 0, sigmaup, id=id)
 
     @classmethod
     def fromstring(cls, val: str) -> 'AsymmetricUncertainty':
@@ -482,24 +521,17 @@ class AsymmetricUncertainty:
     # TODO: combine the redundancies here
     # TODO: implement iadd, isub, etc.
 
-    def rezero(self, inplace=False):
-        """ Zero the sigmas of all entries with zero mode.  See `addtreatzero`
-        for a description of why you'd use this.
+    def rezero(self):
+        """ A copy with the sigmas of all entries with zero mode zeroed. See
+        `addtreatzero` for a description of why you'd use this.
         """
-        if not inplace:
-            result = AsymmetricUncertainty(self.mode, self.s0, self.s1)
-            if not np.isscalar(self.s1):
-                result.s1 = self.s1.copy()
-            result.rezero(inplace=True)
-            return result
-
+        s1 = self.s1
         isupper = self.isupperlimit(strict=True)
-        self._v1 = None
         if isupper:
-            self.s1 = 0
+            s1 = 0
         elif isupper is None:
-            self.s1[self.mode == 0] = 0
-        return self
+            s1 = np.where(self.mode == 0, 0, s1)
+        return AsymmetricUncertainty(self.mode, self.s0, s1)
 
     def addtreatzero(self, other: 'AsymmetricUncertainty'):
         """ In some cases, such as rebinning a histogram, upper limits should
@@ -516,13 +548,15 @@ class AsymmetricUncertainty:
         if not isinstance(other, AsymmetricUncertainty):
             return self + other
         result = self.rezero() + other.rezero()
+        s1 = result.s1
         if np.isscalar(self.mode):
-            if self.mode == 0 and result.s1 == 0:
-                result.s1 = max(self.s1, other.s1)
+            if self.mode == 0 and s1 == 0:
+                s1 = max(self.s1, other.s1)
         else:
-            tofix = (result.mode == 0) & (result.s1 == 0)
-            result.s1[tofix] = np.max([self.s1, other.s1], axis=0)[tofix]
-        return result
+            tofix = (result.mode == 0) & (s1 == 0)
+            s1 = np.where(tofix, np.max([self.s1, other.s1], axis=0), s1)
+        return AsymmetricUncertainty(result.mode, result.s0, s1,
+                                     expression=result._expression)
 
     def average(self, other, weight1=1, weight2=1):
         return (self*weight1).addtreatzero(other*weight2)/(weight1 + weight2)
@@ -557,6 +591,9 @@ class AsymmetricUncertainty:
         if hasattr(other, 'dimensionality'):
             other = 1*other  # ensure it's a quantity
             return other.__class__(self*other.m, other.u)
+        # we're immutable, so the same variable, e.g. for pint units
+        if _isone(other):
+            return self
 
         if self.get_ignore_correlations():
             # when the multiplier is negative, our error distributions switch
@@ -592,6 +629,8 @@ class AsymmetricUncertainty:
         if hasattr(other, 'dimensionality'):
             other = 1./other  # ensure it's a quantity
             return other.__class__(self * other.m, other.u)
+        if _isone(other):
+            return self
 
         if self.get_ignore_correlations():
             try:
@@ -668,21 +707,20 @@ class AsymmetricUncertainty:
         with self.ignore_correlations():
             weighted = self if weights is None else self*weights
             zeroed = weighted.rezero()
-            result = AsymmetricUncertainty(np.sum(zeroed.mode),
-                                           np.sqrt(np.sum(zeroed.v0)),
-                                           np.sqrt(np.sum(zeroed.v1)))
+            mode = np.sum(zeroed.mode)
+            s1 = np.sqrt(np.sum(zeroed.v1))
 
             # todo: check for all s1's to be equal?
             # not sensible state otherwsie
-            if result.mode == 0:
+            if mode == 0:
                 if weights is None or np.isscalar(weights):
                     # self.mode is all zeros
-                    result.s1 = np.max(weighted.s1)
+                    s1 = np.max(weighted.s1)
                 elif np.sum(weights) > 0:
                     # take the error at the maximum weight as the integral
-                    result.s1 = weighted.s1[np.argmax(weights)]
+                    s1 = weighted.s1[np.argmax(weights)]
 
-            return result
+            return AsymmetricUncertainty(mode, np.sqrt(np.sum(zeroed.v0)), s1)
 
     # Numpy array functions
     def sum(self):
@@ -778,8 +816,8 @@ class LinearExpression:
                           for key, coeff in self.coefficients.items())
                 if not isinstance(res, AsymmetricUncertainty):
                     res = AsymmetricUncertainty(res, 0)
-                res._expression = self
-                return res
+                return AsymmetricUncertainty(res.mode, res.s0, res.s1,
+                                             expression=self)
 
         # if we get here, there are variables that span different
         # expressions, so we need to take the partial derivative

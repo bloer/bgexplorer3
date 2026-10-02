@@ -112,17 +112,8 @@ class EmissionSource(EmbeddedDocument):
     spectrum = StringField()
     generated_from = ObjectIdField()
 
-    def __init__(self, *args, **kwargs):
-        """ Set id on rate so that correlations are tracked appropriately """
-        super().__init__(*args, **kwargs)
-        if self.rate is not None:
-            self.rate.m.id = self.id
-
     def clean(self):
         """ make sure multiplier has a sensible value """
-        # rate and id may have been set after __init__ (e.g. by forms)
-        if self.rate is not None:
-            self.rate.m.id = self.id
         try:
             if self.multiplier is None:
                 self.multiplier = Multiplier.get_multiplier(self.rate)

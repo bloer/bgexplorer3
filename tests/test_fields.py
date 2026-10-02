@@ -70,21 +70,34 @@ class TestFields(unittest.TestCase):
         self.assertEqual(test.val.u, units.s)
         self.assertEqual(test.val.m, 600)
 
+    def assertStoredAs(self, fromstr):
+        """ The value is stored as typed, with its id if it's uncertain """
+        stored = TestDoc.val.to_mongo(self.test.val)
+        if isinstance(self.test.val.m, AsymmetricUncertainty):
+            self.assertEqual(stored, {'str': fromstr,
+                                      'id': self.test.val.m.id})
+        else:
+            self.assertEqual(stored, fromstr)
+
     def test3_fromstr(self):
         fromstr = "10"
         self.test.val = fromstr
-        self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
+        self.assertStoredAs(fromstr)
 
         fromstr = "10 +/- 1"
         self.test.val = fromstr
-        self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
+        self.assertStoredAs(fromstr)
+        # and loads as the same variable, still shown as typed
+        loaded = TestDoc.val.to_python(TestDoc.val.to_mongo(self.test.val))
+        self.assertEqual(loaded.m.id, self.test.val.m.id)
+        self.assertEqual(get_fromstr(loaded), fromstr)
         self.assertIsInstance(self.test.val.m, AsymmetricUncertainty)
         self.assertEqual(self.test.val.mode, 10)
         self.assertEqual(self.test.val.s0, 1)
 
         fromstr = "10 +- 1"
         self.test.val = fromstr
-        self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
+        self.assertStoredAs(fromstr)
         self.assertIsInstance(self.test.val.m, AsymmetricUncertainty)
         self.assertEqual(self.test.val.mode, 10)
         self.assertEqual(self.test.val.s0, 1)
@@ -92,7 +105,7 @@ class TestFields(unittest.TestCase):
 
         fromstr = "10+1-2"
         self.test.val = fromstr
-        self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
+        self.assertStoredAs(fromstr)
         self.assertIsInstance(self.test.val.m, AsymmetricUncertainty)
         self.assertEqual(self.test.val.mode, 10)
         self.assertEqual(self.test.val.s1, 1)
@@ -100,23 +113,23 @@ class TestFields(unittest.TestCase):
 
         fromstr = "< 10"
         self.test.val = fromstr
-        self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
+        self.assertStoredAs(fromstr)
         self.assertIsInstance(self.test.val.m, AsymmetricUncertainty)
         self.assertAlmostEqual(self.test.val.get_upper_limit(), 10)
 
         fromstr = "10 keV"
         self.test.val = fromstr
-        self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
+        self.assertStoredAs(fromstr)
         self.assertEqual(self.test.val.u, units.keV)
 
         fromstr = "<10 keV"
         self.test.val = fromstr
-        self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
+        self.assertStoredAs(fromstr)
         self.assertEqual(self.test.val.u, units.keV)
 
         fromstr = "10 +/- 2 keV"
         self.test.val = fromstr
-        self.assertEqual(TestDoc.val.to_mongo(self.test.val), fromstr)
+        self.assertStoredAs(fromstr)
         self.assertEqual(self.test.val.u, units.keV)
 
         with self.assertRaises(ValueError):
@@ -226,8 +239,11 @@ class TestFields(unittest.TestCase):
         assert_equal(test2.hval.bin_edges.m, np.arange(51.))
         assert_equal(test2.val.m, np.arange(3.))
         self.assertEqual(test2.val.u, units.kg)
-        # decoded arrays are writeable
-        test2.hval.hist.mode[0] = 5
+        # decoded arrays are writeable, but values of AUs are immutable
+        self.assertTrue(decode_array(encode_array(np.arange(3.)))
+                        .flags.writeable)
+        with self.assertRaises(ValueError):
+            test2.hval.hist.mode[0] = 5
 
         # big arrays are compressed
         test = TestDoc(hval=Histogram(np.zeros(10000))).save()

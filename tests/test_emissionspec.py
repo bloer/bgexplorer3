@@ -219,9 +219,12 @@ class TestEmission(unittest.TestCase):
                          Multiplier.surface)
 
     def test4_rateid(self):
-        # test that emissionrate has an id assigned
+        """ a rate is a variable whose id is kept when it's stored """
         source = EmissionSource(name="U238", rate="10 +- 0.2 Bq/kg")
-        self.assertEqual(source.rate.id, source.id)
+        self.assertIsNotNone(source.rate.m.id)
+        spec = EmissionSpec(name='e', sources=[source]).save()
+        self.assertEqual(EmissionSpec.objects.get(id=spec.id).sources[0]
+                         .rate.m.id, source.rate.m.id)
 
     def test_json(self):
         source = EmissionSource(name='U238', rate='10 +- 0.2 Bq/kg')

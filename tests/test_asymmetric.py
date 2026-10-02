@@ -227,3 +227,56 @@ class TestAsymmetric(unittest.TestCase):
         result = AsymmetricUncertainty.deserialize((buf.getvalue(), 'keV'))
         assert_equal(result.s1, arr.s1)
         self.assertEqual(result.u, units.keV)
+
+
+class TestLeaves(unittest.TestCase):
+    """ Independent variables have ids and can't change """
+    def test_ids(self):
+        a = AsymmetricUncertainty(10, 1)
+        self.assertTrue(a.isleaf)
+        self.assertIsInstance(a.id, str)
+        self.assertNotEqual(a.id, AsymmetricUncertainty(10, 1).id)
+        # results of calculations aren't variables of their own
+        result = a * 2 + AsymmetricUncertainty(3, 1)
+        self.assertFalse(result.isleaf)
+        self.assertIsNone(result.id)
+        # leaves with the same id are the same variable
+        copy = AsymmetricUncertainty(10, 1, id=a.id)
+        self.assertEqual(copy, a)
+        self.assertAlmostEqual((a - copy).s0, 0)
+        # multiplying by 1, e.g. by pint for units, keeps the variable
+        self.assertIs(a * 1, a)
+        self.assertIs((a * units('kg')).m, a)
+
+    def test_unique_across_threads(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        def make(n):
+            return [AsymmetricUncertainty(1, 1).id for _ in range(n)]
+        with ThreadPoolExecutor(8) as pool:
+            ids = [i for chunk in pool.map(make, [2000] * 8) for i in chunk]
+        self.assertEqual(len(set(ids)), len(ids))
+
+    def test_immutable(self):
+        a = AsymmetricUncertainty(10, 1)
+        for attr in ('mode', 's0', 's1', 'id'):
+            with self.assertRaises(AttributeError):
+                setattr(a, attr, 3)
+        arr = np.arange(3.)
+        b = AsymmetricUncertainty(arr, np.ones(3))
+        # the values are a copy, which can't be changed
+        arr[0] = 5
+        self.assertEqual(b.mode[0], 0)
+        with self.assertRaises(ValueError):
+            b.mode[0] = 5
+        with self.assertRaises(ValueError):
+            b.s1[0] = 5
+        # nor can evaluated results
+        result = b * 2 + b
+        with self.assertRaises(ValueError):
+            result.mode[0] = 5
+        # methods that adjust values return new ones
+        lim = AsymmetricUncertainty(np.zeros(2), np.zeros(2), np.ones(2))
+        zeroed = lim.rezero()
+        assert_equal(zeroed.s1, [0, 0])
+        assert_equal(lim.s1, [1, 1])

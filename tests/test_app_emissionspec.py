@@ -183,7 +183,9 @@ class TestEmissionSpecPages(AppTestCase):
         # resubmitting the edit form changes nothing, then add a period
         form = self.edit_form(spec)
         self.assertEqual(self.post(form, spec).status_code, 302)
-        self.assertEqual(self.get('radon1').sources[0].rate, source.rate)
+        # recalculated as a new variable with the same value
+        self.assertEqual(str(self.get('radon1').sources[0].rate),
+                         str(source.rate))
         set_rows(form, rows(form, 'periods') + [dict(
             id='', description='lab', mode='trapped',
             radonlevel='100 Bq/m**3', duration='10 day', columnheight='5 cm')],
