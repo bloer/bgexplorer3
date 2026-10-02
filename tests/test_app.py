@@ -191,9 +191,10 @@ class TestAppSmall(AppSmokeTest, unittest.TestCase):
             EmissionSource(name='K40', rate='<25 mBq/kg'),
             EmissionSource(name='U238', rate='1 ppb'),
             ]).save()
-        c1 = Component(name='c1', mass='2 kg', location='c1', specs=[e1],
-                       sources=[EmissionSource(name='Co60',
-                                               rate='2 mBq/kg')]).save()
+        c1 = Component(name='c1', mass='2 kg', location='c1',
+                       specs=[e1]).save()
+        c1.add_owned_spec(EmissionSpec(name='c1 Co60', sources=[
+            EmissionSource(name='Co60', rate='2 mBq/kg')]))
         c2 = Component(name='c2', surface_area='1 m**2', specs=[e1]).save()
         a1 = Assembly(name='a1', location='a1', children=[
             Placement(component=c1, weight=2),

@@ -1,8 +1,8 @@
 import unittest
 from mongoengine import (connect, disconnect, StringField, ReferenceField,
                          CASCADE, NULLIFY, PULL, ValidationError)
-from bgexplorer.models.component import Component, Placement, Assembly
-from bgexplorer.models.emissionspec import EmissionSource
+from bgexplorer.models.component import (Component, Placement, Assembly,
+                                         LocationOverride)
 from bgexplorer.models.common import units
 from tests.dbutil import connect_test_db
 
@@ -99,8 +99,8 @@ class TestComponent(unittest.TestCase):
         with self.assertRaises(ValidationError):
             Assembly(name="a1", children=[p, Placement(id=p.id, component=c1)]
                      ).save()
-        s = EmissionSource(name="K40", rate="1 mBq/kg")
+        o = LocationOverride(source="K40", location="x")
         with self.assertRaises(ValidationError):
-            Component(name="c2", sources=[s, EmissionSource(
-                id=s.id, name="U238", rate="1 mBq/kg")]).save()
+            Component(name="c2", location_overrides=[o, LocationOverride(
+                id=o.id, source="U238", location="y")]).save()
 

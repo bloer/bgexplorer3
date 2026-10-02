@@ -31,7 +31,8 @@ class SourceTerm(VersionedDocument):
                                            reverse_delete_rule=CASCADE)
     assemblyPath = VersionedEmbeddedDocumentListField(Placement)
     source = EmbeddedDocumentField(EmissionSource, required=True)
-    spec = VersionedReferenceField(EmissionSpec, reverse_delete_rule=CASCADE)
+    spec = VersionedReferenceField(EmissionSpec, required=True,
+                                   reverse_delete_rule=CASCADE)
     # These are used to find hiteffs
     location = StringField()
     location_auto = BooleanField(default=True)

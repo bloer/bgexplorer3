@@ -17,6 +17,12 @@ from bgexplorer.models.isotope import concentration_to_rate
 import numpy as np
 from tests.dbutil import connect_test_db
 
+
+def spec_of(*sources) -> EmissionSpec:
+    """ A saved spec with just `sources` """
+    return EmissionSpec(name=f"{sources[0].name} spec", sources=list(sources)
+                        ).save()
+
 class TestSourceTerm(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -41,8 +47,7 @@ class TestSourceTerm(unittest.TestCase):
         e1 = EmissionSpec(name="e1", sources=[EmissionSource(name="Th232", rate="10 +- 1 mBq/kg"),
                                               EmissionSource(name="K40", rate="<25 mBq/kg")]).save()
         c1 = Component(name="c1", mass="2 kg",
-                       sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
-                       specs=[e1]).save()
+                       specs=[e1, spec_of(EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg"))]).save()
         self.assertEqual(SourceTerm.objects.count(), 3)
         emissionrates = dict(Th232=AsymmetricUncertainty(20, 2)*units('mBq/kg'),
                              K40=AsymmetricUncertainty.fromlimit(50)*units('mBq/kg'),
@@ -79,8 +84,8 @@ class TestSourceTerm(unittest.TestCase):
     def test1_concentration(self):
         """ Sources given as concentrations are converted to activities """
         c1 = Component(name="c1", mass="2 kg",
-                       sources=[EmissionSource(name="U238", rate="81 ppb"),
-                                EmissionSource(name="K40", rate="32.3 ppm")],
+                       specs=[spec_of(EmissionSource(name="U238", rate="81 ppb"),
+                                      EmissionSource(name="K40", rate="32.3 ppm"))],
                        ).save()
         for name, conc in (('U238', 81*units.ppb), ('K40', 32.3*units.ppm)):
             st = SourceTerm.objects.get(source__name=name)
@@ -105,8 +110,7 @@ class TestSourceTerm(unittest.TestCase):
         e1 = EmissionSpec(name="e1", sources=[EmissionSource(name="Th232", rate="10 +- 1 mBq/kg"),
                                               EmissionSource(name="K40", rate="<25 mBq/kg")]).save()
         c1 = Component(name="c1", mass="2 kg", location="c1 location",
-                       sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
-                       specs=[e1]).save()
+                       specs=[e1, spec_of(EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg"))]).save()
         c2 = Component(name="c2", mass="2 kg",
                        specs=[e1]).save()
         c3 = Component(name="c3", mass="2 kg",
@@ -138,8 +142,7 @@ class TestSourceTerm(unittest.TestCase):
         e1 = EmissionSpec(name="e1", sources=[EmissionSource(name="Th232", rate="10 +- 1 mBq/kg"),
                                               EmissionSource(name="K40", rate="<25 mBq/kg")]).save()
         c1 = Component(name="c1", mass="2 kg",
-                       sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
-                       specs=[e1]).save()
+                       specs=[e1, spec_of(EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg"))]).save()
         c2 = Component(name="c2", mass="2 kg", specs=[e1]).save()
         a1 = Assembly(name="a1", components=[c1, c2]).save()
         a2 = Assembly(name="a2", components=[a1, c2]).save()
@@ -157,7 +160,7 @@ class TestSourceTerm(unittest.TestCase):
         self.assertEqual(counts(), expected)
 
         # removing a source removes it everywhere, and only it
-        c1.sources = []
+        c1.specs = [e1]
         c1.save()
         expected.update({'a1/c1': 2, 'a2/a1/c1': 2})
         self.assertEqual(counts(), expected)
@@ -175,11 +178,9 @@ class TestSourceTerm(unittest.TestCase):
         e1 = EmissionSpec(name="e1", sources=[EmissionSource(name="Th232", rate="10 +- 1 mBq/kg"),
                                               EmissionSource(name="K40", rate="<25 mBq/kg")]).save()
         c1 = Component(name="c1", mass="2 kg", location="c1 location",
-                       sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
-                       specs=[e1]).save()
+                       specs=[e1, spec_of(EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg"))]).save()
         c2 = Component(name="c2", mass="2 kg",
-                       sources=[EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg")],
-                       specs=[e1]).save()
+                       specs=[e1, spec_of(EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg"))]).save()
         c3 = Component(name="c3", mass="5 kg",
                        specs=[e1]).save()
         a1 = Assembly(name="a1", components=[c1, c2, c3], location="a1 location")
@@ -365,17 +366,20 @@ class TestSourceTerm(unittest.TestCase):
         h3 = HitEfficiency(source='U238', location='c1', primary_particle='neutron', primary_yield=1.e-1, material='steel',
                            scalars=dict(v1='(2 +- 0.1)e-1 dru/mBq')).save()
         c1 = Component(name='c1', mass='3 kg', location='c1', material='steel',
-                       sources=[EmissionSource(name='U238', rate='5 mBq/kg')]).save()
+                       specs=[spec_of(EmissionSource(name='U238', rate='5 mBq/kg'))]).save()
         c2 = Component(name='c2', mass='8 kg', location='c1',
-                       sources=[EmissionSource(name='U238', rate='5 microBq/kg')]).save()
+                       specs=[spec_of(EmissionSource(name='U238', rate='5 microBq/kg'))]).save()
         r1 = CalculatedResults.for_component(c1)
         r2 = CalculatedResults.for_component(c2)
 
-        self.assertEqual(len(r1.sources), 1)
-        self.assertEqual(len(r1.sources[0].hiteffs), 3)
+        # the settings may add other sources, which have no hiteffs here
+        def u238(result):
+            return [st for st in result.sources if st.source.name == 'U238']
+        self.assertEqual(len(u238(r1)), 1)
+        self.assertEqual(len(u238(r1)[0].hiteffs), 3)
         self.assertAlmostEqual(r1.scalars['v1'].to('dru').mode, 15*(10 + 2e-2 + 2e-1))
-        self.assertEqual(len(r2.sources), 1)
-        self.assertEqual(len(r2.sources[0].hiteffs), 2)
+        self.assertEqual(len(u238(r2)), 1)
+        self.assertEqual(len(u238(r2)[0].hiteffs), 2)
         self.assertAlmostEqual(r2.scalars['v1'].to('dru').mode, 0.04*(10 + 2e-2))
 
 
@@ -390,8 +394,8 @@ class TestSourceTerm(unittest.TestCase):
         clear_results_cache()
         h = HitEfficiency(source="Co60", location="loc", scalars=dict(
             v1=AsymmetricUncertainty(0.1, 0.01)*units('dru/mBq'))).save()
-        c = Component(name="c", mass="2 kg", location="loc", sources=[
-            EmissionSource(name="Co60", rate="10 +- 1 mBq/kg")]).save()
+        c = Component(name="c", mass="2 kg", location="loc", specs=[spec_of(
+            EmissionSource(name="Co60", rate="10 +- 1 mBq/kg"))]).save()
         a = Assembly(name="a", components=[c]).save()
 
         def results(**kwargs):
@@ -409,7 +413,7 @@ class TestSourceTerm(unittest.TestCase):
                 results(cache=False)
 
         # editing a component changes the result
-        c.sources[0].rate = "20 +- 1 mBq/kg"
+        c.mass = "4 kg"
         c.save()
         assert_allclose(results(), [4, 4])
         # so does changing hiteff values, which doesn't touch sourceterms
@@ -559,12 +563,10 @@ class TestLocationOverride(unittest.TestCase):
         self.assertEqual(locations[('a1/in', 'radon', 'Pb210')],
                          'Connector Outside')
 
-    def test_component_sources_and_cleanup(self):
-        # a component's own sources have no spec, so match by source name
+    def test_source_overrides_and_cleanup(self):
+        # an override by source name applies to every spec
         c1 = Component(name="c1", mass="1 kg", location="Package",
-                       sources=[EmissionSource(name="Pb210",
-                                               rate="1 mBq/kg")],
-                       specs=[self.radon],
+                       specs=[self.becu, self.radon],
                        location_overrides=[
                            LocationOverride(source="Pb210",
                                             location="Connector Inside"),
@@ -572,11 +574,12 @@ class TestLocationOverride(unittest.TestCase):
                                             location="Package Outer Surface"),
                        ]).save()
         self.assertEqual(self.locations(), {
-            ('c1', None, 'Pb210'): 'Connector Inside',
+            ('c1', 'BeCu', 'U238'): 'Package',
+            ('c1', 'BeCu', 'Pb210'): 'Connector Inside',
             ('c1', 'radon', 'Pb210'): 'Package Outer Surface',
         })
         # overrides for a removed spec are dropped
-        c1.specs = []
+        c1.specs = [self.becu]
         c1.save()
         self.assertEqual(len(c1.reload().location_overrides), 1)
         # an override must say what it applies to

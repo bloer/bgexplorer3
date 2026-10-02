@@ -40,13 +40,9 @@ def update_component(sender, document, **kwargs):
     component = document
     log.debug("update_component for %s", component.name)
     # first, generate the list of all source terms for this component
-    sourceterms = []
-    for spec in list(component.specs) + [component]:
-        for source in spec.sources:
-            spec = spec if spec is not component else None
-            sourceterms.append(SourceTerm.from_component_source(component,
-                                                                source, spec)
-                               )
+    sourceterms = [SourceTerm.from_component_source(component, source, spec)
+                   for spec in component.specs
+                   for source in spec.sources]
     # remove any that didn't match
     SourceTerm.objects(
         version_tags=component.active_version,

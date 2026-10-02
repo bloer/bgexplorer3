@@ -11,7 +11,7 @@ from .verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedListField, VersionedEmbeddedDocumentListField,
                      ref_id)
 from .fields import QuantityField, AttachmentsField
-from .emissionspec import EmissionSpec, EmissionSource
+from .emissionspec import EmissionSpec
 from .cosmogenic import ActivatedMaterial
 from .common import units, validate_unique_ids
 from .isotope import compare_source_names
@@ -39,7 +39,7 @@ class HistoryEntry(DynamicEmbeddedDocument):
 
 class LocationOverride(EmbeddedDocument):
     """ Use `location` to find HitEfficiencies for the sources of a component
-    from `spec`, and/or named `source`, instead of the component's location.
+    from `spec` and/or named `source`, instead of the component's location.
     On an Assembly, `placement` limits it to that child Placement, ahead of
     the placement's location. Blank `spec` or `source` match any.
     """
@@ -55,9 +55,8 @@ class LocationOverride(EmbeddedDocument):
     )
 
     def matches(self, spec, source_name: str, placement_id=None) -> bool:
-        """ Does this apply to sources named `source_name` from `spec` (None
-        for a component's own sources), for the component itself or, if
-        `placement_id`, for that child placement?
+        """ Does this apply to sources named `source_name` from `spec`, for
+        the component itself or, if `placement_id`, for that child placement?
         """
         myspec = ref_id(self._data.get('spec'))
         return (self.placement == placement_id and
@@ -107,7 +106,6 @@ class Component(VersionedDocument):
                                reverse_delete_rule=PULL,
                                endpoint='emissionspec',
                                ))
-    sources = EmbeddedDocumentListField(EmissionSource)
     activated_material = VersionedReferenceField(
         ActivatedMaterial, reverse_delete_rule=NULLIFY,
         endpoint='activatedmaterial',
@@ -130,7 +128,6 @@ class Component(VersionedDocument):
 
     def clean(self):
         super().clean()
-        validate_unique_ids(self.sources, 'sources')
         validate_unique_ids(self.location_overrides, 'location_overrides')
         self.check_owned_specs()
         # overrides for specs or placements that were removed go with them
@@ -247,7 +244,6 @@ class Component(VersionedDocument):
             qs = qs.select_version(self.active_version)
         return qs(children__component=self)
 
-    # TODO: add additional EmissionSources just like emissionspec
 
 
 def _ispositive(value):

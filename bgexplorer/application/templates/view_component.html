@@ -39,21 +39,19 @@
     {%- endif %}
 {% endmacro %}
 
-{% macro printspec(spec, cls) %}
+{% macro printspec(spec) %}
     {%- set specname -%}
-    {% if cls == 'spec' %}<a href="{{ url_for('emissionspec.view', object=spec) }}">{{ spec.name }}</a> {{ speccontrols(spec) }}{% else %}self{% endif %}
+    <a href="{{ url_for('emissionspec.view', object=spec) }}">{{ spec.name }}</a> {{ speccontrols(spec) }}
     {%- endset -%}
     {% for source in spec.sources %}
                 <tr class="source {% if source.generated_from %}autogen{% endif %}">
-                    {% if loop.index0 == 0 %}<td class="{{ cls }}" rowspan="{{ spec.sources|length }}">{{ specname }}</td> {% endif %}
+                    {% if loop.index0 == 0 %}<td class="spec" rowspan="{{ spec.sources|length }}">{{ specname }}</td> {% endif %}
                     <td>{{ source.name }}</td>
                     <td>{{ source.category.name or '' }}</td>
                     <td>{{ source.rate | printquantity }}</td>
                 </tr>
     {% else %}
-    {%- if cls == 'spec' %}
                 <tr class="source"><td class="spec">{{ specname }}</td><td colspan="3" class="text-secondary">no sources</td></tr>
-    {%- endif %}
     {% endfor %}
 {% endmacro %}
 
@@ -141,7 +139,7 @@
             </ul>
         </div>
         {%- endif %}
-        {% if g.object.specs or g.object.sources %}
+        {% if g.object.specs %}
         <h4>Radiation sources</h4>
         <table class="table table-sm table-hover">
             <thead>
@@ -149,9 +147,8 @@
             </thead>
             <tbody class="table-group-divider">
                 {% for spec in g.object.specs %}
-                {{ printspec(spec, 'spec') }}
+                {{ printspec(spec) }}
                 {% endfor %}
-                {{ printspec(g.object, 'component') }}
             </tbody>
         </table>
         {% endif %}

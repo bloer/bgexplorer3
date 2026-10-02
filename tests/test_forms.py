@@ -3,8 +3,9 @@ from bson import ObjectId
 from werkzeug.datastructures import MultiDict
 from datetime import datetime
 from bgexplorer.application.forms import update_object, LISTFIELDS_KEY
-from bgexplorer.models.component import Component, HistoryEntry
-from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
+from bgexplorer.models.component import (Component, HistoryEntry,
+                                         LocationOverride)
+from bgexplorer.models.emissionspec import EmissionSpec
 
 
 class TestForms(unittest.TestCase):
@@ -21,12 +22,12 @@ class TestForms(unittest.TestCase):
                           ('sources.rate', '1 mBq/kg'),
                           ('sources.rate', '2 mBq/kg'),
                           ])
-        c1 = update_object(Component(), form)
-        self.assertEqual(len(c1.sources), 2)
-        self.assertEqual(c1.sources[0].id, oldid)
-        self.assertIsInstance(c1.sources[1].id, ObjectId)
-        self.assertNotEqual(c1.sources[1].id, oldid)
-        for source in c1.sources:
+        e1 = update_object(EmissionSpec(), form)
+        self.assertEqual(len(e1.sources), 2)
+        self.assertEqual(e1.sources[0].id, oldid)
+        self.assertIsInstance(e1.sources[1].id, ObjectId)
+        self.assertNotEqual(e1.sources[1].id, oldid)
+        for source in e1.sources:
             source.clean()
             self.assertEqual(source.rate.m.id, source.id)
 
@@ -34,12 +35,13 @@ class TestForms(unittest.TestCase):
         """ Lists not in the form are left alone, but lists marked as
         present with no rows are cleared
         """
-        c1 = Component(name='c1', sources=[EmissionSource(name='K40')],
+        c1 = Component(name='c1', location_overrides=[
+                           LocationOverride(source='K40', location='x')],
                        history=[HistoryEntry(date=datetime(2024, 1, 1),
                                              description='made')])
         c1 = update_object(c1, MultiDict([('name', 'c2')]))
         self.assertEqual(c1.name, 'c2')
-        self.assertEqual(len(c1.sources), 1)
+        self.assertEqual(len(c1.location_overrides), 1)
         self.assertEqual(len(c1.history), 1)
 
         form = MultiDict([('name', 'c2'),
@@ -47,7 +49,7 @@ class TestForms(unittest.TestCase):
                           (LISTFIELDS_KEY, 'specs')])
         c1.specs = [EmissionSpec(name='e1')]
         c1 = update_object(c1, form)
-        self.assertEqual(len(c1.sources), 1)
+        self.assertEqual(len(c1.location_overrides), 1)
         self.assertEqual(len(c1.history), 0)
         self.assertEqual(len(c1.specs), 0)
 
