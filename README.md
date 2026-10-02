@@ -1,5 +1,36 @@
 # Background Explorer
 
+## Running a server
+
+The simplest way is with docker compose, which runs the web server and a
+MongoDB database whose data are kept in the `mongo-data` volume:
+
+```sh
+docker compose up -d
+docker compose logs web | grep token  # the one-time setup token
+```
+
+Then open http://localhost:8000 and follow the setup link to create the first
+site admin (see below). Set `BGEXPLORER_PORT` to use another port.
+
+The server is configured with environment variables. Any Flask setting can be
+given as `FLASK_<NAME>`:
+
+- `FLASK_MONGODB_URI`: the database, e.g. `mongodb://mongo:27017/bgexplorer`.
+- `FLASK_SECRET_KEY`: optional, see below.
+- `FLASK_SESSION_COOKIE_SECURE=true`: when users reach the server over https,
+  e.g. through a reverse proxy, which should also handle TLS.
+- `GUNICORN_CMD_ARGS`: gunicorn's options, by default
+  `--workers 2 --threads 4 --timeout 120 --access-logfile -`.
+
+Without docker, install with `pip install '.[server]'` and run e.g.
+`gunicorn --bind 0.0.0.0:8000 'bgexplorer:create_app()'`. The user commands
+also work inside the container, e.g.
+`docker compose exec web bgexplorer-users create NAME --role site_admin`.
+
+For backups, export versions (see "Versions"), or back up the whole database
+with `mongodump`, which also keeps the users and site settings.
+
 ## Users and login
 
 The server has local user accounts, each with one role. Roles include the

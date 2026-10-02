@@ -40,6 +40,7 @@ bgexplorer-versions = "bgexplorer.cli:versions_main"
 
 [project.optional-dependencies]
 dev = ["mongomock", "flake8", "pytest"]
+server = ["gunicorn"]
 
 [project.urls]
 "Homepage" = "https://github.com/bloer/bgexplorer3"

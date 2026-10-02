@@ -2,7 +2,7 @@ from mongoengine import (Document, DateTimeField, StringField, BooleanField,
                          EmbeddedDocument, EmbeddedDocumentListField, signals,
                          FloatField, EnumField, MapField, URLField,
                          EmbeddedDocumentField, ListField, BinaryField,
-                         ValidationError, ObjectIdField)
+                         ValidationError, ObjectIdField, NotUniqueError)
 from mongoengine.connection import get_db
 from bson import ObjectId
 from pymongo import ReturnDocument
@@ -37,7 +37,11 @@ def get_settings(version_tag: Optional[str] = None, create: bool = True,
                     f"'{version_tag}',")
         if create:
             log.warning("creating version with defaults")
-            return VersionSettings(version_tag=version_tag).save()
+            try:
+                return VersionSettings(version_tag=version_tag).save()
+            except NotUniqueError:
+                # another process created it at the same time
+                return VersionSettings.objects.get(version_tag=version_tag)
         raise KeyError(version_tag) from e
 
 
@@ -131,13 +135,22 @@ def holding(tokens: dict) -> Iterator[None]:
             release_lock(tag, token)
 
 
+# the id of a new ApplicationSettings, so processes creating it at the same
+# time can't make two
+APPLICATION_SETTINGS_ID = ObjectId('000000000000000000000001')
+
+
 def get_application_settings() -> 'ApplicationSettings':
     # there should only ever be one
     try:
         return ApplicationSettings.objects.get()
     except ApplicationSettings.DoesNotExist:
         log.warning("No ApplicationSettings found, creating default")
-        return ApplicationSettings().save()
+        try:
+            return ApplicationSettings(id=APPLICATION_SETTINGS_ID)\
+                .save(force_insert=True)
+        except NotUniqueError:
+            return ApplicationSettings.objects.get()
 
 
 def get_server_secret(name: str) -> str:

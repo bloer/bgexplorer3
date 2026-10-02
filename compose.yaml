@@ -1,0 +1,34 @@
+# Run the server with its own MongoDB:
+#   docker compose up -d
+# then open http://localhost:8000 and follow the setup link. The setup token
+# is in the log: docker compose logs web | grep token
+services:
+  web:
+    build: .
+    image: bgexplorer
+    restart: unless-stopped
+    ports:
+      - "${BGEXPLORER_PORT:-8000}:8000"
+    environment:
+      FLASK_MONGODB_URI: mongodb://mongo:27017/bgexplorer
+      # optional: without it, a key is generated and kept in the database
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-}
+      # set to true when users reach the server over https
+      FLASK_SESSION_COOKIE_SECURE: ${FLASK_SESSION_COOKIE_SECURE:-false}
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  mongo-data:
