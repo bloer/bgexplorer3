@@ -37,7 +37,7 @@
     <ul class="mb-0">{% for name, message in errors.items() %}<li><strong>{{ name }}</strong>: {{ message }}</li>{% endfor %}</ul>
 </div>
 {%- endif -%}
-{%- set basefields = ['name', 'description', 'comment', 'category', 'sources'] -%}
+{%- set basefields = ['name', 'description', 'comment', 'category', 'multiplier', 'sources'] -%}
 <form method="POST" id="mainform">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="row mb-3">

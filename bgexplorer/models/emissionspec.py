@@ -72,6 +72,14 @@ class Multiplier(Enum):
         raise ValidationError(f"Rate units {rate.u} invalid"
                               f" for multiplier {self.name}")
 
+    def accepts(self, rate: Optional[units.Quantity]) -> bool:
+        """ Does `rate` have appropriate units for us? """
+        try:
+            self.check_units(rate)
+        except ValidationError:
+            return False
+        return True
+
     def getvalue(self, component) -> Union[float, units.Quantity]:
         """ Extract the numerical value of the multipler from component """
         mult = 1
@@ -138,6 +146,11 @@ class EmissionSpec(VersionedDocument):
     description = StringField()
     comment = StringField()
     category = EnumField(SourceCategory)
+    multiplier = EnumField(
+        Multiplier,
+        help_text="Used for every source whose rate has suitable units, "
+                  "e.g. to choose inner or outer surface; others keep their "
+                  "own")
     sources = EmbeddedDocumentListField(EmissionSource)
     attachments = AttachmentsField()
 
@@ -226,6 +239,12 @@ class EmissionSpec(VersionedDocument):
         """ Automatically populate derived spectra from settings """
         super().clean()
         validate_unique_ids(self.sources, 'sources')
+        # sources store their multiplier once cleaned, so ours wins wherever
+        # the units allow it, rather than only filling in blanks
+        if self.multiplier is not None:
+            for source in self.sources:
+                if self.multiplier.accepts(source.rate):
+                    source.multiplier = self.multiplier
         # TODO: error checking on active_version and config validity
         config = settings.get_settings(self.active_version)
         # remove all auto-generated sources that no longer have an original

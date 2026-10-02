@@ -197,6 +197,27 @@ class TestEmission(unittest.TestCase):
                                .mode, 20)
         self.assertIsNotNone(spec.sourcemap['Ra226'].generated_from)
 
+    def test2_spec_multiplier(self):
+        """ the spec's multiplier is used by every source it suits """
+        spec = EmissionSpec(name='mixed', multiplier=Multiplier.outer_surface,
+                            sources=[EmissionSource(name='Pb210',
+                                                    rate='1 mBq/m**2'),
+                                     EmissionSource(name='K40',
+                                                    rate='1 mBq/kg')]).save()
+        self.assertEqual([s.multiplier for s in spec.sources],
+                         [Multiplier.outer_surface, Multiplier.mass])
+        # sources store their multiplier, but changing ours still applies
+        spec.multiplier = Multiplier.inner_surface
+        spec.save()
+        self.assertEqual(spec.reload().sources[0].multiplier,
+                         Multiplier.inner_surface)
+        # without one, sources keep their own
+        spec.multiplier = None
+        spec.sources[0].multiplier = Multiplier.surface
+        spec.save()
+        self.assertEqual(spec.reload().sources[0].multiplier,
+                         Multiplier.surface)
+
     def test4_rateid(self):
         # test that emissionrate has an id assigned
         source = EmissionSource(name="U238", rate="10 +- 0.2 Bq/kg")
