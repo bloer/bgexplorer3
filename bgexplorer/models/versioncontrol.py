@@ -6,14 +6,19 @@ from .cosmogenic import ActivatedMaterial
 from .sourceterm import SourceTerm, CalculatedResults
 from .settings import VersionSettings, get_settings, touch, hold_locks
 from .verdoc import (VersionedDocument, ReadOnlyVersionError, check_unlocked,
-                     check_writable)
-from .versiondiff import find_refs, raw_content
+                     check_writable, strip_identity, current_user_name)
+from .versiondiff import (find_refs, raw_content, diff_versions,
+                          settings_content, ItemVersions, DiffEntry,
+                          VersionComparison)
 from .history import EventAction, log_event
 from . import signals
 from bson import ObjectId
 from typing import Optional, Dict, List, Set
+from dataclasses import dataclass, field
 from enum import Enum
 import datetime
+import hashlib
+import json
 import re
 import logging
 log = logging.getLogger(__name__)
@@ -246,84 +251,272 @@ def import_document(cls, original_id, from_tag: str, to_tag: str
     return doc
 
 
-class MergeMethod(Enum):
-    replace_all = 'replace_all'
-    keep_othertag = 'keep_othertag'
-    keep_thistag = 'keep_thistag'
-    keep_newest = 'keep_newest'
+class MergeError(VersionControlError):
+    """ Raised when a merge can't be done safely """
 
 
-def merge_version(version_tag: str, onto: str, keep: bool = True,
-                  method: MergeMethod = MergeMethod.keep_newest):
-    """ Merge the documents from `version_tag` onto the tag `onto`. If `onto`
-    does not exist, this is equivalent to create_version. If `keep` is False,
-    `version_tag` is deleted after the merge.
-    method:
-        replace_all: completely delete the `onto` version then clone
-        keep_othertag: only copy documents that don't match original_id
-        keep_thistag: overwrite any documents with same original_id
-        keep_newest: handle original_id conflicts based on modification time
-    keep_othertag is likely to leave things in a bad state
+class MergeRule(Enum):
+    """ Which copy a merge keeps for items that differ between versions """
+    source = 'source'
+    target = 'target'
+    newest = 'newest'
+
+
+@dataclass
+class ClassMergePlan:
+    """ What a merge does with the items of one class. Copies of `add` and
+    `replace` items are taken from the source; `keep` items differ but keep
+    the target's copy, and `target_only` items are only in the target
     """
-    log.info(f"Merging {version_tag} onto {onto} with method {method}")
-    settings = get_settings(version_tag, create=False)
-    if not version_exists(onto):
-        create_version(onto, version_tag, editable=settings.editable,
-                       description=settings.description)
-    elif method is MergeMethod.replace_all:
-        # delete the target version then create from this one
-        _delete_version(onto)
-        create_version(onto, version_tag, editable=settings.editable,
-                       description=settings.description)
-    elif method is MergeMethod.keep_othertag:
-        for cls in _versioned_classes:
-            existing = cls.select_version(onto).scalar('original_id')
-            # TODO: can I do this in a single query and let the unique index
-            # prevent the conflicts from occurring?
-            cls.objects(version_tags=version_tag, original_id__nin=existing)\
-                .update(bypass_version_control=True, push__version_tags=onto)
-    elif method is MergeMethod.keep_thistag:
-        settings.clone(onto)
-        for cls in _versioned_classes:
-            # the second half of this query excludes documents that already
-            # belong to both versions
-            tomerge = cls.objects(version_tags=version_tag,
-                                  version_tags__ne=onto)
-            cls.objects(version_tags=onto,
-                        original_id__in=tomerge.scalar('original_id'),
-                        ).delete(bypass_reverse_delete=True)
-            tomerge.update(bypass_version_control=True,
-                           push__version_tags=onto)
-    elif method is MergeMethod.keep_newest:
-        ontosettings = get_settings(onto)
-        if ontosettings.modified < settings.modified:
-            settings.clone(onto)
-        for cls in _versioned_classes:
-            # the second half of this query excludes documents that already
-            # belong to both versions
-            totest = cls.objects(version_tags=version_tag,
-                                 version_tags__ne=onto,
-                                 ).scalar('original_id', 'modified')
-            todelete = []
-            toupdate = []
-            # TODO: is there a better way to do this than a loop?
-            for original_id, modified in totest:
-                othermtime = cls.objects(version_tags=onto,
-                                         original_id=original_id)\
-                                .scalar('modified').first()
-                if othermtime is None:
-                    toupdate.append(original_id)
-                elif othermtime < modified:
-                    todelete.append(original_id)
-                    toupdate.append(original_id)
-            cls.objects(version_tags=onto, original_id__in=todelete)\
-                .delete(bypass_reverse_delete=True)
-            cls.objects(version_tags=version_tag, original_id__in=toupdate)\
-                .update(bypass_version_control=True, push__version_tags=onto)
+    cls: type
+    add: List[ItemVersions] = field(default_factory=list)
+    replace: List[ItemVersions] = field(default_factory=list)
+    keep: List[ItemVersions] = field(default_factory=list)
+    target_only: List[ItemVersions] = field(default_factory=list)
 
-    # remove all CalculatedResults
-    sourceterms = SourceTerm.select_version(onto).scalar('id')
-    CalculatedResults.objects(sources__in=sourceterms).delete()
-    touch(onto)
-    if not keep:
-        delete_version(version_tag)
+    @property
+    def name(self) -> str:
+        return self.cls.__name__
+
+    @property
+    def adopted(self) -> List[ItemVersions]:
+        """ The items whose source copies the target will use """
+        return self.add + self.replace
+
+
+@dataclass
+class MergePlan:
+    """ What merging `source` into `target` with `rule` would do. The merge
+    can't be done if there are `problems`. `fingerprint` identifies the
+    state of both versions the plan was made from
+    """
+    source: str
+    target: str
+    rule: MergeRule
+    classes: List[ClassMergePlan]
+    settings: List[DiffEntry]
+    replace_settings: bool
+    fingerprint: str
+    problems: List[str] = field(default_factory=list)
+
+    @property
+    def changes(self) -> bool:
+        return self.replace_settings or any(c.adopted for c in self.classes)
+
+    def counts(self) -> Dict[str, Dict[str, int]]:
+        return {c.name: {'add': len(c.add), 'replace': len(c.replace),
+                         'keep': len(c.keep)} for c in self.classes}
+
+
+def _fingerprint(comparison: VersionComparison) -> str:
+    """ A hash that changes whenever either compared version changes """
+    state = [[(str(i.original_id), str(i.left_id), str(i.left_modified),
+               str(i.right_id), str(i.right_modified))
+              for i in (c.only_left + c.only_right + c.differ + c.equal
+                        + c.same)]
+             for c in comparison.classes]
+    state.append([settings_content(comparison.left),
+                  settings_content(comparison.right)])
+    return hashlib.sha1(json.dumps(state, sort_keys=True, default=str)
+                        .encode()).hexdigest()
+
+
+def _source_wins(item: ItemVersions, rule: MergeRule) -> bool:
+    """ Whether the source copy (right) of a differing item is merged """
+    if rule is MergeRule.newest:
+        # ties keep the target's copy
+        return item.newer == 'right'
+    return rule is MergeRule.source
+
+
+def plan_merge(source: str, target: str,
+               rule: MergeRule = MergeRule.newest) -> MergePlan:
+    """ Work out what merging `source` into `target` would do, without
+    changing anything. Items only in one version are kept, so a merge never
+    removes anything from `target`. Items that differ, and the settings,
+    are taken from the source or kept according to `rule`. For settings,
+    `newest` compares the times the versions were last changed
+    """
+    rule = MergeRule(rule)
+    verify_version(source)
+    verify_version(target)
+    if source == target:
+        raise MergeError("Can't merge a version into itself")
+    problems = []
+    for tag, check in ((target, check_writable), (source, check_unlocked)):
+        try:
+            check(tag)
+        except PermissionError as e:
+            problems.append(str(e))
+    comparison = diff_versions(target, source, classes=_referenced_classes)
+    classes = []
+    for result in comparison.classes:
+        plan = ClassMergePlan(result.cls, add=result.only_right,
+                              target_only=result.only_left)
+        for item in result.differ:
+            (plan.replace if _source_wins(item, rule) else plan.keep)\
+                .append(item)
+        classes.append(plan)
+    if rule is MergeRule.newest:
+        modified = {tag: get_settings(tag, create=False).modified
+                    for tag in (source, target)}
+        source_settings = modified[source] > modified[target]
+    else:
+        source_settings = rule is MergeRule.source
+    result = MergePlan(source, target, rule, classes, comparison.settings,
+                       bool(comparison.settings) and source_settings,
+                       _fingerprint(comparison), problems)
+    # everything the merged documents refer to must be in the target
+    adopted = {c.cls: [i.right_id for i in c.adopted] for c in classes}
+    merged_ids = {i.original_id for c in classes for i in c.adopted}
+    refs = set()
+    for cls, ids in adopted.items():
+        for son in cls._get_collection().find({'_id': {'$in': ids}},
+                                              {'attachments.data': 0}):
+            refs.update(find_refs(strip_identity(son)))
+    if missing := missing_refs(refs - merged_ids, target):
+        problems.append(f"Merged documents refer to {len(missing)} items "
+                        f"that are in neither version: "
+                        + ', '.join(sorted(map(str, missing))))
+    return result
+
+
+def _backup_name(target: str) -> str:
+    base = (f"{target}.premerge-"
+            f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}")
+    name, n = base, 1
+    while version_exists(name):
+        n += 1
+        name = f"{base}-{n}"
+    return name
+
+
+def _copy_settings(source: str, target: str) -> None:
+    """ Replace the content of `target`'s settings with `source`'s, keeping
+    what belongs to the version itself, such as its name and lock
+    """
+    content = settings_content(source)
+    unset = {key: '' for key in settings_content(target)
+             if key not in content}
+    update = {'$set': content} if content else {}
+    if unset:
+        update['$unset'] = unset
+    if update:
+        VersionSettings._get_collection().update_one(
+            {'version_tag': target}, update)
+
+
+def _restore(target: str, backup: str) -> None:
+    """ Make `target` contain exactly the documents and settings of
+    `backup` again, keeping `target`'s own settings document and lock
+    """
+    for cls in _versioned_classes:
+        coll = cls._get_collection()
+        ids = coll.distinct('_id', {'version_tags': target})
+        coll.update_many({'_id': {'$in': ids}},
+                         {'$pull': {'version_tags': target}})
+        coll.delete_many({'_id': {'$in': ids}, 'version_tags': {'$size': 0}})
+        coll.update_many({'version_tags': backup},
+                         {'$push': {'version_tags': target}})
+    _copy_settings(backup, target)
+    touch(target)
+
+
+def _update_rois(version_tag: str) -> None:
+    """ Evaluate the ROIs of the hit efficiencies in `version_tag` with its
+    settings, and save those that changed
+    """
+    rois = get_settings(version_tag).hiteffdbconfig.rois
+    for hiteff in HitEfficiency.select_version(version_tag):
+        values = {roi.key: roi.evaluate(hiteff, store=False) for roi in rois}
+        try:
+            changed = values != dict(hiteff.rois)
+        except Exception:
+            changed = True
+        if changed:
+            hiteff.update(set__rois=values)
+
+
+def _clear_results(version_tag: str) -> None:
+    """ Delete the stored results calculated from a version's SourceTerms """
+    CalculatedResults.objects(
+        sources__in=list(SourceTerm.select_version(version_tag).scalar('id'))
+    ).delete()
+
+
+def merge_version(source: str, target: str,
+                  rule: MergeRule = MergeRule.newest,
+                  fingerprint: Optional[str] = None) -> MergePlan:
+    """ Merge `source` into `target`, see `plan_merge`. If `fingerprint` is
+    given, it must match the plan's, i.e. neither version changed since the
+    plan was shown. Both versions are locked during the merge, and `target`
+    is restored if anything goes wrong. Returns the plan that was carried
+    out. Raises MergeError if the merge can't be done
+    """
+    from .maintenance import rebuild_sourceterms
+    rule = MergeRule(rule)
+    plan = plan_merge(source, target, rule)
+    if plan.problems:
+        raise MergeError("Can't merge", plan.problems)
+    locked = [target] + ([source] if get_settings(source).editable else [])
+    with hold_locks(locked, f"a merge from '{source}' into '{target}'",
+                    current_user_name()):
+        # plan again: either version may have changed before we locked them
+        plan = plan_merge(source, target, rule)
+        if plan.problems:
+            raise MergeError("Can't merge", plan.problems)
+        if fingerprint is not None and plan.fingerprint != fingerprint:
+            raise MergeError(f"'{source}' or '{target}' changed since the "
+                             "merge was planned; review it again")
+        if not plan.changes:
+            return plan
+        backup = _backup_name(target)
+        _create_version(backup, target, False,
+                        f"Backup of '{target}' before merging '{source}'")
+        try:
+            _clear_results(target)
+            for cls_plan in plan.classes:
+                _adopt_copies(cls_plan.cls, target,
+                              [i.right_id for i in cls_plan.adopted])
+            if plan.replace_settings:
+                _copy_settings(source, target)
+            if any(entry.path[:2] == ['hiteffdbconfig', 'rois']
+                   for entry in plan.settings):
+                # some hit efficiencies' ROIs were evaluated with the other
+                # version's settings
+                _update_rois(target)
+            rebuild_sourceterms(target)
+        except Exception as e:
+            log.exception(f"Merge of '{source}' into '{target}' failed, "
+                          "restoring it")
+            try:
+                _restore(target, backup)
+            except Exception:
+                log.exception(f"Restoring '{target}' failed")
+                log_event(EventAction.merge_rollback, target, source,
+                          message=f"restoring failed, see backup {backup}",
+                          backup=backup, error=str(e))
+                raise MergeError(f"The merge failed, and so did restoring "
+                                 f"'{target}'. Its previous state is in "
+                                 f"the tag '{backup}'", [str(e)]) from e
+            _delete_version(backup)
+            log_event(EventAction.merge_rollback, target, source,
+                      message=str(e), error=str(e))
+            raise MergeError(f"The merge failed, and '{target}' was "
+                             f"restored: {e}", [str(e)]) from e
+        _delete_version(backup)
+        touch(target)
+    log_event(EventAction.merge, target, source, message=_merge_summary(plan),
+              rule=rule.value, counts=plan.counts(),
+              settings=plan.replace_settings)
+    return plan
+
+
+def _merge_summary(plan: MergePlan) -> str:
+    """ e.g. 'newest copies: 2 added, 1 replaced, settings replaced' """
+    added = sum(len(c.add) for c in plan.classes)
+    replaced = sum(len(c.replace) for c in plan.classes)
+    text = f"{plan.rule.value} copies: {added} added, {replaced} replaced"
+    if plan.replace_settings:
+        text += ", settings replaced"
+    return text
