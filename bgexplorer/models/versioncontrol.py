@@ -1,5 +1,5 @@
 """ functions for creating, saving, merging, and deleting versions """
-from .component import Component
+from .component import Component, Assembly
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .cosmogenic import ActivatedMaterial
@@ -444,6 +444,40 @@ def _clear_results(version_tag: str) -> None:
     ).delete()
 
 
+def _update_sourceterms(target: str, plan: MergePlan) -> None:
+    """ Update the SourceTerms of `target` that depend on the documents a
+    merge adopted, as if each had been saved there. New settings can change
+    any of them, so then all are rebuilt, as they are when most components
+    are affected
+    """
+    from .maintenance import rebuild_sourceterms
+    adopted = {c.cls: [i.original_id for i in c.adopted]
+               for c in plan.classes}
+    components = Component.select_version(target)
+    # updating each term separately costs more per term than a rebuild
+    touched = components(__raw__={'$or': [
+        {'original_id': {'$in': adopted.get(Component, [])}},
+        {'specs': {'$in': adopted.get(EmissionSpec, [])}}]}).count()
+    if plan.replace_settings or touched > components.count() / 2:
+        rebuild_sourceterms(target)
+        return
+    docs = []
+    # materials update their activation specs, specs their components, and
+    # components their assemblies; hit efficiencies match the final terms
+    for cls in (ActivatedMaterial, EmissionSpec, Component, HitEfficiency):
+        if ids := adopted.get(cls):
+            found = list(cls.select_version(target)(original_id__in=ids))
+            if cls is Component:
+                # leaves, then assemblies from the bottom up
+                found.sort(key=lambda c: (isinstance(c, Assembly),
+                                          c.hierarchy_level))
+            docs.extend(found)
+    log.info(f"Updating SourceTerms in '{target}' for {len(docs)} merged "
+             "documents")
+    for doc in docs:
+        signals.post_save(sender=type(doc), document=doc)
+
+
 def merge_version(source: str, target: str,
                   rule: MergeRule = MergeRule.newest,
                   fingerprint: Optional[str] = None) -> MergePlan:
@@ -453,7 +487,6 @@ def merge_version(source: str, target: str,
     is restored if anything goes wrong. Returns the plan that was carried
     out. Raises MergeError if the merge can't be done
     """
-    from .maintenance import rebuild_sourceterms
     rule = MergeRule(rule)
     plan = plan_merge(source, target, rule)
     if plan.problems:
@@ -485,7 +518,7 @@ def merge_version(source: str, target: str,
                 # some hit efficiencies' ROIs were evaluated with the other
                 # version's settings
                 _update_rois(target)
-            rebuild_sourceterms(target)
+            _update_sourceterms(target, plan)
         except Exception as e:
             log.exception(f"Merge of '{source}' into '{target}' failed, "
                           "restoring it")

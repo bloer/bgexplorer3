@@ -37,7 +37,8 @@ def description(name, tag):
 
 def sourceterm_signature(tag):
     return sorted((st.componentName, st.assemblyPathStr, st.source.name,
-                   str(st.spec.original_id))
+                   str(st.spec.original_id), str(st.emissionrate),
+                   st.weight)
                   for st in SourceTerm.select_version(tag))
 
 
@@ -144,7 +145,11 @@ class TestMerge(unittest.TestCase):
         e1 = EmissionSpec.select_version('b').get(name='e1')
         e1.sources.append(EmissionSource(name='Co60', rate='1 mBq/kg'))
         e1.save()
-        merge_version('b', 'main', MergeRule.newest)
+        # every component uses the spec, so all terms are rebuilt
+        with mock.patch('bgexplorer.models.maintenance.rebuild_sourceterms',
+                        wraps=rebuild_sourceterms) as rebuild:
+            merge_version('b', 'main', MergeRule.newest)
+        rebuild.assert_called_once_with('main')
         merged = sourceterm_signature('main')
         self.assertIn('Co60', {sig[2] for sig in merged})
         vc.create_version('check', 'main')
@@ -210,12 +215,45 @@ class TestMerge(unittest.TestCase):
         plan = plan_merge('b', 'main')
         self.assertIn('in neither version', plan.problems[0])
 
+    def test_sourceterms_selective(self):
+        """ Only the merged documents' terms are updated, unless the
+        settings change, and the result matches a full rebuild
+        """
+        # most of main isn't affected by the merge
+        for i in range(10):
+            Component(name=f'pad{i}', mass='1 kg', specs=[self.e1],
+                      version_tag='main').save()
+        time.sleep(0.01)
+        edit('c3', 'b', mass='3 kg')
+        top = Assembly.select_version('b').get(name='top')
+        top.children.append(Placement(
+            component=Component.select_version('b').get(name='c3'),
+            weight=2))
+        top.save()
+        with mock.patch('bgexplorer.models.maintenance.rebuild_sourceterms'
+                        ) as rebuild:
+            merge_version('b', 'main', MergeRule.newest)
+        rebuild.assert_not_called()
+        merged = sourceterm_signature('main')
+        self.assertIn(('c3', 'top/c3', 'K40'), {sig[:3] for sig in merged})
+        vc.create_version('check', 'main')
+        rebuild_sourceterms('check')
+        self.assertEqual(merged, sourceterm_signature('check'))
+        # new settings rebuild everything
+        settings = get_settings('b')
+        settings.hiteffdbconfig.extra_columns = ['material']
+        settings.save()
+        with mock.patch('bgexplorer.models.maintenance.rebuild_sourceterms'
+                        ) as rebuild:
+            merge_version('b', 'main', MergeRule.source)
+        rebuild.assert_called_once_with('main')
+
     def test_rollback(self):
         before = snapshot('main')
         signature = sourceterm_signature('main')
         versions = {v.version_tag for v in vc.list_versions()}
-        with mock.patch('bgexplorer.models.maintenance.rebuild_sourceterms',
-                        side_effect=RuntimeError('boom')):
+        with mock.patch.object(vc, '_update_sourceterms',
+                               side_effect=RuntimeError('boom')):
             with self.assertRaises(MergeError) as cm:
                 merge_version('b', 'main', MergeRule.source)
         self.assertIn('restored', str(cm.exception))
@@ -230,8 +268,8 @@ class TestMerge(unittest.TestCase):
         edit('c1', 'main', description='after')
 
     def test_rollback_fails(self):
-        with mock.patch('bgexplorer.models.maintenance.rebuild_sourceterms',
-                        side_effect=RuntimeError('boom')), \
+        with mock.patch.object(vc, '_update_sourceterms',
+                               side_effect=RuntimeError('boom')), \
                 mock.patch.object(vc, '_restore',
                                   side_effect=RuntimeError('worse')):
             with self.assertRaises(MergeError) as cm:
