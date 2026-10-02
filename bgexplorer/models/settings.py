@@ -9,7 +9,8 @@ from . import hiteff
 from . import verdoc
 from .common import units
 from enum import Enum
-from typing import Optional
+from typing import Optional, Iterable, Iterator
+import contextlib
 import datetime
 import logging
 log = logging.getLogger(__name__)
@@ -58,6 +59,60 @@ def get_cache_token(version_tag: str) -> Optional[ObjectId]:
         touch(version_tag)
         return get_cache_token(version_tag)
     return doc['cache_token']
+
+
+def acquire_lock(version_tag: str, reason: str,
+                 user: Optional[str] = None) -> ObjectId:
+    """ Lock `version_tag` and return the lock's token. Raises
+    VersionLockedError if it is already locked and KeyError if it doesn't
+    exist
+    """
+    lock = VersionLock(token=ObjectId(), reason=reason, user=user)
+    coll = VersionSettings._get_collection()
+    result = coll.update_one({'version_tag': version_tag,
+                              'lock': {'$in': [None]}},
+                             {'$set': {'lock': lock.to_mongo().to_dict()}})
+    if result.matched_count == 0:
+        doc = coll.find_one({'version_tag': version_tag}, {'lock': 1})
+        if doc is None:
+            raise KeyError(version_tag)
+        raise verdoc._lock_error(version_tag, doc.get('lock') or {})
+    return lock.token
+
+
+def release_lock(version_tag: str, token: Optional[ObjectId] = None
+                 ) -> bool:
+    """ Remove the lock from `version_tag`. If `token` is given, only remove
+    it if it matches. Returns whether a lock was removed
+    """
+    query = {'version_tag': version_tag, 'lock': {'$ne': None}}
+    if token is not None:
+        query['lock.token'] = token
+    result = VersionSettings._get_collection().update_one(
+        query, {'$set': {'lock': None}})
+    return result.modified_count > 0
+
+
+@contextlib.contextmanager
+def hold_locks(version_tags: Iterable[str], reason: str,
+               user: Optional[str] = None) -> Iterator[None]:
+    """ Lock all of `version_tags` for the duration of the context. Writes
+    to them are allowed only from within the context. Raises
+    VersionLockedError, without holding any locks, if any is already locked
+    """
+    tokens = {}
+    try:
+        # a fixed order, so concurrent callers can't each hold half
+        for tag in sorted(set(version_tags)):
+            tokens[tag] = acquire_lock(tag, reason, user)
+        reset = verdoc.held_locks.set(verdoc.held_locks.get() | set(tokens))
+        try:
+            yield
+        finally:
+            verdoc.held_locks.reset(reset)
+    finally:
+        for tag, token in tokens.items():
+            release_lock(tag, token)
 
 
 def get_application_settings() -> 'ApplicationSettings':
@@ -190,6 +245,16 @@ class HitEffDbConfig(EmbeddedDocument):
     # are up-to-date
 
 
+class VersionLock(EmbeddedDocument):
+    """ Marks a version as being changed by a long operation, such as a
+    merge. Only the holder may write to a locked version, see `hold_locks`
+    """
+    token = ObjectIdField(required=True)
+    reason = StringField()
+    user = StringField()
+    since = DateTimeField(default=datetime.datetime.now)
+
+
 class VersionSettings(Document):
     """ This class contains user-configurable settings """
     version_tag = StringField(unique=True, required=True)
@@ -202,6 +267,8 @@ class VersionSettings(Document):
                                            default=_default_auto_sources)
     hiteffdbconfig = EmbeddedDocumentField(HitEffDbConfig,
                                            default=HitEffDbConfig)
+    # set while an operation such as a merge is changing this version
+    lock = EmbeddedDocumentField(VersionLock, default=None)
     meta = {
         'indexes': ['modified'],
         'ordering': ['-modified'],
@@ -211,7 +278,7 @@ class VersionSettings(Document):
         """ Copy ourselves to a new tag, overwriting any existing settings
         for that tag """
         VersionSettings.objects(id=self.id).aggregate([
-            {'$unset': '_id'},
+            {'$unset': ['_id', 'lock']},
             {'$set': {'version_tag': newtag,
                       'modified': datetime.datetime.now(),
                       'cache_token': ObjectId()}},

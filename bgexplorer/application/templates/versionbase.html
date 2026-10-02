@@ -31,5 +31,8 @@
 {%- else %}
 <span id="versionbadge" class="badge text-bg-secondary" title="Tags are read-only snapshots">tag: read-only</span>
 {%- endif %}
+{%- if settings.lock %}
+<span id="lockbadge" class="badge text-bg-warning ms-1" title="Locked by {{ settings.lock.reason }} since {{ pretty_date(settings.lock.since) }}">locked</span>
+{%- endif %}
 {%- endif %}
 {% endblock %}

@@ -5,7 +5,8 @@ from .hiteff import HitEfficiency
 from .cosmogenic import ActivatedMaterial
 from .sourceterm import SourceTerm, CalculatedResults
 from .settings import VersionSettings, get_settings, touch
-from .verdoc import VersionedDocument, ReadOnlyVersionError
+from .verdoc import VersionedDocument, ReadOnlyVersionError, check_unlocked
+from .history import EventAction, log_event
 from typing import Optional, Dict
 from enum import Enum
 import datetime
@@ -72,11 +73,23 @@ def verify_version(version_tag: str, want_exists: bool = True) -> None:
 
 def create_version(version_tag: str, fromtag: Optional[str] = None,
                    editable: bool = True, description: Optional[str] = None,
-                   ) -> VersionSettings:
+                   record: bool = True) -> VersionSettings:
     """ Create a new branch/tag. If `fromtag` is provided, create from that
     tag, otherwise create an empty version. Editable and description
-    are passed to the VersionSettings object, which is returned
+    are passed to the VersionSettings object, which is returned. If `record`
+    is True, the creation is logged as a VersionEvent
     """
+    settings = _create_version(version_tag, fromtag, editable, description)
+    if record:
+        log_event(EventAction.create_branch if editable
+                  else EventAction.create_tag, version_tag, fromtag)
+    return settings
+
+
+def _create_version(version_tag: str, fromtag: Optional[str],
+                    editable: bool, description: Optional[str],
+                    ) -> VersionSettings:
+    """ create_version without logging an event """
     validate_version_name(version_tag)
     # make sure such a version doesn't already exist
     verify_version(version_tag, want_exists=False)
@@ -127,7 +140,9 @@ def delete_version(version_tag: str, allow_tags: bool = True) -> None:
         if not VersionSettings.objects.get(version_tag=version_tag).editable:
             raise ProtectedVersionError(f"'{version_tag}' is a tag; tags "
                                         "can't be deleted")
+    check_unlocked(version_tag)
     _delete_version(version_tag)
+    log_event(EventAction.delete, version_tag)
 
 
 def _delete_version(version_tag: str) -> None:

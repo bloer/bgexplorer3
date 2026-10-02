@@ -21,6 +21,7 @@ from .admin import create_admin_blueprint
 from .radiopurity import create_radiopurity_blueprint
 from ..models.versioncontrol import list_versions, version_exists
 from ..models.verdoc import VersionedDocument
+from ..models.history import recent_events
 from .forms import input_type, input_value, field_kind
 from . import examples
 from . import auth
@@ -190,7 +191,8 @@ def create_app(config_file=None, config=None):
             return dict()
         # whether to show buttons and forms that change this version
         return dict(settings=settings,
-                    can_edit=settings.editable and auth.has_role('editor'))
+                    can_edit=(settings.editable and settings.lock is None
+                              and auth.has_role('editor')))
 
     app.add_template_global(pretty_date, 'pretty_date')
     app.add_template_filter(pretty_date, 'pretty_date')
@@ -212,7 +214,9 @@ def create_app(config_file=None, config=None):
 
     @app.get('/explore/<active_version>')
     def overview():
-        return flask.render_template('overview.html')
+        return flask.render_template(
+            'overview.html',
+            events=recent_events(flask.g.active_version))
 
     app.add_url_rule('/explore/<active_version>/settings',
                      'edit_settings', edit_settings, methods=['GET', 'POST'])

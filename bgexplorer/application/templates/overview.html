@@ -17,6 +17,19 @@
 </div>
 {% endblock %}
 {% block pagecontent %}
+{% if settings.lock %}
+<div id="lockwarning" class="alert alert-warning d-flex align-items-center">
+    <div class="me-auto">This version is locked by {{ settings.lock.reason }}
+        {%- if settings.lock.user %} ({{ settings.lock.user }}){% endif %}
+        since {{ pretty_date(settings.lock.since) }}, so it can't be changed until that finishes.</div>
+    {% if has_role('admin') %}
+    <form method="post" action="{{ url_for('versions.unlock') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-outline-danger" type="submit" title="Only clear a lock left behind by an operation that stopped">Clear lock</button>
+    </form>
+    {% endif %}
+</div>
+{% endif %}
 
 {{ settings.description or '' }}
 <ul>
@@ -97,6 +110,23 @@
             {% endfor %}
         </tbody>
     </table>
+    {% endif %}
+</section>
+
+<section id="history">
+    <h2>History</h2>
+    {% if events %}
+    <table class="table table-sm">
+        <thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead>
+        <tbody>
+            {% for event in events %}
+            <tr><td title="{{ event.time }}">{{ pretty_date(event.time) }}</td>
+                <td>{{ event.user or '' }}</td><td>{{ event.summary }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">No recorded events</p>
     {% endif %}
 </section>
 {% endblock pagecontent %}

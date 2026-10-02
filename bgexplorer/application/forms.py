@@ -211,11 +211,14 @@ def update_object(obj, form, prefix=None, index=0, errors=None, path=None):
         if isinstance(field, me.EmbeddedDocumentField):
             currentval = getattr(obj, fieldname, None)
             if not isinstance(currentval, me.EmbeddedDocument):
+                # leave unset documents alone unless the form fills them
+                if not any(name.startswith(fullfieldname + '.')
+                           for name in form):
+                    continue
                 currentval = field.document_type()
             value = update_object(currentval, form, prefix=fullfieldname,
                                   index=index, errors=errors,
                                   path=path + [fieldname])
-            # TODO: handle null EmbeddedDocuments
         elif isinstance(field, me.EmbeddedDocumentListField):
             # TODO: can't nest lists or this will break
             # the EmbeddedDocument must have a default-constructor
