@@ -38,6 +38,57 @@ def new_id() -> str:
     return str(ObjectId()) if ObjectId is not None else uuid.uuid4().hex
 
 
+class CorrelationsNotLoaded(ValueError):
+    """ A calculated value was loaded without the expression of the
+    variables it depends on, so it can't be combined with others correctly.
+    Not an AttributeError, so it isn't mistaken for a constant
+    """
+
+
+# the expression of a value loaded without it
+_NOT_LOADED = object()
+
+
+def _encode(value, compressarrays: bool = True):
+    """ `value` as something any store can keep: arrays encoded, numpy
+    scalars as plain numbers
+    """
+    if isinstance(value, np.ndarray):
+        return encode_array(value) if compressarrays else value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _decode(value):
+    return decode_array(value) if is_encoded_array(value) else value
+
+
+class LeafStore:
+    """ Where the leaves of serialized expressions can be kept, rather than
+    in each expression. Subclasses keep them in a database, etc.
+    """
+    def get_many(self, ids) -> dict:
+        """ {id: leaf} for each of `ids` that is stored """
+        raise NotImplementedError
+
+    def put_many(self, leaves) -> None:
+        """ Store each of the AsymmetricUncertainty `leaves` """
+        raise NotImplementedError
+
+
+class InMemoryLeafStore(LeafStore):
+    """ A LeafStore in a dict """
+    def __init__(self):
+        self.leaves = {}
+
+    def get_many(self, ids) -> dict:
+        return {i: self.leaves[i] for i in ids if i in self.leaves}
+
+    def put_many(self, leaves) -> None:
+        self.leaves.update((leaf.id, leaf) for leaf in leaves)
+
+
 def _isone(value) -> bool:
     """ Is `value` the plain scalar 1? """
     return (isinstance(value, (int, float, np.integer, np.floating))
@@ -279,8 +330,27 @@ class AsymmetricUncertainty:
 
     @property
     def expression(self):
+        if self._expression is _NOT_LOADED:
+            raise CorrelationsNotLoaded(
+                f"{self} was loaded without its correlations")
         return (self._expression if self._expression is not None
                 else LinearExpression(self))
+
+    @property
+    def correlations_loaded(self) -> bool:
+        """ False if we're a calculated value loaded without the expression
+        it was calculated from
+        """
+        return self._expression is not _NOT_LOADED
+
+    @classmethod
+    def without_correlations(cls, value, sigma, sigmaup=None
+                             ) -> 'AsymmetricUncertainty':
+        """ A calculated value whose expression isn't loaded. Its values can
+        be used, but combining it with others raises CorrelationsNotLoaded,
+        except when ignoring correlations
+        """
+        return cls(value, sigma, sigmaup, expression=_NOT_LOADED)
 
     _threadlocal = threading.local()
 
@@ -343,12 +413,28 @@ class AsymmetricUncertainty:
             result = result + (str(asym.units),)
         return result
 
+    def serialize_expression(self, compressarrays: bool = True,
+                             store: Optional[LeafStore] = None
+                             ) -> Optional[dict]:
+        """ The expression we were calculated from, for storage, or None if
+        we're a leaf. See `LinearExpression.to_terms`. Stored separately from
+        our values, so the values can be loaded without it
+        """
+        if self.isleaf:
+            return None
+        return self.expression.to_terms(compressarrays, store)
+
     @classmethod
     def deserialize(cls, val: Tuple, unit_registry=None,
-                    force_quantity: bool = False) -> 'AsymmetricUncertainty':
+                    force_quantity: bool = False,
+                    expression: Optional[dict] = None,
+                    store: Optional[LeafStore] = None,
+                    ) -> 'AsymmetricUncertainty':
         """ Construct AsymmetricUncertainty from its serialized represeation
         If the serialized object contained a unit, unit_registry must be a
-        `pint.UnitRegistry`
+        `pint.UnitRegistry`. If `expression` from `serialize_expression` is
+        given, the result has it, with its leaves from `store` if they
+        aren't in it.
         """
         unit = None
         if isinstance(val[-1], str) or force_quantity:
@@ -367,7 +453,10 @@ class AsymmetricUncertainty:
             val = tuple(np.load(io.BytesIO(val[0])).values())
         val = tuple(decode_array(v) if is_encoded_array(v) else v
                     for v in val)
-        result = AsymmetricUncertainty(*val, forceposdef=False)
+        if expression is not None:
+            expression = LinearExpression.from_terms(expression, store)
+        result = AsymmetricUncertainty(*val, forceposdef=False,
+                                       expression=expression)
         if unit is not None:
             result = unit_registry.Quantity(result, unit)
         return result
@@ -801,6 +890,52 @@ class LinearExpression:
     def variables(self):
         """ Get list of all variables """
         return set().union(*self.coefficients.keys())
+
+    def to_terms(self, compressarrays: bool = True,
+                 store: Optional[LeafStore] = None) -> dict:
+        """ For storage: {'terms': [[[leaf ids], coefficient], ...]}, where
+        each term is the product of its leaves and coefficient (the offset
+        has no leaves). The leaves are in 'leaves', as {id: serialized
+        values}, unless they're put in `store`
+        """
+        leaves = {}
+        terms = []
+        for key, coefficient in self.coefficients.items():
+            # e.g. x - x, which doesn't depend on x
+            if np.all(np.asarray(coefficient) == 0):
+                continue
+            for leaf in key:
+                leaves[leaf.id] = leaf
+            terms.append([sorted(leaf.id for leaf in key),
+                          _encode(coefficient, compressarrays)])
+        result = dict(terms=terms)
+        if store is not None:
+            store.put_many(leaves.values())
+        else:
+            result['leaves'] = {i: leaf.serialize(compressarrays)
+                                for i, leaf in leaves.items()}
+        return result
+
+    @classmethod
+    def from_terms(cls, data: dict, store: Optional[LeafStore] = None
+                   ) -> 'LinearExpression':
+        """ The inverse of `to_terms`. Leaves not in `data` are looked up
+        in `store`
+        """
+        leaves = {i: AsymmetricUncertainty(*(_decode(v) for v in val),
+                                           id=i)
+                  for i, val in (data.get('leaves') or {}).items()}
+        wanted = {i for ids, _ in data['terms'] for i in ids}
+        if missing := wanted.difference(leaves):
+            if store is not None:
+                leaves.update(store.get_many(missing))
+            if missing := wanted.difference(leaves):
+                raise KeyError(f"Leaves {sorted(missing)} aren't stored")
+        result = cls()
+        for ids, coefficient in data['terms']:
+            key = frozenset(leaves[i] for i in ids)
+            result.coefficients[key] = _decode(coefficient)
+        return result
 
     def evaluate(self, lazy: bool = True) -> 'AsymmetricUncertainty':
         if lazy and not AsymmetricUncertainty.get_ignore_correlations():

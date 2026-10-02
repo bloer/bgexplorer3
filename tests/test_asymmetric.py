@@ -1,7 +1,9 @@
 import unittest
 import numpy as np
 from numpy.testing import *
-from bgexplorer.models.asymmetric import AsymmetricUncertainty
+from bgexplorer.models.asymmetric import (AsymmetricUncertainty, LinearExpression,
+                                         InMemoryLeafStore,
+                                         CorrelationsNotLoaded)
 from bgexplorer.models.common import units, pint
 
 class TestAsymmetric(unittest.TestCase):
@@ -280,3 +282,70 @@ class TestLeaves(unittest.TestCase):
         zeroed = lim.rezero()
         assert_equal(zeroed.s1, [0, 0])
         assert_equal(lim.s1, [1, 1])
+
+
+class TestSerializeExpressions(unittest.TestCase):
+    """ Calculated values can be stored with the variables they depend on """
+    def roundtrip(self, value, store=None):
+        return AsymmetricUncertainty.deserialize(
+            value.serialize(), expression=value.serialize_expression(
+                store=store), store=store)
+
+    def test_roundtrip(self):
+        x = AsymmetricUncertainty(10, 1)
+        y = AsymmetricUncertainty(5, 2)
+        z = self.roundtrip(x + 2*y - x)
+        self.assertAlmostEqual(z.mode, 10)
+        self.assertAlmostEqual(z.s0, 4)
+        # it's still correlated with y, and doesn't depend on x
+        self.assertAlmostEqual((z - 2*y).s0, 0)
+        self.assertAlmostEqual((z + x).s0, np.hypot(4, 1))
+        self.assertEqual(len(json_terms(x + 2*y - x)['leaves']), 1)
+        # leaves have no expression
+        self.assertIsNone(x.serialize_expression())
+
+    def test_shared_leaves(self):
+        """ values stored separately are correlated through their leaves """
+        rate = AsymmetricUncertainty(10, 1)
+        a, b = self.roundtrip(rate * 2), self.roundtrip(rate * 3)
+        self.assertAlmostEqual((a + b).s0, 5)
+        # with a store, the leaves aren't repeated
+        store = InMemoryLeafStore()
+        c = (rate * 2).serialize_expression(store=store)
+        self.assertNotIn('leaves', c)
+        self.assertEqual(list(store.leaves), [rate.id])
+        a = self.roundtrip(rate * 2, store)
+        b = self.roundtrip(rate * 3, store)
+        self.assertAlmostEqual((a + b).s0, 5)
+        with self.assertRaises(KeyError):
+            LinearExpression.from_terms(c)
+
+    def test_arrays(self):
+        x = AsymmetricUncertainty(np.arange(3.), np.ones(3))
+        y = AsymmetricUncertainty(2, 0.5)
+        z = self.roundtrip(x * y + x * np.array([1., 2., 3.]))
+        assert_allclose(z.mode, np.arange(3.) * 2 + np.arange(3.) * [1, 2, 3])
+        expected = x * y + x * np.array([1., 2., 3.])
+        assert_allclose(z.s0, expected.s0)
+        assert_allclose((z - expected).s0, 0, atol=1e-12)
+
+    def test_not_loaded(self):
+        z = AsymmetricUncertainty.without_correlations(10, 4)
+        self.assertFalse(z.correlations_loaded)
+        self.assertEqual(z.mode, 10)
+        self.assertEqual(str(z), str(AsymmetricUncertainty(10, 4)))
+        with self.assertRaises(CorrelationsNotLoaded):
+            z + AsymmetricUncertainty(1, 1)
+        with self.assertRaises(CorrelationsNotLoaded):
+            AsymmetricUncertainty(1, 1) + z
+        with self.assertRaises(CorrelationsNotLoaded):
+            z * 2
+        # without correlations it's fine
+        with AsymmetricUncertainty.ignore_correlations():
+            self.assertAlmostEqual((z * 2).s0, 8)
+
+
+def json_terms(value):
+    """ serialize_expression, through json like a store would """
+    import json
+    return json.loads(json.dumps(value.serialize_expression()))
