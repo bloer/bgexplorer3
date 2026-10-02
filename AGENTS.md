@@ -5,8 +5,9 @@ in radiation detectors. Each entry in the background model comes from one
 Component, one associated EmissionSource (usually a material assay measurement),
 and one associated HitEfficiency (usually derived from a Monte Carlo simulation).
 A model is the total combination of many of each class. Models feature a
-git-like branching and tagging version tracking system. Branch merging is
-only partly implemented. Summary views for each version can be configured
+git-like branching and tagging version tracking system. Versions can be
+compared, single documents imported between them, and whole versions merged
+with one rule for conflicts (see README "Versions"). Summary views for each version can be configured
 to show/hide different columns, use different notes, etc.
 
 ## Structure

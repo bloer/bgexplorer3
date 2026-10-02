@@ -32,6 +32,42 @@ bgexplorer-users set-password NAME  # if a password is forgotten
 Set `LOGIN_DISABLED = True` in the configuration to give everyone every role,
 e.g. for a server only you can reach.
 
+## Versions
+
+A model is one version: a branch, which can be edited, or a tag, a read-only
+snapshot. Each document (component, emission spec, hit efficiency or
+activated material) belongs to a list of versions. Versions share a copy of a
+document until one of them changes it. All copies of an item have the same
+`original_id`, which references use.
+
+- **Compare**: the overview of a version compares it with any other. Items
+  are listed as changed, only in one version, or the same. Each item has a
+  diff page that shows the differences between its copies, linked from the
+  "other versions" table on its page.
+- **Import**: the diff page can import one item from the other version,
+  replacing the copy in this version. Only that document is imported, so
+  everything it refers to must already be in this version.
+- **Merge**: "Merge into" on a branch's overview merges another version into
+  it. Items only in the other version are added, and nothing is removed.
+  For items that are different in both, and for the settings, one rule
+  decides which copy is kept: `newest` (changed last; for the settings,
+  whichever version changed last), `source` (the version merged in) or
+  `target` (the branch merged into). The version's name, description and
+  editability are always kept. The page previews the result; confirming
+  merges it, unless either version changed since the preview. The JSON API
+  has the same, at `/api/v1/versions/<version>/merge`.
+
+MongoDB transactions need a replica set, so merges don't use them. Instead,
+both versions are locked while merging, and nobody else can change them.
+The target is backed up as a tag first, and restored from it if the merge
+fails; the backup is deleted afterwards. If even restoring fails, the backup
+tag is kept and named in the error. An admin can clear a lock that an
+interrupted merge left behind, from the version's overview.
+
+Creating, deleting, importing into and merging versions is recorded in a
+log, shown as the History on each version's overview. There are no commits:
+tags are the only snapshots.
+
 ## Uncertainties and correlations
 
 Rates, hit efficiencies and results are `AsymmetricUncertainty` values
