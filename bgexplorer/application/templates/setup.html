@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Set up - Background Explorer{% endblock %}
+{% block pageheader %}<h1>Set up the server</h1>{% endblock %}
+{% block pagecontent %}
+<p>Create the first site admin, who can then add other users and change the
+site settings. The setup token is written to the server log when the server
+starts; it can be used once.</p>
+<div class="row">
+<form method="POST" id="setupform" class="col-sm-8 col-md-5 col-lg-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {%- for name, label, type, autocomplete in [('token', 'Setup token', 'password', 'off'),
+                                               ('username', 'User name', 'text', 'username'),
+                                               ('password', 'Password', 'password', 'new-password'),
+                                               ('confirm_password', 'Repeat the password', 'password', 'new-password')] %}
+    <div class="mb-3">
+        <label class="form-label" for="{{ name }}">{{ label }}</label>
+        <input type="{{ type }}" class="form-control{% if errors[name] %} is-invalid{% endif %}" name="{{ name }}" id="{{ name }}" autocomplete="{{ autocomplete }}"
+               {%- if name == 'username' %} value="{{ request.form.get('username', '') }}"{% endif %} required>
+        {%- if errors[name] %}<div class="invalid-feedback">{{ errors[name] }}</div>{% endif %}
+    </div>
+    {%- endfor %}
+    <button type="submit" class="btn btn-primary">Create site admin</button>
+</form>
+</div>
+{% endblock %}

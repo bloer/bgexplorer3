@@ -2,7 +2,9 @@
 import flask
 from bgexplorer.application.app import create_app
 from bgexplorer.models.settings import (ApplicationSettings, get_secret_key,
-                                        get_application_settings)
+                                        get_application_settings,
+                                        get_server_secret)
+from bgexplorer.application.auth import SETUP_TOKEN
 from bgexplorer.models.users import User, Role
 from bgexplorer.models import versioncontrol as vc
 from bgexplorer.models.component import Component
@@ -158,6 +160,71 @@ class TestLogin(AuthTestCase):
         self.assertEqual(get_secret_key(), key)
         configured = create_app(config=dict(config, SECRET_KEY='abc'))
         self.assertEqual(configured.config['SECRET_KEY'], 'abc')
+
+
+class TestSetup(AuthTestCase):
+    """ Creating the first site_admin on /setup """
+    def post(self, **form):
+        data = dict(token=get_server_secret(SETUP_TOKEN), username='root',
+                    password=PASSWORD, confirm_password=PASSWORD)
+        return self.client.post(self.url('auth.setup'),
+                                data={**data, **form})
+
+    def test_setup(self):
+        url = self.url('auth.setup')
+        self.assertIn('id="setupalert"',
+                      self.html(self.client.get(self.url('index'))))
+        self.assertIn('id="setupform"', self.html(self.client.get(url)))
+        token = get_server_secret(SETUP_TOKEN)
+        for form, field in ((dict(token='wrong'), 'token'),
+                            (dict(username=' '), 'username'),
+                            (dict(confirm_password='other'),
+                             'confirm_password'),
+                            (dict(password='short', confirm_password='short'),
+                             'password')):
+            with self.subTest(form=form):
+                response = self.post(**form)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('is-invalid', self.html(response))
+                self.assertEqual(User.objects.count(), 0)
+        # failed attempts don't use up the token
+        self.assertEqual(get_server_secret(SETUP_TOKEN), token)
+        response = self.post(username=' root ')
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers['Location'].endswith(
+            self.url('admin.users')))
+        user = User.objects.get()
+        self.assertEqual(user.name, 'root')
+        self.assertIs(user.role, Role.site_admin)
+        # logged in as the new site_admin, and setup is closed
+        self.assertEqual(self.client.get(self.url('admin.users')).status_code,
+                         200)
+        self.assertNotIn('id="setupalert"',
+                         self.html(self.client.get(self.url('index'))))
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.app.test_client().post(
+            url, data=dict(token=token)).status_code, 404)
+
+    def test_used_token(self):
+        """ A token only works once, e.g. if the first user was demoted """
+        self.make_user('u1', Role.site_admin, active=False)
+        token = get_server_secret(SETUP_TOKEN)
+        self.assertEqual(self.post(token=token, username='u2').status_code,
+                         302)
+        User.objects(name='u2').update(set__active=False)
+        response = self.post(token=token, username='u3')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Wrong setup token', self.html(response))
+        # the name must be free
+        response = self.post(username='u1')
+        self.assertIn('That name is taken', self.html(response))
+
+    def test_setup_existing_admin(self):
+        self.make_user('root', Role.site_admin)
+        self.assertEqual(self.client.get(self.url('auth.setup')).status_code,
+                         404)
+        self.assertNotIn('id="setupalert"',
+                         self.html(self.client.get(self.url('index'))))
 
 
 class TestRoles(AuthTestCase):

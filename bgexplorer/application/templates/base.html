@@ -79,6 +79,11 @@
 </div>
 
 <div id="messages">
+{%- if needs_setup() and request.endpoint != 'auth.setup' %}
+    <div class="alert alert-warning" id="setupalert">
+        This server has no site admin yet. <a href="{{ url_for('auth.setup') }}">Set it up</a>
+    </div>
+{%- endif %}
 {%- for category, message in get_flashed_messages(with_categories=true) %}
     <div class="alert alert-{{ {'error': 'danger', 'message': 'info'}.get(category, category) }} alert-dismissible fade show" role="alert">
         {{ message }}

@@ -22,8 +22,13 @@ can read the database can then forge logins, but they could already add users.
 To end everyone's sessions, delete that document (or change the configured
 key) and restart.
 
-Create the first site admin on the command line; it asks for a password.
-They can then add other users through the web interface. The commands only
+Until there is a site admin, every page links to `/setup`, which creates the
+first one. It asks for a one-time setup token, which the server writes to its
+log when it starts, so only someone who can see the log can claim a new
+server. They can then add other users through the web interface.
+
+Users can also be managed on the command line; `create` asks for a
+password. The commands only
 connect to the database, given by `--uri` or the `FLASK_MONGODB_URI`
 environment variable (`python -m bgexplorer.cli` also works when the package
 isn't installed):

@@ -140,13 +140,14 @@ def get_application_settings() -> 'ApplicationSettings':
         return ApplicationSettings().save()
 
 
-def get_secret_key() -> str:
-    """ The server's generated secret key, created the first time it's
-    needed. It's kept in its own collection, so it's shared by every process
-    using the database, but isn't part of any settings or exports
+def get_server_secret(name: str) -> str:
+    """ The server's generated secret `name`, created the first time it's
+    needed. Secrets are kept in their own collection, so they're shared by
+    every process using the database, but aren't part of any settings or
+    exports
     """
     coll = get_db()['server_secrets']
-    query = {'_id': 'secret_key'}
+    query = {'_id': name}
     try:
         doc = coll.find_one_and_update(
             query, {'$setOnInsert': {'value': secrets.token_hex()}},
@@ -155,6 +156,21 @@ def get_secret_key() -> str:
         # another process created it at the same time
         doc = coll.find_one(query)
     return doc['value']
+
+
+def use_server_secret(name: str, value: str) -> bool:
+    """ Delete the secret `name` if it equals `value`, so a one-time token
+    can be used only once. Returns whether it did
+    """
+    if not value:
+        return False
+    return get_db()['server_secrets'].delete_one(
+        {'_id': name, 'value': value}).deleted_count == 1
+
+
+def get_secret_key() -> str:
+    """ The generated key to use when no SECRET_KEY is configured """
+    return get_server_secret('secret_key')
 
 
 class RatioType(Enum):

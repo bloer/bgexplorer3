@@ -103,6 +103,11 @@ def is_last_site_admin(user: User) -> bool:
                                  active=True).count())
 
 
+def has_site_admin() -> bool:
+    """ Whether there is an active site_admin, i.e. the server is set up """
+    return User.objects(role=Role.site_admin, active=True).first() is not None
+
+
 def check_login(name: str, password: str) -> Optional[User]:
     """ The active user with `name` and `password`, or None. Takes about as
     long for unknown names as for wrong passwords

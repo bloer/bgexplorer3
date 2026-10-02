@@ -26,13 +26,14 @@ import numpy as np
 RUN_EXAMPLES = bool(os.environ.get('BGEXPLORER_TEST_EXAMPLES'))
 
 # endpoints that aren't pages
-SKIP_ENDPOINTS = {'static', 'test'}
+SKIP_ENDPOINTS = {'static'}
 
 # pages that don't work yet. These are expected to fail so that fixing them
 # is noticed.
 KNOWN_BROKEN = set()
 # endpoints whose GET doesn't return 200 with the test fixtures
 EXPECTED_STATUS = {'admin.logo': 404,  # no logo is set
+                   'auth.setup': 404,  # logins are disabled
                    'api.plan_merge': 400}  # needs a source version
 
 

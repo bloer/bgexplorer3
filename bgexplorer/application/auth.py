@@ -8,11 +8,15 @@ With the LOGIN_DISABLED config option, everyone has every role.
 from functools import wraps
 from typing import Optional
 from urllib.parse import urlsplit
+import logging
 import flask
 from flask_login import LoginManager, current_user, login_user, logout_user
-from ..models.settings import get_application_settings
-from ..models.users import User, Role, check_login
+from mongoengine import NotUniqueError
+from ..models.settings import (get_application_settings, get_server_secret,
+                               use_server_secret)
+from ..models.users import User, Role, check_login, has_site_admin
 from ..models.verdoc import set_user_provider
+log = logging.getLogger(__name__)
 
 login_manager = LoginManager()
 login_manager.login_view = 'auth.login'
@@ -20,8 +24,11 @@ login_manager.login_message = "Please log in to see this page"
 login_manager.login_message_category = 'warning'
 
 # endpoints anyone can reach, even if anonymous viewing is off
-PUBLIC_ENDPOINTS = {'auth.login', 'auth.logout', 'static', 'favicon',
-                    'admin.logo'}
+PUBLIC_ENDPOINTS = {'auth.login', 'auth.logout', 'auth.setup', 'static',
+                    'favicon', 'admin.logo'}
+
+# the one-time token needed to create the first site_admin on /setup
+SETUP_TOKEN = 'setup_token'
 
 
 @login_manager.user_loader
@@ -31,6 +38,11 @@ def load_user(session_id: str) -> Optional[User]:
 
 def login_disabled() -> bool:
     return bool(flask.current_app.config.get('LOGIN_DISABLED'))
+
+
+def needs_setup() -> bool:
+    """ Whether the first site_admin still has to be created """
+    return not login_disabled() and not has_site_admin()
 
 
 def current_role() -> Optional[Role]:
@@ -127,6 +139,47 @@ def create_auth_blueprint() -> flask.Blueprint:
         return flask.render_template('login.html', error=error), \
             401 if error else 200
 
+    @bp.route('/setup', methods=['GET', 'POST'])
+    def setup():
+        """ Create the first site_admin, with the token from the log """
+        if not needs_setup():
+            flask.abort(404)
+        errors = {}
+        if flask.request.method == 'POST':
+            form = flask.request.form
+            user = User(name=form.get('username', '').strip(),
+                        role=Role.site_admin)
+            if not user.name:
+                errors['username'] = "Enter a user name"
+            elif User.objects(name=user.name).first() is not None:
+                errors['username'] = "That name is taken"
+            if form.get('password') != form.get('confirm_password'):
+                errors['confirm_password'] = "The passwords don't match"
+            else:
+                try:
+                    user.set_password(form.get('password', ''))
+                except ValueError as e:
+                    errors['password'] = str(e)
+            if not errors:
+                # used up first, so only one request can create the user
+                if not use_server_secret(SETUP_TOKEN,
+                                         form.get('token', '').strip()):
+                    errors['token'] = "Wrong setup token"
+                else:
+                    try:
+                        user.save()
+                    except NotUniqueError:
+                        errors['username'] = "That name is taken"
+            if not errors:
+                log.warning(f"Created the first site_admin '{user.name}'")
+                flask.session.clear()
+                login_user(user)
+                flask.flash(f"Created site admin {user.name}. You can now "
+                            "add other users", 'success')
+                return flask.redirect(flask.url_for('admin.users'))
+        return flask.render_template('setup.html', errors=errors), \
+            400 if errors else 200
+
     @bp.post('/logout')
     def logout():
         logout_user()
@@ -184,6 +237,14 @@ def init_app(app: flask.Flask) -> None:
             return None
         return require(Role.viewer)
 
+    with app.app_context():
+        if needs_setup():
+            log.warning(
+                "There is no site_admin yet. Create one at /setup with the "
+                f"setup token {get_server_secret(SETUP_TOKEN)}, or with "
+                "'bgexplorer-users create NAME --role site_admin'")
+
     set_user_provider(_entered_by)
+    app.add_template_global(needs_setup, 'needs_setup')
     app.add_template_global(has_role, 'has_role')
     app.add_template_global(login_disabled, 'login_disabled')
