@@ -1,0 +1,88 @@
+{% extends "versionbase.html" %}
+{% block pageheader %}
+<div class="col-7">
+    <h1>Compare {{ g.active_version }}{% if other %} with {{ other }}{% endif %}</h1>
+</div>
+<div class="col-5 d-flex justify-content-end align-items-center">
+    <div class="dropdown">
+        <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="otherversion" data-bs-toggle="dropdown" aria-expanded="false">{{ 'with ' ~ other if other else 'Choose a version' }}</button>
+        <ul class="dropdown-menu" aria-labelledby="otherversion">
+            {%- for version in all_versions() if version.version_tag != g.active_version %}
+            <li><a class="dropdown-item {% if version.version_tag == other %}active{% endif %}" href="{{ url_for('compare_versions', **{'with': version.version_tag}) }}">{{ version.version_tag }}</a></li>
+            {%- endfor %}
+        </ul>
+    </div>
+</div>
+{% endblock pageheader %}
+
+{% block pagecontent %}
+{%- if comparison %}
+{%- set this = g.active_version %}
+{%- macro difflink(cls, item, version, otherversion, text) -%}
+<a href="{{ url_for(cls.__name__.lower() ~ '.diff', itemid=item.original_id|string, other_version=otherversion, active_version=version) }}">{{ text }}</a>
+{%- endmacro %}
+{%- macro itemtable(cls, items, kind) %}
+<table class="table table-sm compare-{{ kind }}">
+    <thead><tr><th>Name</th><th>Modified in {{ this }}</th><th>Modified in {{ other }}</th></tr></thead>
+    <tbody>
+    {%- for item in items %}
+    <tr>
+        <td>{% if kind == 'only_left' %}{{ difflink(cls, item, other, this, item.name) }}{% else %}{{ difflink(cls, item, this, other, item.name) }}{% endif %}</td>
+        <td>{% if item.left_modified %}{{ pretty_date(item.left_modified) }}{% if item.newer == 'left' %} <span class="badge text-bg-info">newer</span>{% endif %}{% endif %}</td>
+        <td>{% if item.right_modified %}{{ pretty_date(item.right_modified) }}{% if item.newer == 'right' %} <span class="badge text-bg-info">newer</span>{% endif %}{% endif %}</td>
+    </tr>
+    {%- endfor %}
+    </tbody>
+</table>
+{%- endmacro %}
+
+{%- if not comparison.changed %}
+<div id="nochanges" class="alert alert-success">{{ this }} and {{ other }} have the same content.</div>
+{%- endif %}
+
+{%- for result in comparison.classes %}
+<section id="compare-{{ result.name|lower }}" class="mb-4">
+    <h2>{{ result.name }}
+        <small>
+        <span class="badge text-bg-warning" title="Different content">{{ result.differ|length }} changed</span>
+        <span class="badge text-bg-danger">{{ result.only_left|length }} only in {{ this }}</span>
+        <span class="badge text-bg-success">{{ result.only_right|length }} only in {{ other }}</span>
+        <span class="badge text-bg-secondary">{{ (result.same|length) + (result.equal|length) }} the same</span>
+        </small>
+    </h2>
+    {%- if result.differ %}
+    <h3 class="h5">Changed</h3>
+    {{ itemtable(result.cls, result.differ, 'differ') }}
+    {%- endif %}
+    {%- if result.only_left %}
+    <h3 class="h5">Only in {{ this }}</h3>
+    {{ itemtable(result.cls, result.only_left, 'only_left') }}
+    {%- endif %}
+    {%- if result.only_right %}
+    <h3 class="h5">Only in {{ other }}</h3>
+    {{ itemtable(result.cls, result.only_right, 'only_right') }}
+    {%- endif %}
+</section>
+{%- endfor %}
+
+<section id="compare-settings">
+    <h2>Settings</h2>
+    {%- if comparison.settings %}
+    <table class="table">
+        <thead><tr><th>Setting</th><th>{{ this }}</th><th>{{ other }}</th></tr></thead>
+        <tbody>
+        {%- for entry in comparison.settings %}
+        <tr class="diff-{{ entry.kind }}"><td><code>{{ entry.pathstr }}</code></td>
+            <td>{{ format_value(entry.left, {}, this) }}</td>
+            <td>{{ format_value(entry.right, {}, other) }}</td></tr>
+        {%- endfor %}
+        </tbody>
+    </table>
+    {%- else %}
+    <p class="text-muted">The settings are the same.</p>
+    {%- endif %}
+</section>
+{%- else %}
+<p>Choose a version to compare {{ g.active_version }} with.</p>
+{%- endif %}
+{% endblock pagecontent %}

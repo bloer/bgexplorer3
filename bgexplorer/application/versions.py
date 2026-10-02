@@ -6,9 +6,11 @@ from ..models import versioncontrol as vc
 from ..models.verdoc import VersionedDocument, check_writable
 from ..models.settings import get_settings, release_lock
 from ..models.history import EventAction, log_event
+from ..models.versiondiff import diff_versions
 from ..models.hiteff import HitEfficiency
 from .api import APIError, validate_new_version, validation_fields
 from .forms import update_object, LISTFIELDS_KEY
+from .blueprints import format_raw_value
 from .auth import require, role_required, Role
 
 
@@ -117,3 +119,17 @@ def edit_settings():
     return flask.render_template('edit_settings.html', settings=settings,
                                  keys=keys, errors=errors), \
         400 if errors else 200
+
+
+def compare_versions():
+    """ Compare the active version with the version in the `with` query
+    argument
+    """
+    tag = flask.g.active_version
+    other = flask.request.args.get('with') or None
+    if other is not None and not vc.version_exists(other):
+        flask.abort(404, f"Version '{other}' does not exist")
+    comparison = diff_versions(tag, other) if other else None
+    return flask.render_template('versions_compare.html', other=other,
+                                 comparison=comparison,
+                                 format_value=format_raw_value)

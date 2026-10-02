@@ -4,7 +4,7 @@ from mongoengine import disconnect
 from bgexplorer.models import versioncontrol as vc
 from bgexplorer.models.versioncontrol import _versioned_classes
 from bgexplorer.models.versiondiff import (diff_values, diff_documents,
-                                           compare_document)
+                                           compare_document, diff_versions)
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.settings import VersionSettings
@@ -171,3 +171,95 @@ class TestDiffPages(AppTestCase):
                              other_version='b')):
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 404)
+
+
+def branch_with_changes():
+    """ 'main', and 'b' with one of each kind of change to components """
+    vc.create_version('main')
+    e1 = EmissionSpec(name='e1').save()
+    for name in ('same', 'equal', 'changed', 'deleted'):
+        Component(name=name, mass='1 kg', specs=[e1]).save()
+    vc.create_version('b', 'main')
+    for name, mass in (('equal', '1 kg'), ('changed', '2 kg')):
+        c = Component.select_version('b').get(name=name)
+        c.mass = mass
+        c.save()
+    Component.select_version('b').get(name='deleted').delete()
+    Component(name='added', version_tag='b').save()
+    Component(name='mainonly', version_tag='main').save()
+    settings = vc.get_settings('b')
+    settings.hiteffdbconfig.extra_columns = ['material']
+    settings.save()
+
+
+class TestCompareVersions(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        connect_test_db()
+
+    @classmethod
+    def tearDownClass(cls):
+        disconnect()
+
+    def setUp(self):
+        VersionSettings.drop_collection()
+        for cls in _versioned_classes:
+            cls.drop_collection()
+        branch_with_changes()
+
+    def test_categories(self):
+        result = diff_versions('main', 'b')
+        components = result.classes[0]
+        self.assertIs(components.cls, Component)
+
+        def names(items):
+            return [i.name for i in items]
+        self.assertEqual(names(components.only_left), ['deleted', 'mainonly'])
+        self.assertEqual(names(components.only_right), ['added'])
+        self.assertEqual(names(components.differ), ['changed'])
+        self.assertEqual(names(components.equal), ['equal'])
+        self.assertEqual(names(components.same), ['same'])
+        self.assertEqual(components.differ[0].newer, 'right')
+        self.assertFalse(result.classes[1].changed)
+        self.assertEqual([e.pathstr for e in result.settings],
+                         ['hiteffdbconfig.extra_columns'])
+        self.assertTrue(result.changed)
+        # without checking content, equal copies count as changed
+        components = diff_versions('main', 'b', check_content=False)\
+            .classes[0]
+        self.assertEqual(names(components.differ), ['changed', 'equal'])
+
+    def test_unchanged(self):
+        vc.create_version('c', 'b')
+        self.assertFalse(diff_versions('b', 'c').changed)
+
+
+class TestComparePages(AppTestCase):
+    def test_compare(self):
+        branch_with_changes()
+        url = self.url('compare_versions', 'main', **{'with': 'b'})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        html = self.html(response)
+        self.assertIn('1 changed', html)
+        self.assertIn('2 only in main', html)
+        self.assertIn('1 only in b', html)
+        self.assertIn('hiteffdbconfig.extra_columns', html)
+        added = Component.select_version('b').get(name='added')
+        # items only in the other version link to its diff page, where they
+        # can be imported
+        self.assertIn(self.url('component.diff', 'main',
+                               itemid=str(added.original_id),
+                               other_version='b'), html)
+        deleted = Component.select_version('main').get(name='deleted')
+        self.assertIn(self.url('component.diff', 'b',
+                               itemid=str(deleted.original_id),
+                               other_version='main'), html)
+        # the overview links here
+        self.assertIn(url, self.html(self.client.get(
+            self.url('overview', 'main'))))
+        self.assertEqual(self.client.get(self.url(
+            'compare_versions', 'main')).status_code, 200)
+        self.assertEqual(self.client.get(self.url(
+            'compare_versions', 'main', **{'with': 'nosuch'})).status_code,
+            404)

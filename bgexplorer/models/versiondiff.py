@@ -154,3 +154,144 @@ def compare_document(cls, original_id, left: str, right: str,
     if result.left is not None and result.right is not None:
         result.entries = diff_documents(result.left, result.right)
     return result
+
+
+@dataclass
+class ItemVersions:
+    """ One item's copies in two versions, for comparing versions. Ids and
+    times are None where the item isn't in that version
+    """
+    original_id: ObjectId
+    name: str
+    left_id: Optional[ObjectId] = None
+    right_id: Optional[ObjectId] = None
+    left_modified: Any = None
+    right_modified: Any = None
+
+    @property
+    def newer(self) -> Optional[str]:
+        """ 'left' or 'right', whichever copy was modified last """
+        if self.left_modified is None or self.right_modified is None \
+                or self.left_modified == self.right_modified:
+            return None
+        return 'left' if self.left_modified > self.right_modified else 'right'
+
+
+@dataclass
+class ClassComparison:
+    """ The items of one class in two versions: `differ` have copies with
+    different content, `equal` different copies with the same content and
+    `same` share a copy
+    """
+    cls: type
+    only_left: List[ItemVersions] = field(default_factory=list)
+    only_right: List[ItemVersions] = field(default_factory=list)
+    differ: List[ItemVersions] = field(default_factory=list)
+    equal: List[ItemVersions] = field(default_factory=list)
+    same: List[ItemVersions] = field(default_factory=list)
+
+    @property
+    def name(self) -> str:
+        return self.cls.__name__
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.only_left or self.only_right or self.differ)
+
+
+@dataclass
+class VersionComparison:
+    left: str
+    right: str
+    classes: List[ClassComparison]
+    settings: List[DiffEntry]
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.settings) or any(c.changed for c in self.classes)
+
+
+# VersionSettings fields that belong to the version rather than its content
+SETTINGS_IDENTITY_FIELDS = ('_id', 'version_tag', 'editable', 'description',
+                            'lock', 'modified', 'cache_token')
+
+
+def settings_content(version_tag: str) -> dict:
+    """ The raw VersionSettings of `version_tag` that a merge can change """
+    from .settings import VersionSettings
+    son = VersionSettings._get_collection().find_one(
+        {'version_tag': version_tag}) or {}
+    for key in SETTINGS_IDENTITY_FIELDS:
+        son.pop(key, None)
+    return son
+
+
+def _item_name(son: dict) -> str:
+    return son.get('name') or ' @ '.join(
+        str(son[k]) for k in ('source', 'location') if son.get(k)) \
+        or str(son['original_id'])
+
+
+def compare_class(cls, left: str, right: str,
+                  check_content: bool = True) -> ClassComparison:
+    """ Compare the items of class `cls` in versions `left` and `right`. If
+    `check_content`, copies are compared to find those that are equal
+    """
+    coll = cls._get_collection()
+    items: Dict[ObjectId, ItemVersions] = {}
+    for son in coll.find({'version_tags': {'$in': [left, right]}},
+                         {'original_id': 1, 'version_tags': 1, 'modified': 1,
+                          'name': 1, 'source': 1, 'location': 1}):
+        item = items.setdefault(son['original_id'],
+                                ItemVersions(son['original_id'],
+                                             _item_name(son)))
+        for side, tag in (('left', left), ('right', right)):
+            if tag in son['version_tags']:
+                setattr(item, f'{side}_id', son['_id'])
+                setattr(item, f'{side}_modified', son.get('modified'))
+    result = ClassComparison(cls)
+    differ = []
+    for item in sorted(items.values(), key=lambda i: i.name.lower()):
+        if item.right_id is None:
+            result.only_left.append(item)
+        elif item.left_id is None:
+            result.only_right.append(item)
+        elif item.left_id == item.right_id:
+            result.same.append(item)
+        else:
+            differ.append(item)
+    if check_content and differ:
+        ids = [i.left_id for i in differ] + [i.right_id for i in differ]
+        content = {}
+        for son in coll.find({'_id': {'$in': ids}},
+                             {'attachments.data': 0}):
+            copy_id = son['_id']
+            strip_identity(son)
+            for key in IGNORED_FIELDS:
+                son.pop(key, None)
+            content[copy_id] = son
+        for item in differ:
+            if content.get(item.left_id) == content.get(item.right_id):
+                result.equal.append(item)
+            else:
+                result.differ.append(item)
+    else:
+        result.differ = differ
+    return result
+
+
+def diff_versions(left: str, right: str, classes=None,
+                  check_content: bool = True) -> VersionComparison:
+    """ Compare the content of two versions. SourceTerms are derived from
+    the other documents, so aren't compared
+    """
+    if classes is None:
+        from .component import Component
+        from .emissionspec import EmissionSpec
+        from .hiteff import HitEfficiency
+        from .cosmogenic import ActivatedMaterial
+        classes = (Component, EmissionSpec, HitEfficiency, ActivatedMaterial)
+    return VersionComparison(
+        left, right,
+        [compare_class(cls, left, right, check_content) for cls in classes],
+        list(diff_values(settings_content(left), settings_content(right))))

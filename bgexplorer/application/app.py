@@ -16,7 +16,8 @@ from ..models.fields import get_fromstr
 from .common import pretty_date
 from .blueprints import CollectionViews
 from .api import create_api, API_VERSION
-from .versions import create_versions_blueprint, edit_settings
+from .versions import (create_versions_blueprint, edit_settings,
+                       compare_versions)
 from .admin import create_admin_blueprint
 from .radiopurity import create_radiopurity_blueprint
 from ..models.versioncontrol import list_versions, version_exists
@@ -220,6 +221,8 @@ def create_app(config_file=None, config=None):
 
     app.add_url_rule('/explore/<active_version>/settings',
                      'edit_settings', edit_settings, methods=['GET', 'POST'])
+    app.add_url_rule('/explore/<active_version>/compare',
+                     'compare_versions', compare_versions)
 
     @app.get('/explore/<active_version>/hitefflocations')
     def hitefflocations():

@@ -5,6 +5,14 @@
     <small class="mb-3">Last modified {{ pretty_date(settings.modified) }}</small>
 </div>
 <div class="col-5 d-flex justify-content-end align-items-center">
+    <div class="dropdown me-1">
+        <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="comparewith" data-bs-toggle="dropdown" aria-expanded="false">Compare</button>
+        <ul class="dropdown-menu" aria-labelledby="comparewith">
+            {%- for version in all_versions() if version.version_tag != g.active_version %}
+            <li><a class="dropdown-item" href="{{ url_for('compare_versions', **{'with': version.version_tag}) }}">with {{ version.version_tag }}</a></li>
+            {%- endfor %}
+        </ul>
+    </div>
     {% if has_role('editor') %}
     <a class="btn btn-outline-primary me-1" href="{{ url_for('versions.new', **{'from': g.active_version}) }}">Branch</a>
     {% endif %}
