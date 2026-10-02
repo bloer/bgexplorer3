@@ -131,6 +131,8 @@ class AppSmokeTest:
                          'emissionspec.get_attachment',
                          'emissionspec.sourceterms', 'hitefficiency.view',
                          'component.diff', 'hitefficiency.diff',
+                         'export_version', 'api.export_version',
+                         'versions.import_file',
                          'activatedmaterial.view',
                          'activatedmaterial.get_attachment',
                          'versions.new', 'versions.delete',

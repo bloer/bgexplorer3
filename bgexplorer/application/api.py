@@ -3,9 +3,11 @@ GET /api/v1/versions/<version_tag>
 
 Errors are returned as {"error": {"message": str, "fields": {name: str}}},
 where "fields" is only present for validation errors of particular fields.
-Requests with a body must be sent as application/json.
+Requests with a body must be sent as application/json, except uploads of
+version files to POST /api/v1/versions/import, which are multipart forms.
 """
 import datetime
+import tempfile
 import flask
 from bson import ObjectId
 from mongoengine.base.document import NON_FIELD_ERRORS
@@ -14,9 +16,14 @@ from pint.errors import PintError
 from werkzeug.exceptions import HTTPException
 from ..models.settings import VersionSettings, HitEffDbConfig
 from ..models import versioncontrol as vc
+from ..models.versionfile import (export_version, import_version,
+                                  VersionFileError)
 from .auth import require, Role, SAFE_METHODS
 
 API_VERSION = 'v1'
+
+# endpoints that take multipart file uploads instead of JSON
+UPLOAD_ENDPOINTS = ('api.import_version',)
 
 # VersionSettings fields that can be changed with PATCH
 SETTINGS_FIELDS = ('description', 'addsources', 'hiteffdbconfig')
@@ -160,6 +167,43 @@ def update_settings(settings: VersionSettings, body: dict) -> None:
     settings.reload()
 
 
+def send_version_file(version_tag: str):
+    """ A download of `version_tag` exported to a file """
+    tmp = tempfile.SpooledTemporaryFile(max_size=2**26)
+    export_version(version_tag, tmp)
+    tmp.seek(0)
+    return flask.send_file(tmp, mimetype='application/gzip',
+                           as_attachment=True,
+                           download_name=f"{version_tag}.bgx.tar.gz")
+
+
+def import_uploaded_version(form, files) -> VersionSettings:
+    """ Import the version file uploaded as `file`, as the version named
+    `version_tag` of `type` 'branch' or 'tag' in `form`. Raises APIError
+    """
+    tag = form.get('version_tag')
+    tag = tag.strip() if isinstance(tag, str) else tag
+    type_ = form.get('type') or 'branch'
+    # the name and description are checked like those of a new branch
+    tag, _, _, description = validate_new_version(
+        tag, None, 'branch', form.get('description'))
+    if type_ not in ('branch', 'tag'):
+        raise APIError("type must be 'branch' or 'tag'",
+                       fields={'type': "must be 'branch' or 'tag'"})
+    upload = files.get('file')
+    if upload is None or not upload.filename:
+        raise APIError("Choose a version file to import",
+                       fields={'file': "required"})
+    if type_ == 'tag':
+        require(Role.admin)
+    try:
+        return import_version(upload.stream, tag, editable=type_ == 'branch',
+                              description=description)
+    except VersionFileError as e:
+        raise APIError(str(e), problems=e.problems,
+                       fields={'file': str(e)}) from e
+
+
 def merge_args(args) -> tuple:
     """ The (source, rule) of a merge request, or raise APIError """
     source = args.get('source')
@@ -238,7 +282,10 @@ def create_api() -> flask.Blueprint:
     # The SameSite=Lax session cookie also isn't sent on cross-site POSTs
     @api.before_request
     def require_json():
+        # files are uploaded as multipart forms, which browsers can send
+        # cross-origin, so those endpoints rely on the SameSite cookie
         if (flask.request.method in ('POST', 'PUT', 'PATCH')
+                and flask.request.endpoint not in UPLOAD_ENDPOINTS
                 and not flask.request.is_json):
             raise APIError("Content-Type must be application/json", 415)
 
@@ -319,6 +366,20 @@ def create_api() -> flask.Blueprint:
         except vc.MergeError as e:
             raise APIError(str(e), 409, problems=e.problems) from e
         return flask.jsonify(plan_to_json(plan))
+
+    @api.get('/versions/<active_version>/export')
+    def export_version():
+        return send_version_file(flask.g.active_version)
+
+    @api.post('/versions/import')
+    def import_version():
+        settings = import_uploaded_version(flask.request.form,
+                                           flask.request.files)
+        response = flask.jsonify(settings_to_json(settings))
+        response.status_code = 201
+        response.headers['Location'] = flask.url_for(
+            'api.get_version', active_version=settings.version_tag)
+        return response
 
     @api.delete('/versions/<active_version>')
     def delete_version():

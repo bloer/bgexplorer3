@@ -28,6 +28,7 @@ from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.settings import VersionSettings, get_settings
 from bgexplorer.models.history import VersionEvent, EventAction
 from tests.dbutil import connect_test_db
+from tests.test_app_components import AppTestCase
 
 
 def spectrum(counts):
@@ -271,3 +272,79 @@ class TestVersionFile(unittest.TestCase):
             io.BytesIO(export_bytes()))
         self.assertEqual(manifest['version_tag'], 'src')
         self.assertEqual(len(docs[Component]), 3)
+
+
+class TestVersionFilePages(AppTestCase):
+    def setUp(self):
+        super().setUp()
+        VersionEvent.drop_collection()
+        make_model('main')
+
+    def download(self, endpoint):
+        response = self.client.get(self.url(endpoint, 'main'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'application/gzip')
+        self.assertIn('main.bgx.tar.gz',
+                      response.headers['Content-Disposition'])
+        return response.get_data()
+
+    def test_export_import(self):
+        self.assertIn(self.url('export_version', 'main'), self.html(
+            self.client.get(self.url('overview', 'main'))))
+        data = self.download('export_version')
+        url = self.url('versions.import_file')
+        self.assertIn(url, self.html(self.client.get(
+            self.url('versions.new'))))
+        self.assertEqual(self.client.get(url).status_code, 200)
+        response = self.client.post(url, data={
+            'file': (io.BytesIO(data), 'main.bgx.tar.gz'),
+            'version_tag': 'copy', 'type': 'branch'})
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.location.endswith('/explore/copy'))
+        self.assertFalse(diff_versions('main', 'copy').changed)
+        html = self.html(self.client.get(self.url('overview', 'copy')))
+        self.assertIn('copy imported from a file of main', html)
+
+    def test_import_errors(self):
+        data = self.download('export_version')
+        url = self.url('versions.import_file')
+        cases = (
+            (dict(version_tag='main'), 409, 'already exists'),
+            (dict(version_tag='bad name'), 400, 'Version name'),
+            (dict(version_tag='new', file=None), 400, 'Choose a version'),
+            (dict(version_tag='new', file=(io.BytesIO(b'junk'), 'x.gz')),
+             400, 'Not a version file'),
+        )
+        for changes, status, text in cases:
+            with self.subTest(changes=changes):
+                form = {'file': (io.BytesIO(data), 'main.bgx.tar.gz'),
+                        'version_tag': 'new'}
+                form.update(changes)
+                form = {k: v for k, v in form.items() if v is not None}
+                response = self.client.post(url, data=form)
+                self.assertEqual(response.status_code, status)
+                self.assertIn(text, self.html(response))
+        self.assertFalse(vc.version_exists('new'))
+
+    def test_api(self):
+        data = self.download('api.export_version')
+        url = self.url('api.import_version')
+        response = self.client.post(url, data={
+            'file': (io.BytesIO(data), 'main.bgx.tar.gz'),
+            'version_tag': 't', 'type': 'tag', 'description': 'from api'})
+        self.assertEqual(response.status_code, 201)
+        body = response.get_json()
+        self.assertEqual((body['version_tag'], body['type'],
+                          body['description']), ('t', 'tag', 'from api'))
+        self.assertTrue(response.headers['Location'].endswith(
+            '/api/v1/versions/t'))
+        # the file is checked before anything is created
+        response = self.client.post(url, data={
+            'file': (io.BytesIO(make_file({'manifest.json': b'{}'})), 'x'),
+            'version_tag': 'bad'})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(vc.version_exists('bad'))
+        # other endpoints still need JSON
+        self.assertEqual(self.client.post(
+            self.url('api.create_version'),
+            data={'version_tag': 'x'}).status_code, 415)

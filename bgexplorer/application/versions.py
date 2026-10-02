@@ -8,7 +8,8 @@ from ..models.settings import get_settings, release_lock
 from ..models.history import EventAction, log_event
 from ..models.versiondiff import diff_versions
 from ..models.hiteff import HitEfficiency
-from .api import APIError, validate_new_version, validation_fields
+from .api import (APIError, validate_new_version, validation_fields,
+                  import_uploaded_version, send_version_file)
 from .forms import update_object, LISTFIELDS_KEY
 from .blueprints import format_raw_value
 from .auth import require, role_required, Role
@@ -47,6 +48,27 @@ def create_versions_blueprint() -> flask.Blueprint:
                                      errors=errors,
                                      versions=vc.list_versions()), \
             400 if errors else 200
+
+    @bp.route('/import', methods=['GET', 'POST'])
+    def import_file():
+        """ Create a new version from an exported version file """
+        req = flask.request
+        form = req.form if req.method == 'POST' else req.args
+        errors, problems = {}, []
+        if req.method == 'POST':
+            try:
+                settings = import_uploaded_version(req.form, req.files)
+            except APIError as e:
+                errors = dict(e.fields or {}, __all__=e.message)
+                problems = e.problems or []
+                status = e.status
+            else:
+                flask.flash(f"Imported '{settings.version_tag}'", 'success')
+                return flask.redirect(flask.url_for(
+                    'overview', active_version=settings.version_tag))
+        return flask.render_template('versions_import.html', form=form,
+                                     errors=errors, problems=problems), \
+            (status if errors else 200)
 
     @bp.route('/<active_version>/delete', methods=['GET', 'POST'])
     def delete():
@@ -170,3 +192,8 @@ def compare_versions():
     return flask.render_template('versions_compare.html', other=other,
                                  comparison=comparison,
                                  format_value=format_raw_value)
+
+
+def export_version():
+    """ Download the active version as a file """
+    return send_version_file(flask.g.active_version)

@@ -17,7 +17,7 @@ from .common import pretty_date
 from .blueprints import CollectionViews
 from .api import create_api, API_VERSION
 from .versions import (create_versions_blueprint, edit_settings,
-                       compare_versions)
+                       compare_versions, export_version)
 from .admin import create_admin_blueprint
 from .radiopurity import create_radiopurity_blueprint
 from ..models.versioncontrol import list_versions, version_exists
@@ -223,6 +223,8 @@ def create_app(config_file=None, config=None):
                      'edit_settings', edit_settings, methods=['GET', 'POST'])
     app.add_url_rule('/explore/<active_version>/compare',
                      'compare_versions', compare_versions)
+    app.add_url_rule('/explore/<active_version>/export',
+                     'export_version', export_version)
 
     @app.get('/explore/<active_version>/hitefflocations')
     def hitefflocations():

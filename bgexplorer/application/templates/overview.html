@@ -13,6 +13,7 @@
             {%- endfor %}
         </ul>
     </div>
+    <a class="btn btn-outline-secondary me-1" id="exportlink" href="{{ url_for('export_version') }}" title="Download this version as a file">Export</a>
     {% if has_role('editor') %}
     <a class="btn btn-outline-primary me-1" href="{{ url_for('versions.new', **{'from': g.active_version}) }}">Branch</a>
     {% endif %}
