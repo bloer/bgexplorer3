@@ -716,3 +716,26 @@ class TestLoginInBrowser(BrowserTestCase):
                                                object=self.c1))
         page.click('#logoutform button')
         self.assertTrue(page.locator('#loginlink').is_visible())
+
+
+class TestMergeInBrowser(BrowserTestCase):
+    def setUp(self):
+        super().setUp()
+        vc.create_version('main')
+        Component(name='c1').save()
+        vc.create_version('b', 'main')
+        Component(name='new', version_tag='b').save()
+
+    def test_merge(self):
+        page = self.open(self.url('overview', 'main'))
+        page.click('#mergelink')
+        page.select_option('#source', 'b')
+        page.check('#rule-source')
+        page.click('#mergeoptions button[type=submit]')
+        page.wait_for_selector('#mergeform')
+        self.assertIn('new', page.inner_text('.merge-add'))
+        page.click('#mergeform button[type=submit]')
+        page.wait_for_selector('#history')
+        self.assertIn('Merged b into main', page.inner_text('#history'))
+        self.assertEqual(Component.select_version('main')
+                         (name='new').count(), 1)

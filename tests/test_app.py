@@ -32,7 +32,8 @@ SKIP_ENDPOINTS = {'static', 'test'}
 # is noticed.
 KNOWN_BROKEN = set()
 # endpoints whose GET doesn't return 200 with the test fixtures
-EXPECTED_STATUS = {'admin.logo': 404}  # no logo is set
+EXPECTED_STATUS = {'admin.logo': 404,  # no logo is set
+                   'api.plan_merge': 400}  # needs a source version
 
 
 def reset_database():

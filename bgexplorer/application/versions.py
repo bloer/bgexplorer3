@@ -64,6 +64,43 @@ def create_versions_blueprint() -> flask.Blueprint:
                                      protected=protected,
                                      istag=not settings.editable)
 
+    @bp.route('/<active_version>/merge', methods=['GET', 'POST'])
+    def merge():
+        """ Preview merging another version into the active one, and do it
+        on confirmation
+        """
+        tag = flask.g.active_version
+        req = flask.request
+        form = req.form if req.method == 'POST' else req.args
+        source = form.get('source') or None
+        try:
+            rule = vc.MergeRule(form.get('rule') or 'newest')
+        except ValueError:
+            flask.abort(400, f"Unknown merge rule '{form.get('rule')}'")
+        if source is not None and not vc.version_exists(source):
+            flask.abort(404, f"Version '{source}' does not exist")
+        plan, error, status = None, None, 200
+        if source is not None and source != tag:
+            if req.method == 'POST':
+                try:
+                    done = vc.merge_version(source, tag, rule,
+                                            form.get('fingerprint') or None)
+                except vc.MergeError as e:
+                    error, status = e, 409
+                else:
+                    flask.flash(f"Merged '{source}' into '{tag}': "
+                                f"{vc._merge_summary(done)}"
+                                if done.changes else
+                                f"Nothing to merge from '{source}'",
+                                'success')
+                    return flask.redirect(flask.url_for('overview'))
+            plan = vc.plan_merge(source, tag, rule)
+        elif source == tag:
+            error, status = "Can't merge a version into itself", 400
+        return flask.render_template('versions_merge.html', source=source,
+                                     rule=rule, rules=list(vc.MergeRule),
+                                     plan=plan, error=error), status
+
     @bp.post('/<active_version>/unlock')
     def unlock():
         """ Clear a lock left behind by an operation that didn't finish """

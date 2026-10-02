@@ -1,0 +1,92 @@
+{% extends "versionbase.html" %}
+{% block title %}Merge into {{ g.active_version }} - Background Explorer{% endblock %}
+{% block pageheader %}<h1>Merge into {{ g.active_version }}</h1>{% endblock %}
+{% block pagecontent %}
+{%- set descriptions = {
+    'newest': "use whichever copy was changed last",
+    'source': "use the copy being merged in",
+    'target': "keep the copy in " ~ g.active_version} %}
+<p>Items that are only in the other version are added to {{ g.active_version }}.
+Nothing is removed from {{ g.active_version }}. For items that are different
+in both versions, and for the version settings, one rule decides which copy
+{{ g.active_version }} keeps.</p>
+
+<form method="GET" id="mergeoptions" class="row g-3 align-items-end mb-4">
+    <div class="col-auto">
+        <label class="form-label" for="source">Merge from</label>
+        <select class="form-select" name="source" id="source">
+            {%- for version in all_versions() if version.version_tag != g.active_version %}
+            <option value="{{ version.version_tag }}" {% if version.version_tag == source %}selected{% endif %}>{{ version.version_tag }}{% if not version.editable %} (tag){% endif %}</option>
+            {%- endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <span class="form-label d-block">For items that differ</span>
+        {%- for option in rules %}
+        <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="rule" id="rule-{{ option.value }}" value="{{ option.value }}" {% if option == rule %}checked{% endif %}>
+            <label class="form-check-label" for="rule-{{ option.value }}" title="{{ descriptions[option.value] }}">{{ option.value }}</label>
+        </div>
+        {%- endfor %}
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-outline-primary">Preview</button>
+    </div>
+</form>
+
+{%- if error %}
+<div id="mergeerror" class="alert alert-danger">{{ error }}
+    {%- if error.problems %}<ul class="mb-0">{% for problem in error.problems %}<li>{{ problem }}</li>{% endfor %}</ul>{% endif %}
+</div>
+{%- endif %}
+
+{%- if plan %}
+{%- macro itemlist(cls, items, title, kind) %}
+{%- if items %}
+<h3 class="h6">{{ title }} <span class="badge text-bg-secondary">{{ items|length }}</span></h3>
+<ul class="merge-{{ kind }}">
+    {%- for item in items %}
+    <li><a href="{{ url_for(cls.__name__.lower() ~ '.diff', itemid=item.original_id|string, other_version=source) }}">{{ item.name }}</a></li>
+    {%- endfor %}
+</ul>
+{%- endif %}
+{%- endmacro %}
+<section id="mergeplan">
+    <h2>Merging {{ source }} into {{ g.active_version }}: {{ descriptions[rule.value] }}</h2>
+    {%- if plan.problems %}
+    <div id="mergeproblems" class="alert alert-danger">This merge can't be done:
+        <ul class="mb-0">{% for problem in plan.problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+    </div>
+    {%- elif not plan.changes %}
+    <div id="nochanges" class="alert alert-info">There is nothing to merge: {{ g.active_version }} already has everything from {{ source }}
+        {%- if plan.classes|selectattr('keep')|list or plan.settings %} that this rule would take{% endif %}.</div>
+    {%- endif %}
+    <div class="row">
+    {%- for cls_plan in plan.classes if cls_plan.add or cls_plan.replace or cls_plan.keep or cls_plan.target_only %}
+        <div class="col-md-6 col-lg-3 mb-3" id="merge-{{ cls_plan.name|lower }}">
+            <h3 class="h5">{{ cls_plan.name }}</h3>
+            {{ itemlist(cls_plan.cls, cls_plan.add, "Added from " ~ source, 'add') }}
+            {{ itemlist(cls_plan.cls, cls_plan.replace, "Replaced by the copy in " ~ source, 'replace') }}
+            {{ itemlist(cls_plan.cls, cls_plan.keep, "Different, keeping " ~ g.active_version ~ "'s copy", 'keep') }}
+            {{ itemlist(cls_plan.cls, cls_plan.target_only, "Only in " ~ g.active_version ~ ", kept", 'target_only') }}
+        </div>
+    {%- endfor %}
+    </div>
+    {%- if plan.settings %}
+    <p id="mergesettings">The settings differ in {{ plan.settings|map(attribute='pathstr')|join(', ') }}:
+        {% if plan.replace_settings %}they are replaced by those of {{ source }}{% else %}{{ g.active_version }} keeps its own{% endif %}.</p>
+    {%- endif %}
+    {%- if plan.changes and not plan.problems %}
+    <form method="POST" id="mergeform">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="source" value="{{ source }}">
+        <input type="hidden" name="rule" value="{{ rule.value }}">
+        <input type="hidden" name="fingerprint" value="{{ plan.fingerprint }}">
+        <p class="text-secondary">Both versions are locked while merging. If anything goes wrong, {{ g.active_version }} is restored.</p>
+        <button type="submit" class="btn btn-primary">Merge {{ source }} into {{ g.active_version }}</button>
+        <a class="btn btn-secondary" href="{{ url_for('overview') }}">Cancel</a>
+    </form>
+    {%- endif %}
+</section>
+{%- endif %}
+{% endblock %}

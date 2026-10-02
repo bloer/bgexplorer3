@@ -19,6 +19,9 @@
     {% if has_role('admin') %}
     <a class="btn btn-outline-secondary me-1" href="{{ url_for('versions.new', type='tag', **{'from': g.active_version}) }}">Tag</a>
     {% endif %}
+    {% if can_edit %}
+    <a class="btn btn-outline-primary me-1" id="mergelink" href="{{ url_for('versions.merge') }}">Merge into</a>
+    {% endif %}
     {% if can_edit and g.active_version != default_version %}
     <a class="btn btn-outline-danger" href="{{ url_for('versions.delete') }}">Delete</a>
     {% endif %}

@@ -16,6 +16,7 @@ from bgexplorer.models.history import VersionEvent, EventAction
 from bgexplorer.models.maintenance import rebuild_sourceterms
 from bgexplorer.models.versiondiff import settings_content
 from tests.dbutil import connect_test_db
+from tests.test_app_components import AppTestCase
 
 
 def edit(name, tag, **changes):
@@ -241,3 +242,102 @@ class TestMerge(unittest.TestCase):
         self.assertIn(backups[0], str(cm.exception))
         self.assertFalse(get_settings(backups[0]).editable)
         self.assertIsNone(get_settings('main').lock)
+
+
+class TestMergePages(AppTestCase):
+    def setUp(self):
+        super().setUp()
+        VersionEvent.drop_collection()
+        vc.create_version('main')
+        Component(name='c1').save()
+        vc.create_version('b', 'main')
+        edit('c1', 'b', description='b')
+        Component(name='new', version_tag='b').save()
+
+    def test_preview_and_merge(self):
+        url = self.url('versions.merge', 'main')
+        self.assertIn(url, self.html(self.client.get(
+            self.url('overview', 'main'))))
+        self.assertEqual(self.client.get(url).status_code, 200)
+        response = self.client.get(url, query_string={'source': 'b',
+                                                      'rule': 'source'})
+        self.assertEqual(response.status_code, 200)
+        html = self.html(response)
+        self.assertIn('id="mergeform"', html)
+        self.assertIn('Added from b', html)
+        self.assertIn('Replaced by the copy in b', html)
+        fingerprint = plan_merge('b', 'main', MergeRule.source).fingerprint
+        self.assertIn(fingerprint, html)
+        # planning changed nothing
+        self.assertIsNone(description('c1', 'main'))
+        response = self.client.post(url, data={
+            'source': 'b', 'rule': 'source', 'fingerprint': fingerprint})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(description('c1', 'main'), 'b')
+        self.assertEqual(description('new', 'main'), None)
+        html = self.html(self.client.get(self.url('overview', 'main')))
+        self.assertIn('Merged b into main', html)
+        # and again: nothing left to merge
+        html = self.html(self.client.get(url, query_string={'source': 'b'}))
+        self.assertIn('id="nochanges"', html)
+        self.assertNotIn('id="mergeform"', html)
+
+    def test_stale(self):
+        url = self.url('versions.merge', 'main')
+        fingerprint = plan_merge('b', 'main', MergeRule.source).fingerprint
+        edit('c1', 'b', description='later')
+        response = self.client.post(url, data={
+            'source': 'b', 'rule': 'source', 'fingerprint': fingerprint})
+        self.assertEqual(response.status_code, 409)
+        html = self.html(response)
+        self.assertIn('changed since', html)
+        # the page shows the new plan to confirm instead
+        self.assertIn(plan_merge('b', 'main', MergeRule.source).fingerprint,
+                      html)
+        self.assertIsNone(description('c1', 'main'))
+
+    def test_refused(self):
+        vc.create_tag('t', 'main')
+        url = self.url('versions.merge', 't')
+        html = self.html(self.client.get(url, query_string={'source': 'b'}))
+        self.assertIn('id="mergeproblems"', html)
+        self.assertNotIn('id="mergeform"', html)
+        response = self.client.post(url, data={'source': 'b'})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(description('c1', 't'), None)
+        url = self.url('versions.merge', 'main')
+        for args, status in (({'source': 'nosuch'}, 404),
+                             ({'source': 'b', 'rule': 'bad'}, 400),
+                             ({'source': 'main'}, 400)):
+            with self.subTest(args=args):
+                self.assertEqual(self.client.get(
+                    url, query_string=args).status_code, status)
+
+    def test_api(self):
+        url = self.url('api.plan_merge', 'main')
+        response = self.client.get(url, query_string={'source': 'b'})
+        self.assertEqual(response.status_code, 200)
+        plan = response.get_json()
+        self.assertEqual(plan['rule'], 'newest')
+        self.assertEqual([i['name'] for i in plan['classes']['Component']
+                          ['add']], ['new'])
+        self.assertEqual([i['name'] for i in plan['classes']['Component']
+                          ['replace']], ['c1'])
+        url = self.url('api.merge_version', 'main')
+        response = self.client.post(url, json={'source': 'b',
+                                               'fingerprint': 'stale'})
+        self.assertEqual(response.status_code, 409)
+        response = self.client.post(url, json={
+            'source': 'b', 'fingerprint': plan['fingerprint']})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(description('c1', 'main'), 'b')
+        for body in ({'source': 'nosuch'}, {'source': 'b', 'rule': 'x'},
+                     {'source': 'b', 'other': 1}):
+            with self.subTest(body=body):
+                self.assertEqual(self.client.post(url, json=body)
+                                 .status_code, 400)
+        vc.create_tag('t', 'main')
+        response = self.client.post(self.url('api.merge_version', 't'),
+                                    json={'source': 'b'})
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(response.get_json()['error']['problems'])

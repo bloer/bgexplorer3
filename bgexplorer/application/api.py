@@ -29,11 +29,12 @@ HIDDEN_FIELDS = ('_id', '_cls', 'cache_token')
 class APIError(Exception):
     """ Error returned to the client as JSON """
     def __init__(self, message: str, status: int = 400,
-                 fields: dict = None):
+                 fields: dict = None, problems: list = None):
         super().__init__(message)
         self.message = message
         self.status = status
         self.fields = fields
+        self.problems = problems
 
 
 def jsonable(value):
@@ -159,6 +160,39 @@ def update_settings(settings: VersionSettings, body: dict) -> None:
     settings.reload()
 
 
+def merge_args(args) -> tuple:
+    """ The (source, rule) of a merge request, or raise APIError """
+    source = args.get('source')
+    if not isinstance(source, str) or not vc.version_exists(source):
+        raise APIError(f"Version '{source}' not found",
+                       fields={'source': "not found"})
+    if source == flask.g.active_version:
+        raise APIError("Can't merge a version into itself",
+                       fields={'source': "must be another version"})
+    try:
+        rule = vc.MergeRule(args.get('rule', 'newest'))
+    except ValueError as e:
+        raise APIError(str(e), fields={'rule': "must be one of " + ', '.join(
+            r.value for r in vc.MergeRule)}) from e
+    return source, rule
+
+
+def plan_to_json(plan) -> dict:
+    """ A MergePlan, with each class's items by original_id """
+    def items(rows):
+        return [dict(id=str(row.original_id), name=row.name) for row in rows]
+    return dict(source=plan.source, target=plan.target,
+                rule=plan.rule.value, fingerprint=plan.fingerprint,
+                problems=plan.problems, changes=plan.changes,
+                replace_settings=plan.replace_settings,
+                settings=[entry.pathstr for entry in plan.settings],
+                classes={c.name: dict(add=items(c.add),
+                                      replace=items(c.replace),
+                                      keep=items(c.keep),
+                                      target_only=items(c.target_only))
+                         for c in plan.classes})
+
+
 def validate_new_version(tag, fromtag=None, type_='branch',
                          description=None):
     """ Check the arguments to create a new version. Returns
@@ -213,6 +247,8 @@ def create_api() -> flask.Blueprint:
         error = dict(message=e.message)
         if e.fields:
             error['fields'] = e.fields
+        if e.problems:
+            error['problems'] = e.problems
         return flask.jsonify(error=error), e.status
 
     @api.errorhandler(PermissionError)
@@ -258,6 +294,31 @@ def create_api() -> flask.Blueprint:
         settings = get_version_settings(flask.g.active_version)
         update_settings(settings, get_json_object())
         return flask.jsonify(settings_to_json(settings))
+
+    @api.get('/versions/<active_version>/merge')
+    def plan_merge():
+        source, rule = merge_args(flask.request.args)
+        return flask.jsonify(plan_to_json(vc.plan_merge(
+            source, flask.g.active_version, rule)))
+
+    @api.post('/versions/<active_version>/merge')
+    def merge_version():
+        body = get_json_object()
+        allowed = {'source', 'rule', 'fingerprint'}
+        if unknown := set(body) - allowed:
+            raise APIError(f"Unknown fields: {', '.join(sorted(unknown))}",
+                           fields={name: "unknown field" for name in unknown})
+        source, rule = merge_args(body)
+        fingerprint = body.get('fingerprint')
+        if fingerprint is not None and not isinstance(fingerprint, str):
+            raise APIError("fingerprint must be a string",
+                           fields={'fingerprint': "must be a string"})
+        try:
+            plan = vc.merge_version(source, flask.g.active_version, rule,
+                                    fingerprint)
+        except vc.MergeError as e:
+            raise APIError(str(e), 409, problems=e.problems) from e
+        return flask.jsonify(plan_to_json(plan))
 
     @api.delete('/versions/<active_version>')
     def delete_version():
