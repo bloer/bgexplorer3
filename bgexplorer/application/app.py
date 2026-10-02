@@ -24,7 +24,6 @@ from ..models.versioncontrol import list_versions, version_exists
 from ..models.verdoc import VersionedDocument
 from ..models.history import recent_events
 from .forms import input_type, input_value, field_kind
-from . import examples
 from . import auth
 
 from ..models.asymmetric import AsymmetricUncertainty
@@ -231,10 +230,5 @@ def create_app(config_file=None, config=None):
         """ Return a list of all 'location' keys in the HitEfficiency DB """
         return flask.jsonify(HitEfficiency.select_version(flask.g.active_version)
                              .distinct('location'))
-
-    #examples.qis.populate_example(clean=True)
-    @app.get('/test')
-    def test():
-        return """<select value="x"></select>"""
 
     return app
