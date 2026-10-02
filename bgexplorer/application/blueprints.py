@@ -16,7 +16,8 @@ from ..models.fields import InlineAttachment
 from ..models.importexport import iter_json_documents, import_documents
 from ..models.verdoc import check_writable
 from ..models.versiondiff import compare_document, find_refs
-from ..models.versioncontrol import version_exists
+from ..models.versioncontrol import (version_exists, import_document,
+                                     VersionControlError)
 from ..models.settings import get_settings
 from .api import validation_fields
 from .auth import require_for_changes, Role
@@ -305,6 +306,35 @@ class CollectionViews(flask.Blueprint):
                 'diff_document.html', comparison=comparison,
                 other_version=other_version, refs=refs,
                 format_value=format_raw_value)
+
+        @self.post('/import_from/<from_version>/<itemid>')
+        def import_from(from_version, itemid):
+            """ Replace the active version's copy of an item with the copy
+            in `from_version`
+            """
+            this = flask.g.active_version
+            try:
+                doc = import_document(self.doc_cls, itemid, from_version,
+                                      this)
+            except InvalidId:
+                flask.abort(404, f"No {self.doc_cls.__name__} with id "
+                                 f"{itemid}")
+            except KeyError as e:
+                flask.abort(404, f"Version {e} does not exist")
+            except VersionControlError as e:
+                missing = describe_refs(map(ObjectId, e.problems),
+                                        from_version)
+                flask.flash(flask.render_template_string(
+                    "{{ message }}{% if names %}:<ul>{% for name in names %}"
+                    "<li>{{ name }}</li>{% endfor %}</ul>{% endif %}",
+                    message=str(e),
+                    names=[missing.get(ObjectId(p), (None, p))[1]
+                           for p in e.problems]), 'danger')
+                return flask.redirect(flask.url_for(
+                    '.diff', itemid=itemid, other_version=from_version))
+            flask.flash(f"Imported {getattr(doc, 'name', None) or itemid} "
+                        f"from '{from_version}'", 'success')
+            return flask.redirect(flask.url_for('.view', object=doc))
 
         @self.route('/new', methods=['GET', 'POST'])
         @self.route('/<objid>/edit', methods=['GET', 'POST'])

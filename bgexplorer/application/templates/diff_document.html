@@ -42,7 +42,14 @@
 <div class="alert alert-secondary">{{ comparison.entries|length }} difference{{ '' if comparison.entries|length == 1 else 's' }}.</div>
 {%- endif %}
 </div>
-{% block diffactions %}{% endblock %}
+{%- if can_edit and right is not none and not comparison.same_copy %}
+<form id="importform" class="mb-3" method="post" action="{{ url_for('.import_from', itemid=itemid, from_version=other_version) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-outline-success">Import from {{ other_version }}</button>
+    <small class="text-secondary ms-2">{% if left is none %}Adds this item to {{ g.active_version }}{% else %}Replaces the copy in {{ g.active_version }} with the copy in {{ other_version }}{% endif %}.
+        Anything it refers to must already be in {{ g.active_version }}.</small>
+</form>
+{%- endif %}
 
 <table id="difftable" class="table">
     <thead>

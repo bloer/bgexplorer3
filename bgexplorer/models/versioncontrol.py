@@ -4,10 +4,14 @@ from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .cosmogenic import ActivatedMaterial
 from .sourceterm import SourceTerm, CalculatedResults
-from .settings import VersionSettings, get_settings, touch
-from .verdoc import VersionedDocument, ReadOnlyVersionError, check_unlocked
+from .settings import VersionSettings, get_settings, touch, hold_locks
+from .verdoc import (VersionedDocument, ReadOnlyVersionError, check_unlocked,
+                     check_writable)
+from .versiondiff import find_refs, raw_content
 from .history import EventAction, log_event
-from typing import Optional, Dict
+from . import signals
+from bson import ObjectId
+from typing import Optional, Dict, List, Set
 from enum import Enum
 import datetime
 import re
@@ -152,6 +156,94 @@ def _delete_version(version_tag: str) -> None:
     for cls in _versioned_classes:
         cls.delete_tag(version_tag)
     VersionSettings.objects(version_tag=version_tag).delete()
+
+
+class VersionControlError(ValueError):
+    """ Raised when an operation between versions can't be done safely.
+    `problems` lists the reasons
+    """
+    def __init__(self, message: str, problems: Optional[List[str]] = None):
+        super().__init__(message)
+        self.problems = problems or []
+
+
+def _adopt_copies(cls, version_tag: str, copy_ids) -> None:
+    """ Make the copies with `copy_ids` (from other versions) the copies of
+    their items in `version_tag`, replacing any it had. This bypasses all
+    checks and signals
+    """
+    copy_ids = list(copy_ids)
+    if not copy_ids:
+        return
+    coll = cls._get_collection()
+    original_ids = coll.distinct('original_id', {'_id': {'$in': copy_ids}})
+    # pull before pushing: each version may only have one copy of an item
+    replaced = coll.distinct('_id', {'version_tags': version_tag,
+                                     'original_id': {'$in': original_ids},
+                                     '_id': {'$nin': copy_ids}})
+    coll.update_many({'_id': {'$in': replaced}},
+                     {'$pull': {'version_tags': version_tag}})
+    coll.delete_many({'_id': {'$in': replaced}, 'version_tags': {'$size': 0}})
+    coll.update_many({'_id': {'$in': copy_ids},
+                      'version_tags': {'$ne': version_tag}},
+                     {'$push': {'version_tags': version_tag}})
+
+
+# classes that versioned documents refer to
+_referenced_classes = [Component, EmissionSpec, HitEfficiency,
+                       ActivatedMaterial]
+
+
+def missing_refs(ids, version_tag: str) -> Set[ObjectId]:
+    """ The items among `ids` that aren't in `version_tag` """
+    missing = set(ids)
+    for cls in _referenced_classes:
+        if not missing:
+            break
+        missing -= set(cls._get_collection().distinct(
+            'original_id', {'version_tags': version_tag,
+                            'original_id': {'$in': list(missing)}}))
+    return missing
+
+
+def import_document(cls, original_id, from_tag: str, to_tag: str
+                    ) -> VersionedDocument:
+    """ Make the copy of item `original_id` in `from_tag` also the copy in
+    `to_tag`, replacing any copy `to_tag` had. Only this document is
+    imported: everything it refers to must already be in `to_tag`. Returns
+    the document in `to_tag`. Raises VersionControlError if it can't be
+    imported, and ReadOnlyVersionError if `to_tag` can't be changed
+    """
+    original_id = ObjectId(original_id)
+    verify_version(from_tag)
+    verify_version(to_tag)
+    if from_tag == to_tag:
+        raise VersionControlError("Can't import a document into its own "
+                                  "version")
+    check_writable(to_tag)
+    with hold_locks([to_tag], f"an import from '{from_tag}'"):
+        source = cls.select_version(from_tag)(original_id=original_id)\
+            .first()
+        if source is None:
+            raise VersionControlError(f"No {cls.__name__} {original_id} in "
+                                      f"'{from_tag}'")
+        refs = set(find_refs(raw_content(source))) - {original_id}
+        if missing := missing_refs(refs, to_tag):
+            raise VersionControlError(
+                f"{getattr(source, 'name', None) or original_id} refers to "
+                f"documents that "
+                f"aren't in '{to_tag}'; import those first",
+                [str(ref) for ref in sorted(missing)])
+        _adopt_copies(type(source), to_tag, [source.id])
+        doc = cls.select_version(to_tag).get(original_id=original_id)
+        # update the SourceTerms that are derived from it
+        signals.post_save(sender=type(doc), document=doc)
+        touch(to_tag)
+    log_event(EventAction.import_document, to_tag, from_tag,
+              message=f"{type(doc).__name__} "
+                      f"{getattr(doc, 'name', None) or original_id}",
+              cls=cls.__name__, original_id=str(original_id))
+    return doc
 
 
 class MergeMethod(Enum):

@@ -84,15 +84,19 @@ class AppSmokeTest:
             values = {}
             if 'active_version' in rule.arguments:
                 values['active_version'] = self.version
-            if 'objid' not in rule.arguments:
+            # items not loaded from the active version are named 'itemid'
+            itemkey = 'objid' if 'objid' in rule.arguments else 'itemid'
+            if itemkey not in rule.arguments:
                 objects = [None]
             else:
                 blueprint = rule.endpoint.split('.')[0]
                 objects = self.objects(blueprint)
                 self.assertTrue(objects, f"No objects to test {rule}")
+            if 'other_version' in rule.arguments:
+                values['other_version'] = self.version
             for obj in objects:
                 if obj is not None:
-                    values['objid'] = str(obj.original_id)
+                    values[itemkey] = str(obj.original_id)
                 if 'userid' in rule.arguments:
                     for user in User.objects:
                         yield rule.endpoint, rule.build(
@@ -125,6 +129,7 @@ class AppSmokeTest:
                          'component.get_attachment',
                          'emissionspec.get_attachment',
                          'emissionspec.sourceterms', 'hitefficiency.view',
+                         'component.diff', 'hitefficiency.diff',
                          'activatedmaterial.view',
                          'activatedmaterial.get_attachment',
                          'versions.new', 'versions.delete',
