@@ -1,5 +1,9 @@
 # Background Explorer
 
+A web application for building and tracking the radioactive background model
+of a radiation detector. The full documentation is at
+<https://bloer.github.io/bgexplorer3/> (source in [docs/](docs/)).
+
 ## Running a server
 
 The simplest way is with docker compose, which runs the web server and a

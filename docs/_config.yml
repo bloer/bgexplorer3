@@ -1,0 +1,33 @@
+title: Background Explorer
+description: Model and track radioactive backgrounds in radiation detectors
+url: "https://bloer.github.io"
+baseurl: "/bgexplorer3"
+remote_theme: just-the-docs/just-the-docs@v0.10.1
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
+  - jekyll-include-cache
+
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+back_to_top: true
+back_to_top_text: "Back to top"
+
+aux_links:
+  "Background Explorer on GitHub": "https://github.com/bloer/bgexplorer3"
+aux_links_new_tab: true
+
+gh_edit_link: true
+gh_edit_link_text: "Edit this page on GitHub"
+gh_edit_repository: "https://github.com/bloer/bgexplorer3"
+gh_edit_branch: "develop"
+gh_edit_source: docs
+gh_edit_view_mode: "tree"
+
+footer_content: "Background Explorer is developed at PNNL. Distributed under the terms of its <a href=\"https://github.com/bloer/bgexplorer3/blob/develop/LICENSE\">license</a>."
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - README.md

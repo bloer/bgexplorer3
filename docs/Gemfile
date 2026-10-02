@@ -1,0 +1,12 @@
+# For previewing the docs locally:
+#   bundle install && bundle exec jekyll serve
+source "https://rubygems.org"
+gem "github-pages", group: :jekyll_plugins
+gem "jekyll-remote-theme"
+gem "jekyll-include-cache"
+gem "webrick"
+# no longer bundled with newer Ruby versions
+gem "rexml"
+gem "base64"
+gem "bigdecimal"
+gem "csv"
