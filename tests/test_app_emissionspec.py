@@ -6,6 +6,7 @@ from bgexplorer.models.assay import Assay
 from bgexplorer.models.component import Component
 from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
                                             Multiplier, SourceCategory)
+from bgexplorer.models.exposure import RadonExposure
 from bgexplorer.models.fields import get_fromstr
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.sourceterm import CalculatedResults
@@ -151,6 +152,47 @@ class TestEmissionSpecPages(AppTestCase):
         self.assertEqual(
             self.client.get(self.url('emissionspec.edit', 'b', type='nope'))
             .status_code, 400)
+
+    def test_new_radon(self):
+        """ radon exposures calculate their sources from the periods """
+        html = self.html(self.client.get(self.url('emissionspec.overview',
+                                                  'b')))
+        self.assertIn('id="newradonexposure"', html)
+        url = self.url('emissionspec.edit', 'b', type='radonexposure')
+        form = mainform(self.html(self.client.get(url)))
+        self.assertEqual(form['multiplier'], 'surface_area')
+        self.assertEqual(form['category'], 'radon')
+        self.assertNotIn('sources.name', form)
+        form['name'] = 'radon1'
+        form['multiplier'] = 'outer_surface_area'
+        set_rows(form, [dict(id='', description='cleanroom', mode='free',
+                             radonlevel='10 +- 1 Bq/m**3',
+                             duration='3 day', columnheight='10 cm')],
+                 'periods')
+        self.assertEqual(self.client.post(url, data=form).status_code, 302)
+        spec = self.get('radon1')
+        self.assertIs(type(spec), RadonExposure)
+        self.assertEqual(spec.periods[0].description, 'cleanroom')
+        source = spec.sources[0]
+        self.assertEqual((source.name, source.multiplier),
+                         ('Pb210', Multiplier.outer_surface))
+        html = self.html(self.client.get(
+            self.url('emissionspec.view', 'b', object=spec)))
+        self.assertIn('Radon exposure', html)
+
+        # resubmitting the edit form changes nothing, then add a period
+        form = self.edit_form(spec)
+        self.assertEqual(self.post(form, spec).status_code, 302)
+        self.assertEqual(self.get('radon1').sources[0].rate, source.rate)
+        set_rows(form, rows(form, 'periods') + [dict(
+            id='', description='lab', mode='trapped',
+            radonlevel='100 Bq/m**3', duration='10 day', columnheight='5 cm')],
+                 'periods')
+        self.assertEqual(self.post(form, spec).status_code, 302)
+        spec = self.get('radon1')
+        self.assertEqual(len(spec.periods), 2)
+        self.assertEqual(spec.sources[0].id, source.id)
+        self.assertGreater(spec.sources[0].rate, source.rate)
 
     def test_edit_sources(self):
         before = self.total()

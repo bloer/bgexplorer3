@@ -3,6 +3,7 @@ from . import component
 from . import emissionspec
 from . import assay
 from . import cosmogenic
+from . import exposure
 from . import hiteff
 from . import sourceterm
 from . import settings

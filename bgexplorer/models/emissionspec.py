@@ -222,6 +222,9 @@ class EmissionSpec(VersionedDocument):
         if doinsert:
             self.sources.append(matchout)
 
+    # subclasses that calculate their sources set this, so they aren't edited
+    COMPUTED_SOURCES = False
+
     # fields of an EmissionSource which, if edited, make a generated source
     # an override of the default
     OVERRIDE_FIELDS = ('name', 'category', 'rate', 'multiplier', 'particle',

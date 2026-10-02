@@ -591,6 +591,26 @@ class TestLocationOverrideEditor(BrowserTestCase):
                                    'radon (package)'])
 
 
+class TestRadonExposureEditor(BrowserTestCase):
+    def setUp(self):
+        super().setUp()
+        vc.create_version('main')
+
+    def test_add_period(self):
+        page = self.open(self.url('emissionspec.edit', type='radonexposure'))
+        page.fill('input[name="name"]', 'cleanroom radon')
+        page.click('button[data-tableid="periods"]')
+        row = page.locator('#periods tbody tr').last
+        row.locator('input[name="periods.radonlevel"]').fill('10 Bq/m**3')
+        row.locator('input[name="periods.duration"]').fill('3 day')
+        page.click('#mainform button[type=submit] >> nth=0')
+        page.wait_for_selector('h2:text-is("Radon exposure")')
+        spec = EmissionSpec.objects.get(name='cleanroom radon')
+        self.assertEqual(spec.periods[0].columnheight, 10 * units.cm)
+        self.assertIn('Pb210', page.locator('h2:text-is("Sources") + table')
+                      .inner_text())
+
+
 class TestRadiopuritySpinner(BrowserTestCase):
     def setUp(self):
         super().setUp()

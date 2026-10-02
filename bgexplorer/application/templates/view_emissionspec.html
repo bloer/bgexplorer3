@@ -40,6 +40,10 @@
     <div class="col-md-12 col-lg-8">
         <h2>Sources</h2>
         {{ utils.print_doclist(g.object, 'sources', ['name', 'comment', 'rate', 'multiplier']) }}
+        {%- if g.object.periods is defined %}
+        <h2>Radon exposure</h2>
+        {{ utils.print_doclist(g.object, 'periods') }}
+        {%- endif %}
     </div>
 </div>
 {% if components %}
