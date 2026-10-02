@@ -1,6 +1,7 @@
 import flask
 import mongoengine as me
 from bson import ObjectId
+from bson.errors import InvalidId
 from io import BytesIO
 from ..models.sourceterm import find_sourceterms, CalculatedResults
 from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
@@ -14,6 +15,8 @@ from ..models.cosmogenic import ActivatedMaterial, CosmogenicActivation
 from ..models.fields import InlineAttachment
 from ..models.importexport import iter_json_documents, import_documents
 from ..models.verdoc import check_writable
+from ..models.versiondiff import compare_document, find_refs
+from ..models.versioncontrol import version_exists
 from ..models.settings import get_settings
 from .api import validation_fields
 from .auth import require_for_changes, Role
@@ -30,6 +33,68 @@ def get_or_404(queryset, objid):
         return queryset.get(original_id=ObjectId(objid))
     except queryset._document.DoesNotExist:
         flask.abort(404, f"No {queryset._document._class_name} with id {objid}")
+
+
+# versioned classes that documents refer to, and their blueprints
+REFERENCED_CLASSES = ((Component, 'component'),
+                      (EmissionSpec, 'emissionspec'),
+                      (HitEfficiency, 'hitefficiency'),
+                      (ActivatedMaterial, 'activatedmaterial'))
+
+
+def describe_refs(ids, version: str) -> dict:
+    """ {original_id: (blueprint, name)} for the documents with `ids` in
+    `version`
+    """
+    found = {}
+    ids = list(set(ids))
+    for cls, endpoint in REFERENCED_CLASSES:
+        if not ids:
+            break
+        for doc in cls._get_collection().find(
+                {'version_tags': version, 'original_id': {'$in': ids}},
+                {'original_id': 1, 'name': 1, 'source': 1, 'location': 1}):
+            name = doc.get('name') or ' @ '.join(
+                str(doc[k]) for k in ('source', 'location') if doc.get(k))
+            found[doc['original_id']] = (endpoint, name)
+        ids = [i for i in ids if i not in found]
+    return found
+
+
+def format_raw_value(value, refs: dict, version: str, maxlen: int = 200):
+    """ HTML for a raw (`to_mongo`) value in a diff. Ids are looked up in
+    `refs` (see describe_refs) and linked to `version`
+    """
+    esc = markupsafe.escape
+    if value is None or value == []:
+        return markupsafe.Markup('<span class="text-secondary">none</span>')
+    if isinstance(value, ObjectId):
+        if value not in refs:
+            return markupsafe.Markup('<span class="text-danger" title="Not '
+                                     'in this version">missing {}</span>'
+                                     ).format(value)
+        endpoint, name = refs[value]
+        url = flask.url_for(f'{endpoint}.view', objid=str(value),
+                            active_version=version)
+        return markupsafe.Markup('<a href="{}">{}</a>').format(url, name)
+    if isinstance(value, dict):
+        if 'str' in value:
+            return esc(value['str'])
+        if 'units' in value:
+            return esc(f"{value.get('value')} {value['units']}")
+        items = [markupsafe.Markup('<dt class="col-4">{}</dt>'
+                                   '<dd class="col-8">{}</dd>').format(
+                     key, format_raw_value(item, refs, version, maxlen))
+                 for key, item in value.items() if key not in ('id', '_cls')]
+        return markupsafe.Markup('<dl class="row mb-0">{}</dl>').format(
+            markupsafe.Markup('').join(items))
+    if isinstance(value, list):
+        return markupsafe.Markup(', ').join(
+            format_raw_value(item, refs, version, maxlen) for item in value)
+    text = str(value)
+    if len(text) > maxlen:
+        text = text[:maxlen] + '…'
+    return esc(text)
 
 
 def flash_import_report(report) -> None:
@@ -213,6 +278,33 @@ class CollectionViews(flask.Blueprint):
                                          components=components,
                                          activations=activations,
                                          spectypes=spectypes)
+
+        @self.get('/diff/<itemid>/<other_version>')
+        def diff(itemid, other_version):
+            """ Compare an item in the active version with its copy in
+            `other_version`. The item may be missing from either one
+            """
+            this = flask.g.active_version
+            if not version_exists(other_version):
+                flask.abort(404, f"Version '{other_version}' does not exist")
+            try:
+                comparison = compare_document(self.doc_cls, itemid, this,
+                                              other_version)
+            except InvalidId:
+                flask.abort(404, f"No {self.doc_cls.__name__} with id "
+                                 f"{itemid}")
+            if comparison.left is None and comparison.right is None:
+                flask.abort(404, f"No {self.doc_cls.__name__} with id "
+                                 f"{itemid} in either version")
+            refs = {}
+            for side, tag in (('left', this), ('right', other_version)):
+                ids = [ref for entry in comparison.entries
+                       for ref in find_refs(getattr(entry, side))]
+                refs[side] = describe_refs(ids, tag)
+            return flask.render_template(
+                'diff_document.html', comparison=comparison,
+                other_version=other_version, refs=refs,
+                format_value=format_raw_value)
 
         @self.route('/new', methods=['GET', 'POST'])
         @self.route('/<objid>/edit', methods=['GET', 'POST'])

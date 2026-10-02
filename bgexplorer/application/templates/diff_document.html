@@ -1,0 +1,61 @@
+{% extends "versionbase.html" %}
+{%- set left, right = comparison.left, comparison.right %}
+{%- set doc = left or right %}
+{%- set itemid = comparison.original_id|string %}
+
+{% block pageheader %}
+<div class="col-7">
+    <h2>Compare {{ doc._class_name.rsplit('.', 1)[-1] }} <small class="text-secondary">{{ doc.name or itemid }}</small></h2>
+</div>
+<div class="col-5 d-flex justify-content-end align-items-center">
+    <div class="dropdown">
+        <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="otherversion" data-bs-toggle="dropdown" aria-expanded="false">with {{ other_version }}</button>
+        <ul class="dropdown-menu" aria-labelledby="otherversion">
+            {%- for version in all_versions() if version.version_tag != g.active_version %}
+            <li><a class="dropdown-item {% if version.version_tag == other_version %}active{% endif %}" href="{{ url_for('.diff', itemid=itemid, other_version=version.version_tag) }}">{{ version.version_tag }}</a></li>
+            {%- endfor %}
+        </ul>
+    </div>
+</div>
+{% endblock pageheader %}
+
+{% block pagecontent %}
+{%- macro side(obj, version) -%}
+{%- if obj is not none %}
+<a href="{{ url_for('.view', objid=itemid, active_version=version) }}">{{ version }}</a>
+<small class="text-secondary d-block">revision {{ obj.revision }}, {{ pretty_date(obj.modified) }}{% if obj.enteredby %} by {{ obj.enteredby }}{% endif %}</small>
+{%- else %}
+{{ version }} <span class="badge text-bg-warning">not in this version</span>
+{%- endif %}
+{%- endmacro %}
+
+<div id="diffsummary" class="mb-3">
+{%- if comparison.same_copy %}
+<div class="alert alert-success">Both versions share the same copy of this item.</div>
+{%- elif comparison.identical %}
+<div class="alert alert-success">The copies in both versions have the same content.</div>
+{%- elif left is none %}
+<div class="alert alert-info">This item is only in {{ other_version }}.</div>
+{%- elif right is none %}
+<div class="alert alert-info">This item is only in {{ g.active_version }}.</div>
+{%- else %}
+<div class="alert alert-secondary">{{ comparison.entries|length }} difference{{ '' if comparison.entries|length == 1 else 's' }}.</div>
+{%- endif %}
+</div>
+{% block diffactions %}{% endblock %}
+
+<table id="difftable" class="table">
+    <thead>
+        <tr><th>Field</th><th>{{ side(left, g.active_version) }}</th><th>{{ side(right, other_version) }}</th></tr>
+    </thead>
+    <tbody>
+    {%- for entry in comparison.entries %}
+    <tr class="diff-{{ entry.kind }} {{ {'added': 'table-success', 'removed': 'table-danger', 'changed': 'table-warning'}[entry.kind] }}">
+        <td><code>{{ entry.pathstr }}</code></td>
+        <td>{{ format_value(entry.left, refs.left, g.active_version) }}</td>
+        <td>{{ format_value(entry.right, refs.right, other_version) }}</td>
+    </tr>
+    {%- endfor %}
+    </tbody>
+</table>
+{% endblock pagecontent %}
