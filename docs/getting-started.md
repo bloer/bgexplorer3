@@ -66,13 +66,13 @@ dilution refrigerator, with assays and simulated hit efficiencies. Load it
 into the version `examples-qis` with:
 
 ```sh
-python -m bgexplorer.application.examples.qis mongodb://localhost:27017/bgexplorer
+python -m examples/qis/qis.py mongodb://localhost:27017/bgexplorer
 ```
 
 or, with Docker:
 
 ```sh
-docker compose exec web python -m bgexplorer.application.examples.qis mongodb://mongo:27017/bgexplorer
+docker compose exec -w /app/examples/qis web python qis.py mongodb://mongo:27017/bgexplorer
 ```
 
 This takes a minute or so. It replaces the `examples-qis` version if it
