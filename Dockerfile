@@ -7,8 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
-COPY bgexplorer ./bgexplorer
-RUN pip install '.[server]' && rm -rf /app/bgexplorer
+COPY src ./src
+RUN pip install '.[server]' && rm -rf /app/src
+COPY examples ./examples
 
 RUN useradd --system --create-home bgexplorer
 USER bgexplorer

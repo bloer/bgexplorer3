@@ -5,6 +5,7 @@ from bgexplorer.models.settings import get_settings, HitEffConfig
 from bgexplorer.models.versioncontrol import create_version, delete_version
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.sourceterm import CalculatedResults, find_sourceterms
+from pathlib import Path
 import importlib.resources
 import os
 import logging
@@ -40,7 +41,8 @@ def populate_example(version_tag='examples-qis', clean: bool = False,
     settings.save()
     log.debug("Saving hit efficiencies")
     # hiteff data
-    with tarfile.open(importlib.resources.files('bgexplorer.application.examples').joinpath('qis_hiteffs.tar.gz')) as tar:
+    mydir = Path(__file__).resolve().parent
+    with tarfile.open(mydir/'qis_hiteffs.tar.gz') as tar:
         for jsonfile in tar:
             jsondata = tar.extractfile(jsonfile).read()
             hiteff = HitEfficiency.from_json(jsondata, created=True)
