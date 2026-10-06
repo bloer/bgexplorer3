@@ -294,8 +294,9 @@ class QuantityField(BaseField):
         result = dict(value=value.m)
         if isinstance(value.m, AsymmetricUncertainty):
             result = self._au_to_mongo(value.m)
-        if not value.dimensionless:
-            result['units'] = utostr(value.u)
+        unitstr = utostr(value.u)
+        if unitstr:
+            result['units'] = unitstr
         return compress(result)
 
     def _au_to_mongo(self, au: AsymmetricUncertainty) -> dict:
