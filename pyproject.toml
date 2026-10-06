@@ -45,11 +45,12 @@ server = ["gunicorn"]
 [project.urls]
 "Homepage" = "https://github.com/bloer/bgexplorer3"
 "Bug Tracker" = "https://github.com/bloer/bgexplorer3/issues"
+"Documentation" = "https://bloer.github.io/bgexplorer3"
 
 # hatchling includes all non-gitignored files in the package (templates,
 # static, example data) by default
 [tool.hatch.build.targets.wheel]
-packages = ["bgexplorer"]
+packages = ["src/bgexplorer"]
 exclude = ["*.bak"]
 
 # tests are unittest-style, but pytest gives better reporting
