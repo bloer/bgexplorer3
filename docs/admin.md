@@ -13,6 +13,8 @@ nav_order: 10
 
 The server has local user accounts. There is no self-registration and no
 password reset by email: site admins manage all accounts.
+**Avoid password reuse**. I have attempted to follow best-practices for
+storing hashed passwords, but you should assume security is minimal at best.
 
 Each user has one role, and each role can do everything the ones before it can:
 
@@ -24,7 +26,7 @@ Each user has one role, and each role can do everything the ones before it can:
 | `site_admin` | also change the site settings, manage users and run maintenance, on the **Admin** pages |
 
 Anyone can view the models without logging in, unless **allow anon view** is
-turned off in the site settings. Users change their own password on their
+turned off in the site settings. Users can hange their own password on their
 **profile** page.
 
 ### Users
@@ -56,7 +58,8 @@ site admin can't be demoted or deactivated.
 
 ## Configuration
 
-The server is configured with environment variables. Any Flask setting can be
+The server is configured with environment variables and a configuration file.
+Any Flask setting can be
 given as `FLASK_<NAME>`; values are parsed as JSON where possible, so
 `FLASK_LOGIN_DISABLED=true` is a boolean.
 

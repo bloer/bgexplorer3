@@ -11,26 +11,39 @@ nav_order: 7
 
 ## Asymmetric uncertainties and upper limits
 
-Rates, hit efficiencies and results are *asymmetric uncertainties*: a most
+Rates, hit efficiencies and results are objects of the `AsymmetricUncertainties`
+class. This class has two purposes: (1) combine measurements and upper limits
+in a meaningful way and (2) properly track correlated errors.
+An `AU` is represented by three numbers: a most
 likely value (the mode) with separate lower and upper standard deviations,
-e.g. `12 +3 -2 mBq/kg`.
-
+e.g. `12 +3 -2`. Quantities with units are handled with the `pint` library.
 Material assays often only give an upper limit. A limit is represented as a
-value of zero with only an upper uncertainty, `0 +s -0`. Limits combine so that:
+value of zero with only an upper uncertainty, `0 +s -0`.
+
+Limits combine so that:
 
 - a sum of limits is still a limit;
-- adding a limit to a measured value doesn't raise the measurement's lower
+- adding a limit to a measured value doesn't change the measurement's lower
   bound.
 
-The uncertainties propagate as if they were gaussian. This is a practical
-convention for building a background budget, not a strict statistical model:
-results that include limits should be read as conservative estimates.
+The upper and lower limits are combined separately as though each is gaussian.
+I.e., if `A = ma +s1a -s2a; B = mb +s1b -s2b`, then
+`A + B = ma + mb +sqrt(s1a**2 + s1b**2) -sqrt(s2a**2 + s2b**2)`.
+Upper limits follow the same rules, so if
+`C < uc; D < ud`, then `C + D < sqrt(uc**2 + ud**2)`.
+In order to calculate confidence intervals, we treat the AU as having a PDF
+consisting of two half-gaussians joined at the mode (discontinuously).
+The combining rules are **not** proper statistical treatement of the
+PDF. Since the PDF is positive-definite, adding multiple pure upper limits
+would eventually converge to a gaussian separated from zero.
 
 In plots, measured values are shown with 1σ error bars, and limits at their
-90% upper limit. In spectra, bins that are upper limits are shaded up to their
-one-sided 1σ (84.13%) upper limit.
+90% upper limit. In spectra, all bins are drawn from -1σ (or zero)
+to the one-sided 1σ (84.13%) upper limit. (Symmetric points are therefore drawn
+as the usual 1σ errors, while asymmetric bins smoothly transition to pure
+upper limits without jumping around.)
 
-## What is correlated
+## Correlated uncertainties
 
 Independent random variables are the values that were entered or measured:
 
@@ -60,6 +73,11 @@ totals keep these correlations.
 Only sums and products are tracked. Division by an uncertain value and other
 nonlinear operations treat their inputs as independent (and log a warning), as
 do a few array operations such as slicing or integrating a spectrum.
+The treatment of correlations is based heavily on the excellent `uncertainties`
+package with two major modifications. (1) Allowing asymmetric uncertainties and
+(b) array values are treated as a whole. In `uncertainties`, each element of
+a numpy array is treated as a separate uncertain value, which slows down
+vector operations.
 
 ## Storing correlated values
 

@@ -46,7 +46,7 @@ your simulation output. A minimal hit efficiency looks like:
   "nprimaries": 1000000,
   "scalars": {
     "countrate": {"value": 2.3e-5, "sigma": 1e-6, "units": "1/Bq/g/s"},
-    "countrate_2MeV": {"value": 0, "sigma": 0, "sigmaup": 2e-8, "units": "1/Bq/g/s"}
+    "countrate_above_2MeV": {"value": 0, "sigma": 0, "sigmaup": 2e-8, "units": "1/Bq/g/s"}
   }
 }
 ```

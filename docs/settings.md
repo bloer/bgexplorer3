@@ -52,12 +52,15 @@ For each scalar and spectrum key found in the hit efficiencies:
 
 Keys and display units are filled in from the hit efficiencies as they are
 added. A unit that isn't compatible with existing hit efficiencies is
-rejected.
+rejected. Similarly, adding a new hit efficiency with incompatible units is
+rejected. If these aren't filled, the first inserted hit efficiency sets the units.
 
 **Extra columns** lists extra hit efficiency fields, e.g. `material`, to show
 as columns on the Hit Efficiencies overview.
 
 ### Regions of interest
+
+**NOTE** ROI implementation is not tested yet; evaluate the scalars outside.
 
 A region of interest (ROI) makes a new scalar from a spectrum, e.g. the rate
 between 2400 and 2500 keV. It has:

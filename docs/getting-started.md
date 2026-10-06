@@ -91,7 +91,8 @@ already exists, but doesn't touch any other version.
 
    ![A component's summary](assets/images/component.png)
 4. The **Source Terms** tab lists every source on every component inside it,
-   with the hit efficiencies each one matched.
+   with the hit efficiencies each one matched. This can take a long time to
+   load on large trees.
 
    ![A component's source terms](assets/images/sourceterms.png)
 5. The **Results** tab shows the background contributions table, the

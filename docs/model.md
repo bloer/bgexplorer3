@@ -37,14 +37,16 @@ like this:
 |----------|---------|
 | `5 mBq/kg` | a value without uncertainty |
 | `1.2 +- 0.3 mBq/kg` | symmetric uncertainty; `±` and `+/-` also work |
-| `1.2 +0.3 -0.2 mBq/kg` | asymmetric uncertainty, upper first |
+| `1.2 +0.3 -0.2 mBq/kg` | asymmetric uncertainty, upper first; additional spaces ok |
 | `(1.2 ± 0.3)e-3 Bq/kg` | with a common exponent |
 | `< 5 mBq/kg` | an upper limit at 90% CL |
 | `< 5 (95%) mBq/kg` | an upper limit at another CL |
 
 Any compatible unit works (`200 g` for a mass in kg, `5 cm**2` for an area).
 Write powers as `**`, e.g. `Bq/m**2`. `ppm`, `ppb`, `ppt` and `ppq` are
-available. What you typed is kept and shown back to you.
+available and automatically converted to `Bq/kg` based on the isotope.
+The original string is retained for all display purposes rather than the
+internal floating point representation.
 
 {: .note }
 The `1.2(3)` notation and negative values aren't supported yet.
@@ -55,19 +57,19 @@ The `1.2(3)` notation and negative values aren't supported yet.
 |-------|---------|
 | Name | required; can't contain `/` |
 | Description, notes | free text |
-| Material | free text, e.g. `copper`. Used to match hit efficiencies that give a material, and to group results |
-| Mass, volume, inner and outer surface area, length, width, height | geometry, defaulting to 0. The surface area used for rates is inner + outer |
-| Hit Efficiency Location | the `location` to match in the hit efficiency database; blank uses the component's name. Autocompletes from existing locations |
-| Specs | the emission specs that apply |
+| Material | free text, e.g. `copper`. Used to match hit efficiencies that give a material (for e.g. (alpha,n) neutron yields), and to group results |
+| Mass, volume, inner and outer surface area, length, width, height | geometry, defaulting to 0. The surface area used for rates is inner + outer by default |
+| Hit Efficiency Location | the `location` to match in the hit efficiency database; blank uses the component's name if not given in a parent Placement. Autocompletes from existing locations |
+| Specs | the radiation emission specs that apply. Opens a search form. |
 | Location overrides | send some sources to another location, see [below](#location-overrides) |
-| Purchase info, material purchase info | vendor, part number, batch, order, dates… |
+| Purchase info, material purchase info | optional vendor, part number, batch, order, dates… |
 | History | handling records: date, location, duration, worker… |
 | Attachments, extra metadata | anything else |
 
 ### Assemblies
 
-An assembly has the same fields, plus its **children**. Each child placement
-has:
+An assembly has the same information fields, plus its **children**, but no
+emission specs. Each child placement has:
 
 - the **component** placed;
 - a **weight**, the number of copies (any positive number, default 1);
@@ -87,8 +89,10 @@ A spec can be *owned* by a single component. It is then only used by that
 component, isn't offered for other components, and is deleted with it. Create
 one with **New spec for this component** on the component's page. Owned specs
 have an "own" badge, and are hidden from the emission spec overview unless you
-choose **Show component-specific**. Use
-**make specific** to replace a shared spec on one component with a private
+choose **Show component-specific**. This is strictly a convenience to keep search
+tables from getting cluttered with per-component information and can be completely
+ignored.
+Use **make specific** to replace a shared spec on one component with a private
 copy, named `<spec> (<component>)` (the **make specific** button next to the
 spec in the component's Radiation sources table), e.g. to give one component its own radon
 history. Cloning a component also clones the specs it owns.
@@ -119,7 +123,11 @@ rate's units unless a multiplier is set:
 | none | `Bq`, or fluxes `1/cm**2/s`, `1/cm**2/s/sr` |
 
 Use the spec's multiplier to choose e.g. the inner surface for all its
-surface sources at once.
+surface sources at once. Fluxes are primarily used to represent the ambient
+laboratory backgrounds, and must match the units of the corresponding hit efficiency.
+E.g., if the result unit is `counts/kg/keV/day` and the ambient gamma flux
+measured in `1/cm**2/s/sr`, the hit efficiency must be normalized to
+`(cm**2 sr)/(kg keV)`.
 
 **Concentrations** (`ppb` etc., or a bare number as a fraction, so `1e-9` is
 1 ppb) need the source's name to be an isotope. They are converted to
@@ -129,11 +137,13 @@ natural potassium.
 
 ### Generated sources
 
-The version [settings](settings.html#generated-sources) can add sources
-automatically: by default, every spec with U-238 also gets U-235 (by natural
+Additional sources can be defined automatically based on the version [settings](settings.html#generated-sources). By default, every spec with U-238 also gets U-235 (by natural
 abundance) and Ra-226 (in secular equilibrium). Generated sources are shown in
 the spec. A source you enter with the same name takes precedence, and editing a
-generated source turns it into your own.
+generated source turns it into your own. This is intended to handle models where
+some materials are out of secular equilibrium, where the Ra-226 rate would be
+entered separately, and otherwise it is generated automatically. Then all
+simulation locations can be split between upper and lower chain.
 
 ### Assays
 
@@ -145,6 +155,16 @@ measurement, which are kept for reference and don't affect the results:
 - **measurement**: technique, institution, instrument, dates, count time,
   operator, raw results;
 - **publication**: reference, URL, details (e.g. "Table II, entry 45").
+
+Measurement results are entered in a separate table than the sources used to
+build the background model. The measurement may have multiple replicates,
+isotopes that you don't want to track, or measure multiple isotopes in the same
+chain, so the model values often must be interpreted.
+
+One design goal of Background Explorer is to serve as an internal assay tracking
+tool. This can be achieved by, e.g., creating a new "Assay Tracking" branch,
+filling out the request section, followed by sample tracking and results, then
+the result can be imported into the actual background model branch.
 
 #### Importing from radiopurity.org
 
@@ -198,12 +218,11 @@ activated material and has a list of exposure **periods**:
 |-------|---------|
 | Description, location | e.g. surface storage, flight |
 | Duration | in days |
-| Factor | activation rate relative to sea level: 1 at the surface, 0 underground; e.g. higher for flights |
+| Factor | activation rate relative to sea level: 1 at the surface, 0 deep underground; e.g. higher for flights |
 
-A cooldown underground is a period with factor 0. The spec calculates one
-source per isotope, in `Bq/kg` at the end of the last period, multiplied by
-the component's mass. Changing the activated material updates every spec that
-uses it.
+A "cooldown" underground is a period with factor 0. The spec calculates one
+source per isotope, in `Bq/kg` at the end of the last period.
+Changing the activated material updates every spec that uses it.
 
 {: .tip }
 To plan with common estimates, e.g. "all of these parts get 10 days of
@@ -220,8 +239,15 @@ edit that.
 | Material | optional; if set, only components of this material match |
 | Normalization | `rate` (per decay per second, the default), `flux` (per 1/s/cm²), `flux_per_sr`, or `none` (absolutely normalized) |
 | Scalars | named values with units, e.g. counts per decay in an energy window |
-| Spectra | histograms, imported on the edit page |
+| Spectra | histograms as numpy binary, imported on the edit page |
 | Simulation details | number of primaries, primary particle, spectrum and yield, bias weight, livetime, version, files, date… |
+
+Most associations in Background Explorer are defined manually: attaching
+emission specs to components, components to assemblies, activated materials
+to activation specs. Hit Efficiencies are matched to Source Terms automatically
+by keying on the source's name and component's location. It is therefore
+critical to mainttain a consistent naming scheme for these fields
+(e.g., U238 vs U-238 vs U vs 238U, capitalization).
 
 The scalars' and spectra's display names, units and visibility are set in the
 version [settings](settings.html#hit-efficiency-display). Regions of interest
@@ -242,7 +268,11 @@ file formats.
 Each SourceTerm uses every hit efficiency whose `source` equals the source's
 name, whose `location` equals the SourceTerm's location, and whose `material`
 is the component's material or blank. Several matching hit efficiencies are
-summed.
+summed. This is intended to handle e.g. two separate simulations for neutrons
+and gammas that should both be normalized to the same U238 rate. This means
+that you **cannot** improve simulation uncertainties by uploading multiple hit
+efficiency results for the same simulation parameters; they must be averaged
+separately, and the new result will replace the original.
 
 The location is decided from the most specific setting, starting at the
 component itself and walking up to the root assembly:
@@ -254,6 +284,12 @@ component itself and walking up to the root assembly:
 5. then the same on each assembly further up;
 6. finally, the component's name.
 
+This scheme allows correct hit efficiency assignment for multiply-placed items.
+For example, if we have assayed a bag of screws, their radioactivity contribution
+will be in multiple places determined by the parent assemblies' locations. It's
+best to default to NOT assigning a location to each component, but instead
+assign at the placement level.
+
 The **Source Terms** tab shows each SourceTerm's location and where it came from,
 e.g. "override on Tower" or "component name".
 
@@ -262,6 +298,8 @@ e.g. "override on Tower" or "component name".
 An override sends the sources of one spec, or one source name, or both, to a
 different location. For example, put the radon plate-out on a component's
 surface at the `CuCanSurface` location while its bulk assay stays at `CuCan`.
+As with other locations, this is an exact string match against the hit efficiency
+table, so it's critical to observe consisten naming conventions.
 
 On an assembly, an override can also be limited to one placement. When several
 overrides match, the more specific one wins (a spec counts more than a source
@@ -271,5 +309,4 @@ name). Overrides for specs or placements that are removed go with them.
 
 Isotope names are recognized as `U238`, `U-238` or `238U`, and can have a suffix,
 like `U238 lower`. These are treated as the same isotope for generated sources,
-overrides, concentrations and activation. **Hit efficiency matching uses the
-exact string**, so pick one spelling for your simulations and specs.
+overrides, concentrations and activation. **Hit efficiency matching uses the exact string**, so pick one spelling for your simulations and specs.

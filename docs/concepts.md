@@ -36,11 +36,17 @@ An **assembly** is a component made of other components. Each child is
 *placed* in the assembly, with a **weight**, the number of copies. An
 assembly's mass, volume and surface areas are the weighted sums of its
 children's. Assemblies can contain other assemblies, so the whole detector is a
-tree with one root assembly at the top.
+tree with (typically) one root assembly at the top. One could maintain two
+separate or partially overlapping hierarchies to represent e.g. best- and worst-case
+scenarios, but this ismore naturally done with two distinct versions.
+
+In relation to GEANT4, a component is a "logical volume" with material and mass.
+A **placement** is a "physical volume" specifying where and how many of each
+component is placed in the assemblies "mother logical volume"
 
 ## Emission specs and sources
 
-An **emission spec** says how radioactive something is. It holds a list of
+An **emission spec** is a convenience grouping of
 **emission sources**, each an isotope (or other source name) with a rate, e.g.
 `U-238: 12 +3 -2 mBq/kg`, or an upper limit like `< 5 mBq/kg`.
 
@@ -48,17 +54,21 @@ A component lists the specs that apply to it. One spec, say an assay of a
 batch of copper, is usually shared by every component made of that copper.
 
 The rate's units decide what it is multiplied by: Bq/kg by the component's
-mass, Bq/m² by its surface area, Bq by nothing, and so on. Concentrations like
-`ppb` of U-238 are converted to activities automatically.
+mass, Bq/m² by its surface area, Bq by nothing (for e.g. 'per-piece' normalized results),
+and so on. Concentrations like
+`ppb` of U-238 are converted to activities automatically for recognized isotopes.
 
 There are several kinds of spec:
 
 | Kind | Use |
 |------|-----|
-| Emission spec | rates entered by hand, e.g. estimates or targets |
+| Emission spec | the most generic type, rates entered by hand, e.g. estimates or targets |
 | Assay | a material assay, with sample, measurement and publication details; can be imported from radiopurity.org |
 | Radon exposure | Pb-210 plate-out calculated from a history of radon exposure |
 | Cosmogenic activation | activation products calculated from a material's activation rates and an exposure history |
+
+Components have a history tracking feature, but at present this is completely
+separate from exposure histories.
 
 See [Building a model](model.html) for details.
 
@@ -75,6 +85,10 @@ a region of interest per decay of U-238 in the copper can. It can have:
 Each hit efficiency is labelled with the `source` it simulated, e.g. `U238`,
 and a `location`, the name of the volume it was simulated in, e.g. `CuCan`. It
 may also give a `material`.
+
+The 'efficiency' part of the term is important for getting units correct.
+A 'component × source' typically has units like `decays / second`, so the
+hit efficiency must be normalized to `counts / decay`.
 
 ## SourceTerms: matching it all up
 
@@ -112,13 +126,19 @@ category, and can be filtered interactively. See [Results](results.html).
 
 ## Uncertainties
 
-Every rate and efficiency can carry an asymmetric uncertainty or be an upper
+Every rate and efficiency can carry an (asymmetric) uncertainty or be an upper
 limit, and correlations are tracked: two components using the same assay have
 correlated uncertainties. See [Uncertainties](uncertainties.html).
+It's rare to enter asymmetric uncertainties directly, but they come up often
+when trying to add a value to an upper limit.
 
 ## Versions
 
 The whole model lives in a **version**: a branch you can edit, or a read-only
 tag. Versions can be compared, and documents copied or whole versions merged
 between them. Each version has its own [settings](settings.html). See
-[Versions](versions.html).
+[Versions](versions.html). In the web interface, there is always a single
+"active" version, displayed on the navbar next to the 'Index' link. This is
+similar to the active branch of a git repository. There is no "commit" concept,
+but edits always apply to the active version only; the same object on a
+different version remains unchanged.
