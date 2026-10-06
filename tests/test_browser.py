@@ -59,6 +59,8 @@ class BrowserTestCase(AppTestCase):
             cls.browser = cls.playwright.chromium.launch(env=env)
         except PlaywrightError as e:
             cls.playwright.stop()
+            # tearDownClass isn't called when setUpClass raises
+            super().tearDownClass()
             raise unittest.SkipTest(f"Can't launch chromium: {e}")
         cls.server = make_server('127.0.0.1', 0, cls.app, threaded=True)
         cls.base = f'http://127.0.0.1:{cls.server.server_port}'

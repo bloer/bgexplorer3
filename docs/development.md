@@ -13,10 +13,10 @@ nav_order: 13
 
 | Path | Contents |
 |------|----------|
-| `bgexplorer/models/` | the MongoEngine documents and the calculations: components, emission specs, hit efficiencies, SourceTerms and results, version control, uncertainties (`asymmetric.py`), histograms and units |
-| `bgexplorer/application/` | the Flask app: pages (`blueprints.py`), versions, admin, login, JSON API (`api.py`), templates and static files |
-| `bgexplorer/cli.py` | the `bgexplorer-users` and `bgexplorer-versions` commands |
-| `bgexplorer/application/examples/` | the `qis` example model |
+| `src/bgexplorer/models/` | the MongoEngine documents and the calculations: components, emission specs, hit efficiencies, SourceTerms and results, version control, uncertainties (`asymmetric.py`), histograms and units |
+| `src/bgexplorer/application/` | the Flask app: pages (`blueprints.py`), versions, admin, login, JSON API (`api.py`), templates and static files |
+| `src/bgexplorer/cli.py` | the `bgexplorer-users` and `bgexplorer-versions` commands |
+| `examples/` | example models (`qis`) and scripts; not installed with the package |
 | `tests/` | unittest-style tests, run with pytest |
 | `scripts/profile_calc.py` | a manual benchmark of the calculations on the example model |
 

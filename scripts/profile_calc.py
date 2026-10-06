@@ -15,6 +15,8 @@ import pstats
 import time
 import flask
 import mongoengine
+import sys
+from pathlib import Path
 
 VERSION = 'examples-qis'
 
@@ -57,7 +59,10 @@ def main():
 
     app = create_app(config={'MONGODB_URI': args.uri, 'TESTING': True})
     if args.populate or not VersionSettings.objects(version_tag=VERSION):
-        from bgexplorer.application.examples import qis
+        # examples are not installed; load from the repo checkout
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / 'examples' / 'qis'))
+        import qis
         timeit("populate_example",
                lambda: qis.populate_example(version_tag=VERSION, clean=True))
 

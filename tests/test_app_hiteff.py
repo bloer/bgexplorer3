@@ -1,5 +1,4 @@
 """ Creating, editing and importing hit efficiencies and their spectra """
-import importlib.resources
 import io
 import json
 import re
@@ -11,6 +10,7 @@ from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.settings import get_settings, SpectrumROI
 from bgexplorer.models.common import units
+from tests import EXAMPLES_DIR
 from bgexplorer.models import versioncontrol as vc
 from tests.test_app_components import AppTestCase
 
@@ -129,8 +129,7 @@ class TestHitEffPages(AppTestCase):
         self.assertIn('Duplicate name', self.html(response))
 
     def test_import(self):
-        path = (importlib.resources.files('bgexplorer.application.examples')
-                .joinpath('qis_hiteffs.tar.gz'))
+        path = EXAMPLES_DIR / 'qis' / 'qis_hiteffs.tar.gz'
         vc.create_version('empty')
         response = self.client.post(
             self.url('hitefficiency.import_', 'empty'),

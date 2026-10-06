@@ -19,6 +19,7 @@ from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.users import User
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.common import units
+from tests import load_example
 from tests.dbutil import TEST_MONGODB_URI, connect_test_db
 import numpy as np
 
@@ -528,9 +529,9 @@ class TestAppExamples(AppSmokeTest, unittest.TestCase):
 
     @classmethod
     def populate(cls):
-        from bgexplorer.application.examples import qis
+        qis = load_example('qis')
         qis.populate_example(version_tag=cls.version, clean=True)
-        ActivatedMaterial(version_tag=cls.version, name='m1', isotopes=[
+        m1 = ActivatedMaterial(version_tag=cls.version, name='m1', isotopes=[
             CosmogenicIsotope(isotope='Co60',
                               activationrate='97 +- 10 1/kg/day')]).save()
         c1 = Component.select_version(cls.version).first()
@@ -538,7 +539,9 @@ class TestAppExamples(AppSmokeTest, unittest.TestCase):
         with cls.app.test_request_context():
             flask.g.active_version = cls.version
             urls = [flask.url_for('component.add_attachments', object=c1),
-                    flask.url_for('emissionspec.add_attachments', object=e1)]
+                    flask.url_for('emissionspec.add_attachments', object=e1),
+                    flask.url_for('activatedmaterial.add_attachments',
+                                  object=m1)]
         for url in urls:
             cls.app.test_client().post(url, data=dict(
                 fupload=(BytesIO(b'hello'), 'hello.txt'), description='test'))
