@@ -604,6 +604,7 @@ class CollectionViews(flask.Blueprint):
                             label=row['label'], depth=row['depth'],
                             selected=row['selected'], size=row['size'],
                             children=row.get('children', False),
+                            confidence=row['confidence'],
                             value=scalar_json(row['value']))
             charts = {groupby: [row_json(row) for row in rows]
                       for groupby, rows in result['charts'].items()}

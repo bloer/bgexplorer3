@@ -230,6 +230,50 @@ class TestDashboard(AppTestCase):
         with self.assertRaises(ValueError):
             dashboard(self.a2, 'v1', BudgetFilter(root=[self.p_c1]))
 
+    def test_confidence(self):
+        """ Rows have the size-weighted mean rating of their terms """
+        for name, rating in (('c1', 5), ('c2', 2)):
+            comp = Component.select_version('main').get(name=name)
+            comp.confidence_rating = rating
+            comp.save()
+        result = dashboard(self.a2, 'v1')
+        isotopes = {row['key']: row for row in result['charts']['isotope']}
+        # c1 4 (rated 5), c2 3 (rated 2), c3 0.5 (unrated)
+        self.assertAlmostEqual(isotopes['Th232']['confidence']['mean'],
+                               (4 * 5 + 3 * 2) / 7)
+        self.assertAlmostEqual(isotopes['Th232']['confidence']['unrated'],
+                               0.5 / 7.5)
+        # a limit is weighted by its upper limit
+        limit = isotopes['K40']['size']
+        self.assertGreater(limit, 20.)
+        self.assertEqual(isotopes['K40']['confidence'],
+                         dict(mean=5., unrated=0.))
+
+        # an assembly averages all the terms below it, not its children
+        rows = {row['label']: row for row in result['charts']['component']}
+        self.assertAlmostEqual(rows['a1']['confidence']['mean'],
+                               (5 * (4 + limit) + 2 * 3) / (7 + limit))
+        self.assertEqual(rows['a1']['confidence']['unrated'], 0.)
+        self.assertEqual(rows['c2 label']['confidence'],
+                         dict(mean=2., unrated=0.))
+        self.assertEqual(rows['c3']['confidence'],
+                         dict(mean=None, unrated=1.))
+
+        # only the terms passing the filters count
+        f = BudgetFilter(dict(material=[('copper', False)]))
+        rows = {row['label']: row for row in
+                dashboard(self.a2, 'v1', f)['charts']['component']}
+        self.assertEqual(rows['a1']['confidence'], dict(mean=5., unrated=0.))
+        self.assertIsNone(rows['c2 label']['value'])
+        self.assertEqual(rows['c2 label']['confidence'],
+                         dict(mean=None, unrated=0.))
+        # and the unfiltered size is still what orders them
+        f = BudgetFilter(dict(isotope=[('K40', True)]))
+        isotopes = {row['key']: row for row in
+                    dashboard(self.a2, 'v1', f)['charts']['isotope']}
+        self.assertEqual(isotopes['Th232']['confidence']['mean'],
+                         (4 * 5 + 3 * 2) / 7)
+
     def test_errors(self):
         with self.assertRaises(ValueError):
             dashboard(self.a2, 'nope')
@@ -362,6 +406,14 @@ class TestDashboard(AppTestCase):
                            data['total']['value'])
         isotopes = {row['key']: row for row in data['charts']['isotope']}
         self.assertTrue(isotopes['K40']['value']['is_limit'])
+        # nothing is rated yet
+        self.assertEqual(rows[1]['confidence'], dict(mean=None, unrated=1.))
+        c1 = Component.select_version('main').get(name='c1')
+        c1.confidence_rating = 4
+        c1.save()
+        data2 = self.client.get(url).get_json()
+        self.assertEqual(data2['charts']['component'][1]['confidence'],
+                         dict(mean=4., unrated=0.))
         # totals are also formatted, like the contributions table
         total = self.total(self.a2).to('dru').m
         self.assertEqual(data['total']['text'], '{:S}'.format(total))

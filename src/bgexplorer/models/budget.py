@@ -55,6 +55,8 @@ class Term(NamedTuple):
     sourceterm: SourceTerm
     values: dict
     keys: dict
+    # the confidence rating of the component the SourceTerm belongs to
+    rating: Optional[int] = None
 
 
 def _component_path(st: SourceTerm, child_ids: set) -> Tuple[str, ...]:
@@ -95,7 +97,7 @@ def term_values(obj: Component, relativeto: Optional[Assembly] = None,
                         material=(st.material or st.componentName
                                   or NO_MATERIAL),
                         category=category.value if category else NO_CATEGORY)
-            terms.append(Term(st, values, keys))
+            terms.append(Term(st, values, keys, st.confidence_rating))
         return terms
     key = _cache_key(obj, 'spectra' if spectra else 'terms', _ref_id(obj),
                      relativeto and _ref_id(relativeto))
@@ -232,12 +234,18 @@ def _resolve_root(obj: Component, root: Tuple[str, ...]):
 class _Group:
     """ The sum of some SourceTerms' values passing the filters, and of all
     of them. Measurements and upper limits are summed together, as
-    AsymmetricUncertainties
+    AsymmetricUncertainties.
+
+    Also the mean confidence rating of those passing, weighted by their
+    sizes (see `_size`), and the fraction of the size that is unrated
     """
     def __init__(self):
         self.value = None
         self.unfiltered = None
         self.selected = False
+        self.rated_sum = 0.
+        self.rated_size = 0.
+        self.unrated_size = 0.
 
     @staticmethod
     def _add(total, value):
@@ -246,12 +254,32 @@ class _Group:
     def add(self, value):
         self.value = self._add(self.value, value)
 
-    def include(self, value, selected: bool, passing: bool):
-        """ Add `value` to the unfiltered sum, and to the sum if `passing` """
+    def include(self, value, selected: bool, passing: bool,
+                size: float = 0., rating: Optional[int] = None):
+        """ Add `value` to the unfiltered sum, and to the sum and the
+        confidence if `passing`. `size` is the `_size` of `value` in the
+        units of the rows, `rating` the term's confidence rating
+        """
         self.unfiltered = self._add(self.unfiltered, value)
         self.selected |= selected
         if passing:
             self.add(value)
+            if rating is None:
+                self.unrated_size += size
+            else:
+                self.rated_sum += size * rating
+                self.rated_size += size
+
+    @property
+    def confidence(self) -> dict:
+        """ dict(mean, unrated): the size-weighted mean rating of the rated
+        terms passing (None if none, or they have no size), and the fraction
+        of the size of all terms passing that is unrated
+        """
+        total = self.rated_size + self.unrated_size
+        return dict(mean=self.rated_sum / self.rated_size
+                    if self.rated_size else None,
+                    unrated=self.unrated_size / total if total else 0.)
 
 
 def _convert(value, unit):
@@ -276,14 +304,16 @@ def _rows(groups: dict, labels: dict, unit) -> List[dict]:
     rows = [dict(key=key, label=labels.get(key, key), depth=0,
                  selected=group.selected,
                  size=_size(_convert(group.unfiltered, unit)),
-                 value=_convert(group.value, unit))
+                 value=_convert(group.value, unit),
+                 confidence=group.confidence)
             for key, group in groups.items()]
     rows.sort(key=lambda row: row['size'], reverse=True)
     return rows
 
 
 def _component_rows(terms: List[Term], scalar: str, filters: BudgetFilter,
-                    chart_root: Component, depth: int, unit) -> List[dict]:
+                    chart_root: Component, depth: int, unit,
+                    sizes: dict) -> List[dict]:
     """ Rows for each child of `chart_root` (at path `filters.root`), each
     followed by rows for its own children down to `depth` levels, from
     `terms` below the root. Only plain Components have sources of their own
@@ -301,7 +331,8 @@ def _component_rows(terms: List[Term], scalar: str, filters: BudgetFilter,
         passing = filters.matches(term.keys, skip='component')
         for level in {min(len(path), 1), min(len(path), depth)}:
             groups[path[:level]].include(term.values[scalar], selected,
-                                         passing)
+                                         passing, sizes[id(term)],
+                                         term.rating)
     labels = {path: names[path][0] if path in names
               else path[-1] if path else chart_root.name
               for path in groups}
@@ -373,9 +404,12 @@ def dashboard(obj: Component, scalar: str,
     of (path, name) down to `filters.root`, and charts of rows for each
     groupby. Each chart has a row for every group below the root, whatever
     the other filters, so rows stay put while filtering. Each row is
-    dict(key, label, depth, selected, size, value), in order of their
-    unfiltered size (a float in `units`: the upper limit of limits, else the
-    central value); value is None if nothing in the row passes the filters.
+    dict(key, label, depth, selected, size, value, confidence), in order of
+    their unfiltered size (a float in `units`: the upper limit of limits,
+    else the central value); value is None if nothing in the row passes the
+    filters. confidence is dict(mean, unrated) over the terms in value: the
+    mean of their components' confidence ratings weighted by their sizes
+    (None if none are rated), and the fraction of the size that is unrated.
     Measurements and upper limits are summed together, so a value is only a
     limit if everything in it is. The component rows are described in
     `_component_rows`.
@@ -398,18 +432,21 @@ def _dashboard(obj, scalar, filters, relativeto, unit, groupbys, depth):
 
     root = filters.root
     below = [t for t in terms if t.keys['component'][:len(root)] == root]
+    # where each term is drawn, which is also its weight in the confidence
+    sizes = {id(t): _size(_convert(t.values[scalar], unit)) for t in below}
     charts = {}
     for groupby in groupbys:
         if groupby == 'component':
             charts[groupby] = _component_rows(below, scalar, filters,
-                                              chart_root, depth, unit)
+                                              chart_root, depth, unit, sizes)
             continue
         groups = defaultdict(_Group)
         for term in below:
             key = term.keys[groupby]
             groups[key].include(term.values[scalar],
                                 filters.passes(groupby, key),
-                                filters.matches(term.keys, skip=groupby))
+                                filters.matches(term.keys, skip=groupby),
+                                sizes[id(term)], term.rating)
         charts[groupby] = _rows(groups, {}, unit)
 
     total = _Group()
