@@ -149,6 +149,10 @@
             {%- endcall %}
             <div class="form-text">Specs that belong to this component are created from its summary page.
                 Radon exposure and cosmogenic activation are specs too.</div>
+            {{ formfield(g.object, 'confidence_rating', outerclass='mt-3') }}
+            <div class="form-text">5: this actual part was measured or is precisely known. 3: a close proxy,
+                such as an assay of the same material and vendor but another lot, or a rough mass or location.
+                1: a wild guess. Leave blank if not rated.</div>
         </fieldset>
         {% endif -%}
     </div>

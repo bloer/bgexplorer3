@@ -132,7 +132,8 @@ input{% if open %} type="{{ type }}"{% endif -%}
     {%- elif type == "textarea" -%}
         {{ value }}</textarea>
     {%- elif type == "select" %}
-        {%- if value == '' or value is none %}
+        {#- optional fields keep the blank so a value can be cleared #}
+        {%- if value == '' or value is none or not field.required %}
         <option value="">--</option>
         {% endif -%}
         {%- for option in field.choices %}

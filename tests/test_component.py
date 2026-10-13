@@ -104,3 +104,18 @@ class TestComponent(unittest.TestCase):
             Component(name="c2", location_overrides=[o, LocationOverride(
                 id=o.id, source="U238", location="y")]).save()
 
+
+    def test6_confidence_rating(self):
+        self.assertIsNone(Component(name="c1").confidence_rating)
+        for rating in (None, 1, 3, 5):
+            with self.subTest(rating=rating):
+                Component(name="c1", confidence_rating=rating).validate()
+        for rating in (0, 6, "2.5", "high"):
+            with self.subTest(rating=rating):
+                with self.assertRaises(ValidationError):
+                    Component(name="c1", confidence_rating=rating).validate()
+        c1 = Component(name="c1", confidence_rating=4).save()
+        self.assertEqual(Component.objects.get(name="c1").confidence_rating, 4)
+        self.assertEqual(c1.clone().confidence_rating, 4)
+        self.assertNotIn('confidence_rating',
+                         Component(name="c2").to_mongo())

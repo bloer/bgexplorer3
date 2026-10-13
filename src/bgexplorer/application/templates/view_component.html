@@ -64,6 +64,9 @@
         {% for attr in ['description', 'material', 'notes', 'location'] %}
         <dt class="col-4">{{ attr | title }}</dt><dd class="col-8">{{ g.object[attr] }} </dd>
         {% endfor %}
+        {% if 'children' not in g.object._fields %}
+        <dt class="col-4">Confidence rating</dt><dd class="col-8" title="{{ g.object._fields.confidence_rating.help_text }}">{{ g.object.confidence_rating if g.object.confidence_rating is not none else 'not rated' }}</dd>
+        {% endif %}
         {% for key, val in g.object.extra_metadata.items() %}
         <dt class="col-4">{{ key }}</dt><dd class="col-4">{{ val | urlize }}</dd>
         {% endfor %}
