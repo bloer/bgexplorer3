@@ -165,6 +165,33 @@ class TestSourceTerm(unittest.TestCase):
         expected.update({'a1/c1': 2, 'a2/a1/c1': 2})
         self.assertEqual(counts(), expected)
 
+    def test2_confidence_rating(self):
+        """ SourceTerms copy their leaf component's rating, and follow it """
+        e1 = EmissionSpec(name="e1", sources=[
+            EmissionSource(name="Th232", rate="10 mBq/kg")]).save()
+        c1 = Component(name="c1", mass="2 kg", specs=[e1],
+                       confidence_rating=4).save()
+        c2 = Component(name="c2", mass="2 kg", specs=[e1]).save()
+        a1 = Assembly(name="a1", components=[c1, c2]).save()
+
+        def ratings():
+            return {st.assemblyPathStr: st.confidence_rating
+                    for st in SourceTerm.objects}
+        self.assertEqual(ratings(), {'c1': 4, 'c2': None, 'a1/c1': 4,
+                                     'a1/c2': None})
+
+        c1.reload()
+        c1.confidence_rating = 2
+        c1.save()
+        c2.reload()
+        c2.confidence_rating = 5
+        c2.save()
+        self.assertEqual(ratings(), {'c1': 2, 'c2': 5, 'a1/c1': 2,
+                                     'a1/c2': 5})
+        c1.confidence_rating = None
+        c1.save()
+        self.assertEqual(ratings()['a1/c1'], None)
+
     def test3_hiteffs(self):
         """ Test that queries find HitEfficiencies """
         h1 = HitEfficiency(source="Th232", location="c1 location",

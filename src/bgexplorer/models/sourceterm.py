@@ -4,7 +4,7 @@ from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
                          StringField, BooleanField, MapField, Document,
                          SortedListField, CASCADE, PULL, ReferenceField,
                          EmbeddedDocumentListField, ObjectIdField,
-                         ValidationError)
+                         ValidationError, IntField)
 from .verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedQuerySet, VersionedListField,
                      VersionedEmbeddedDocumentListField)
@@ -54,6 +54,7 @@ class SourceTerm(VersionedDocument):
     componentName = StringField()
     assemblyPathStr = StringField()
     material = StringField()
+    confidence_rating = IntField(choices=[1, 2, 3, 4, 5])
     # make queries against placement path much easier to assemble
     placement_ids = ListField(ObjectIdField())
 
@@ -135,6 +136,7 @@ class SourceTerm(VersionedDocument):
         self.assemblyPathStr = '/'.join([self.assemblyRoot.name] +
                                         [p.name for p in self.assemblyPath])
         self.material = self.component.material
+        self.confidence_rating = self.component.confidence_rating
         # clear cached properties1
         try:
             del self.emissionrate
@@ -199,6 +201,7 @@ class SourceTerm(VersionedDocument):
                            set__componentName=self.component.name,
                            set__assemblyPathStr=self.assemblyPathStr,
                            set__material=self.material,
+                           set__confidence_rating=self.confidence_rating,
                            )
         if not self.hiteffs_auto:
             update_dict['set__hiteffs_auto'] = self.hiteffs_auto
