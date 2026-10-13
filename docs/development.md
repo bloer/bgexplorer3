@@ -54,6 +54,10 @@ Environment variables:
   playwright browser tests (`tests/test_browser.py`), if chromium can't find
   them on the system.
 
+The browser tests use `playwright`, which is part of the `dev` extra. After
+installing it, run `playwright install chromium` to download the browser and
+`sudo playwright install-deps chromium` to install its system libraries.
+
 ## Running a development server
 
 ```sh
