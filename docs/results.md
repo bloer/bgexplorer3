@@ -39,9 +39,24 @@ The budget plots break down one result, chosen with **Result**, four ways:
 - by **isotope**, i.e. source name;
 - by **source category**, e.g. assay, radon, activation.
 
-Values are drawn as red points with 1σ error bars, and upper limits as blue
-lines ending at their 90% upper limit. A row that is a sum of measurements and
-limits is a measurement; it is only a limit if everything in it is.
+Values are drawn as circles with 1σ error bars, and upper limits as triangles
+on lines ending at their 90% upper limit. A row that is a sum of measurements
+and limits is a measurement; it is only a limit if everything in it is.
+
+The colour of a marker is the row's mean [confidence rating](model.md) of its
+components, rounded to the nearest of the five classes 1 to 5 (halves round
+up), with a key above the plots. Dark gray means unrated. The mean is weighted
+by each source term's size, i.e. its value (or its 90% upper limit, for
+limits), over the source terms that pass the filters, so a component that
+contributes little hardly moves it:
+
+    mean = Σ(size × rating) / Σ(size), over the rated source terms
+
+Unrated source terms are left out of the mean, so a row is dark gray only if
+none of it is rated. Hovering shows the exact mean and the fraction of the
+row's size that is unrated, which the colour alone hides. Assemblies average
+over all the components beneath them. Components saved before the rating
+existed count as unrated until they are saved again.
 
 {: .note }
 Error bars and limits use different confidence levels, so a value that

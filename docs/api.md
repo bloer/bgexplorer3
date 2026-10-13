@@ -104,6 +104,11 @@ is JSON:
 `root` drills into the component tree by placement ids. For `component`
 filters, the keys are lists of placement ids.
 
+Each row of `dashboard.json` also has `confidence`: `{"mean": 4.2, "unrated":
+0.1}`, the size-weighted mean confidence rating of the source terms passing the
+filters (`null` if none is rated) and the fraction of their size that is
+unrated. See [Results](results.md).
+
 Values are returned as:
 
 ```json
