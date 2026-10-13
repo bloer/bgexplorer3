@@ -61,6 +61,7 @@ The `1.2(3)` notation and negative values aren't supported yet.
 | Mass, volume, inner and outer surface area, length, width, height | geometry, defaulting to 0. The surface area used for rates is inner + outer by default |
 | Hit Efficiency Location | the `location` to match in the hit efficiency database; blank uses the component's name if not given in a parent Placement. Autocompletes from existing locations |
 | Specs | the radiation emission specs that apply. Opens a search form. |
+| Confidence rating | optional, 1 to 5 (components only): how well known the inputs are, and how closely the assays match this part. 5 is the actual part measured or precisely known; 3 is a close proxy, such as an assay of the same material and vendor but another lot, or a rough mass or location; 1 is a wild guess. Blank means not rated, which is not the same as 1. It is included in the component's JSON on the Export tab and `api/<id>` only when set |
 | Location overrides | send some sources to another location, see [below](#location-overrides) |
 | Purchase info, material purchase info | optional vendor, part number, batch, order, dates… |
 | History | handling records: date, location, duration, worker… |
