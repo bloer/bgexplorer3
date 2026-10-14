@@ -213,7 +213,8 @@ class VersionComparison:
 
 # VersionSettings fields that belong to the version rather than its content
 SETTINGS_IDENTITY_FIELDS = ('_id', 'version_tag', 'editable', 'description',
-                            'lock', 'modified', 'cache_token')
+                            'lock', 'modified', 'cache_token',
+                            'calc_token')
 
 
 def settings_content(version_tag: str) -> dict:

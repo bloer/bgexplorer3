@@ -45,28 +45,46 @@ def get_settings(version_tag: Optional[str] = None, create: bool = True,
         raise KeyError(version_tag) from e
 
 
-def touch(version_tag: str):
+def touch(version_tag: str, terms_only: bool = False):
     """ Mark that data in `version_tag` changed, so any in-memory cache of
-    calculated results for it is invalid
+    calculated results for it is invalid. Unless `terms_only`, the
+    calculation token changes as well, which invalidates the cached values of
+    every SourceTerm. Use `terms_only` only for changes that are reflected in
+    the SourceTerms' own stamps.
     """
-    VersionSettings.objects(version_tag=version_tag).update(
-        set__modified=datetime.datetime.now(), set__cache_token=ObjectId())
+    update = dict(set__modified=datetime.datetime.now(),
+                  set__cache_token=ObjectId())
+    if not terms_only:
+        update['set__calc_token'] = ObjectId()
+    VersionSettings.objects(version_tag=version_tag).update(**update)
+
+
+def _get_token(version_tag: str, field: str) -> Optional[ObjectId]:
+    # read the raw value: mongoengine would fill in a new default for
+    # settings saved before the token existed
+    doc = VersionSettings.objects(version_tag=version_tag)\
+                         .only(field).as_pymongo().first()
+    if doc is None:
+        return None
+    if doc.get(field) is None:
+        touch(version_tag)
+        return _get_token(version_tag, field)
+    return doc[field]
 
 
 def get_cache_token(version_tag: str) -> Optional[ObjectId]:
     """ Return a token that changes whenever data in `version_tag` changes,
     or None if the version has no settings
     """
-    # read the raw value: mongoengine would fill in a new default for
-    # settings saved before cache_token existed
-    doc = VersionSettings.objects(version_tag=version_tag)\
-                         .only('cache_token').as_pymongo().first()
-    if doc is None:
-        return None
-    if doc.get('cache_token') is None:
-        touch(version_tag)
-        return get_cache_token(version_tag)
-    return doc['cache_token']
+    return _get_token(version_tag, 'cache_token')
+
+
+def get_calc_token(version_tag: str) -> Optional[ObjectId]:
+    """ Return a token that changes whenever something other than a
+    SourceTerm changes how the SourceTerms' values are calculated, such as a
+    HitEfficiency. None if the version has no settings
+    """
+    return _get_token(version_tag, 'calc_token')
 
 
 def acquire_lock(version_tag: str, reason: str,
@@ -324,6 +342,9 @@ class VersionSettings(Document):
     modified = DateTimeField(default=datetime.datetime.now)
     # replaced whenever any data in this version changes, see `touch`
     cache_token = ObjectIdField(default=ObjectId)
+    # replaced when SourceTerm values change for reasons other than the
+    # SourceTerms' own content, see `touch`
+    calc_token = ObjectIdField(default=ObjectId)
     editable = BooleanField(required=True, default=True)
     addsources = EmbeddedDocumentListField(AddSource,
                                            default=_default_auto_sources)
@@ -343,7 +364,8 @@ class VersionSettings(Document):
             {'$unset': ['_id', 'lock']},
             {'$set': {'version_tag': newtag,
                       'modified': datetime.datetime.now(),
-                      'cache_token': ObjectId()}},
+                      'cache_token': ObjectId(),
+                      'calc_token': ObjectId()}},
             {'$merge': {'into': VersionSettings.objects._collection.name,
                         'on': 'version_tag',
                         'whenMatched': 'replace'}},
@@ -429,7 +451,12 @@ def post_save(sender, document, **kwargs):
     """
     version_tag = getattr(document, 'active_version', None)
     if version_tag is not None:
-        touch(version_tag)
+        # the SourceTerms they affect are stamped with what they depend on
+        from .component import Component
+        from .emissionspec import EmissionSpec
+        from .sourceterm import SourceTerm
+        touch(version_tag, terms_only=isinstance(
+            document, (Component, EmissionSpec, SourceTerm)))
 
 
 signals.post_save.connect(post_save)

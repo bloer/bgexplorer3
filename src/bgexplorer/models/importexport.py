@@ -15,7 +15,8 @@ from .verdoc import (VersionedDocument, VersionedReferenceField,
                      strip_identity)
 
 # derived fields that `clean` rebuilds
-DERIVED_FIELDS = ('scalars_keys', 'spectra_keys', 'rois', 'cache_token')
+DERIVED_FIELDS = ('scalars_keys', 'spectra_keys', 'rois', 'cache_token',
+                  'calc_token')
 
 
 def iter_json_documents(stream: IO[bytes],

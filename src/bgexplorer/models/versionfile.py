@@ -228,7 +228,7 @@ def import_version(fileobj: IO[bytes], version_tag: str,
     settings.update(version_tag=version_tag, editable=True,
                     description=description,
                     modified=datetime.datetime.now(),
-                    cache_token=ObjectId())
+                    cache_token=ObjectId(), calc_token=ObjectId())
     try:
         VersionSettings._from_son(dict(settings)).validate(clean=False)
     except (ValidationError, InvalidDocumentError, ValueError, TypeError,

@@ -30,7 +30,7 @@ SETTINGS_FIELDS = ('description', 'addsources', 'hiteffdbconfig')
 HITEFFDBCONFIG_FIELDS = ('rois', 'display_scalars', 'display_spectra',
                          'extra_columns')
 # fields that are never returned
-HIDDEN_FIELDS = ('_id', '_cls', 'cache_token')
+HIDDEN_FIELDS = ('_id', '_cls', 'cache_token', 'calc_token')
 
 
 class APIError(Exception):

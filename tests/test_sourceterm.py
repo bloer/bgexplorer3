@@ -463,6 +463,67 @@ class TestSourceTerm(unittest.TestCase):
         clone = settings.clone('other')
         self.assertNotEqual(settings.cache_token, clone.cache_token)
 
+    def test6_stamps(self):
+        """ A SourceTerm's stamp only changes when its content does """
+        VersionSettings.drop_collection()
+        settings = get_settings()
+        HitEfficiency(source="Co60", location="loc", scalars=dict(
+            v1=AsymmetricUncertainty(0.1, 0.01)*units('dru/mBq'))).save()
+        e1 = spec_of(EmissionSource(name="Co60", rate="10 +- 1 mBq/kg"))
+        c = Component(name="c", mass="2 kg", location="loc",
+                      specs=[e1]).save()
+        a = Assembly(name="a", components=[c]).save()
+
+        def stamps():
+            return {st.assemblyPathStr: st.stamp for st in SourceTerm.objects}
+        before = stamps()
+        self.assertEqual(len(before), 2)
+        self.assertEqual(len(set(before.values())), 2)
+        self.assertTrue(all(before.values()))
+        # saved and recalculated values agree
+        for st in SourceTerm.objects:
+            self.assertEqual(st.stamp, st.content_stamp())
+
+        def tokens():
+            settings.reload()
+            return settings.cache_token, settings.calc_token
+        tokens_before = tokens()
+        # saving again changes nothing about the terms, nor the stamps
+        c.reload()
+        c.save()
+        self.assertEqual(stamps(), before)
+        # edits to components change the cache token but not the
+        # calculation token, since the stamps cover them
+        self.assertNotEqual(tokens()[0], tokens_before[0])
+        self.assertEqual(tokens()[1], tokens_before[1])
+
+        c.confidence_rating = 3
+        c.save()
+        after = stamps()
+        self.assertNotEqual(after['c'], before['c'])
+        self.assertNotEqual(after['a/c'], before['a/c'])
+        self.assertEqual(
+            {st.assemblyPathStr: st.stamp == st.content_stamp()
+             for st in SourceTerm.objects}, {'c': True, 'a/c': True})
+
+        a.reload()
+        a.children[0].weight = 2
+        a.save()
+        weighted = stamps()
+        self.assertEqual(weighted['c'], after['c'])
+        self.assertNotEqual(weighted['a/c'], after['a/c'])
+
+        # HitEfficiencies change the calculation token, and the stamps of
+        # the SourceTerms using them
+        h = HitEfficiency.objects.get(source="Co60")
+        calc = tokens()[1]
+        h.scalars = dict(v1=AsymmetricUncertainty(0.2, 0.01)*units('dru/mBq'))
+        h.save()
+        self.assertNotEqual(tokens()[1], calc)
+        self.assertEqual(stamps(), weighted)
+        h.delete()
+        self.assertNotEqual(stamps()['c'], weighted['c'])
+
 
 class TestLocationOverride(unittest.TestCase):
     maxDiff = None

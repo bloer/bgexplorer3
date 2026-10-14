@@ -1,5 +1,6 @@
 from functools import cached_property, reduce
 import operator
+import hashlib
 from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
                          StringField, BooleanField, MapField, Document,
                          SortedListField, CASCADE, PULL, ReferenceField,
@@ -17,7 +18,7 @@ from .asymmetric import AsymmetricUncertainty, LinearExpression
 from .histogram import Histogram
 from .hiteff import HitEfficiency
 from .isotope import concentration_to_rate
-from .common import units, addnone, multnone
+from .common import units, addnone, multnone, Quantity
 from .asymmetric import sum_values
 from . import settings
 from typing import List, Optional, Union, Dict, Tuple, Iterable
@@ -58,6 +59,9 @@ class SourceTerm(VersionedDocument):
     confidence_rating = IntField(choices=[1, 2, 3, 4, 5])
     # make queries against placement path much easier to assemble
     placement_ids = ListField(ObjectIdField())
+    # identifies everything that determines this term's calculated values
+    # other than the HitEfficiencies' content, see `content_stamp`
+    stamp = StringField()
 
     meta = {'indexes': ['assemblyPath', 'source.id', 'hiteffs',
                         'assemblyPath.component', 'placement_ids']}
@@ -133,6 +137,25 @@ class SourceTerm(VersionedDocument):
                 (self.location_origin or '').startswith('override'))
 
 
+    def content_stamp(self) -> str:
+        """ A digest of everything about this SourceTerm that its values
+        and keys in a budget depend on, besides the content of its
+        HitEfficiencies. The same for SourceTerms with the same content
+        """
+        # the stored _id, which is what a reference that isn't dereferenced
+        # yet has (ref_id gives original_id for documents)
+        hiteffs = [str(h.id) for h in self._data.get('hiteffs') or []]
+        multiplier = self.rate_multiplier
+        if isinstance(multiplier, Quantity):
+            multiplier = (float(multiplier.m), str(multiplier.u))
+        else:
+            multiplier = (float(multiplier), '')
+        content = (self.source.to_mongo(), float(self.weight), multiplier,
+                   self.material,
+                   self.componentName, self.confidence_rating,
+                   [str(pid) for pid in self.placement_ids], hiteffs)
+        return hashlib.sha1(repr(content).encode()).hexdigest()[:20]
+
     def clean(self):
         super().clean()
         self.clear_results()
@@ -154,6 +177,7 @@ class SourceTerm(VersionedDocument):
             pass
         self.livetimes = [hit.get_livetime(self.emissionrate)
                           for hit in self.hiteffs]
+        self.stamp = self.content_stamp()
 
     @property
     def hiteffs_query(self) -> VersionedQuerySet:
@@ -222,6 +246,10 @@ class SourceTerm(VersionedDocument):
         st.clear_results()
         if update_hiteffs and st.hiteffs_auto:
             st.find_hiteffs()
+        # find_hiteffs stamps it when it changes anything
+        if st.stamp != (stamp := st.content_stamp()):
+            st.update(set__stamp=stamp)
+            st.stamp = stamp
         return st
 
     @classmethod
