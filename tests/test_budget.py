@@ -1,10 +1,13 @@
 """ Filtered budget breakdowns for the results dashboard """
 import unittest
+from unittest import mock
 from bgexplorer.models.budget import (BudgetFilter, dashboard, NO_CATEGORY,
                                       table, term_values)
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
                                             SourceCategory)
+from bgexplorer.models.basecalc import ScalarCalculator
+from bgexplorer.models.sourceterm import SourceTerm, clear_results_cache
 from bgexplorer.models.common import DimensionalityError, units as unitreg
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import get_settings, HitEffConfig
@@ -312,6 +315,52 @@ class TestDashboard(AppTestCase):
         self.assertIsNot(term_values(self.a2), terms)
         self.assertIsNot(dashboard(self.a2, 'v1', BudgetFilter.from_json(text)),
                          result)
+
+    def recalculated(self, **kwargs):
+        """ The Terms of a2 and how many SourceTerms had to be calculated """
+        with mock.patch.object(ScalarCalculator, 'calculate', autospec=True,
+                               side_effect=ScalarCalculator.calculate
+                               ) as calculate:
+            return term_values(self.a2, **kwargs), calculate.call_count
+
+    def test_unchanged_terms_reused(self):
+        terms, count = self.recalculated()
+        self.assertEqual(count, 5)
+        self.assertEqual(self.recalculated()[1], 0)
+        # editing one component only recalculates its own SourceTerms
+        self.c3.confidence_rating = 2
+        self.c3.save()
+        edited, count = self.recalculated()
+        self.assertEqual(count, 1)
+        self.assertIsNot(edited, terms)
+        # as does a change in a rate
+        self.e2.reload()
+        self.e2.sources[0].rate = '2 +- 0.5 mBq/kg'
+        self.e2.save()
+        self.assertEqual(self.recalculated()[1], 1)
+        # the result is the same as calculating everything
+        reused = dashboard(self.a2, 'v1')
+        clear_results_cache()
+        self.assertEqual(self.recalculated()[1], 5)
+        fresh = dashboard(self.a2, 'v1')
+        self.assertSame(reused['total'], fresh['total'])
+        self.assertEqual(reused['charts']['component'][-1]['key'],
+                         fresh['charts']['component'][-1]['key'])
+        # HitEfficiencies could change any of them
+        clear_results_cache()
+        term_values(self.a2)
+        self.replace_hiteff('c3', v1='0.7 +- 0.05 dru/mBq')
+        self.assertEqual(self.recalculated()[1], 5)
+
+    def test_unstamped_terms(self):
+        """ SourceTerms from before there were stamps are stamped when used """
+        SourceTerm._get_collection().update_many({}, {'$unset': {'stamp': ''}})
+        expected = dashboard(self.a2, 'v1')
+        clear_results_cache()
+        self.assertEqual(self.recalculated()[1], 5)
+        self.assertEqual(SourceTerm.objects(stamp__exists=True).count(), 5)
+        self.assertEqual(self.recalculated()[1], 0)
+        self.assertSame(dashboard(self.a2, 'v1')['total'], expected['total'])
 
     def replace_hiteff(self, location, **scalars):
         HitEfficiency.objects.get(source='Th232', location=location).delete()

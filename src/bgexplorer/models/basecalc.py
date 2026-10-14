@@ -7,7 +7,7 @@ product of AsymmetricUncertainties. Pint is used again to convert sums to the
 units they are displayed in (see `conversion_factor`).
 """
 import logging
-from typing import Dict, Optional
+from typing import Dict, NamedTuple, Optional
 from .common import units as unitreg, DimensionalityError, Quantity
 from .asymmetric import sum_values
 from .hiteff import HitEfficiency
@@ -56,24 +56,59 @@ def _split(q):
     return q, _DIMENSIONLESS
 
 
+class TermScalars(NamedTuple):
+    """ The scalar results of one SourceTerm: `values` are magnitudes in the
+    SI base units in `bases`, and `defaults` has a readable unit for each.
+    `mismatched` are scalars that the SourceTerm's own HitEfficiencies give
+    different dimensions
+    """
+    values: dict
+    bases: dict
+    defaults: dict
+    mismatched: frozenset = frozenset()
+
+
+class UnitTracker:
+    """ Combines the units of the scalars of many SourceTerms. The base unit
+    of each result is in `units`. If results of the same name have different
+    dimensions, that name is in `mismatched` and its values can't be added
+    up. `default_units` has a readable unit for each name, from the first
+    SourceTerm that had it.
+    """
+    def __init__(self):
+        self.units = {}
+        self.default_units = {}
+        self.mismatched = set()
+
+    def add(self, scalars: TermScalars) -> None:
+        units = self.units
+        self.mismatched.update(scalars.mismatched)
+        for key, base in scalars.bases.items():
+            if units.setdefault(key, base) != base:
+                self.mismatched.add(key)
+            if key not in self.default_units:
+                self.default_units[key] = scalars.defaults[key]
+
+
 class ScalarCalculator:
     """ Calculates the scalars and ROIs of SourceTerms as plain magnitudes in
     SI base units, given the HitEfficiencies `hiteffs` they refer to (see
     `load_hiteffs`). One calculator is meant for a batch of SourceTerms, and
     is not thread safe.
-
-    The base unit of each result is in `units`. If results of the same name
-    have different dimensions, that name is in `mismatched` and its values
-    can't be added up. `default_units` has a readable unit for each name, from
-    the first SourceTerm that had it.
     """
     def __init__(self, hiteffs: Dict):
         self.hiteffs = hiteffs
-        self.units = {}
-        self.default_units = {}
-        self.mismatched = set()
         self._hiteff_scalars = {}
         self._compatible = {}
+        self._defaults = {}
+
+    def _default_unit(self, unit, rate_unit):
+        try:
+            return self._defaults[unit, rate_unit]
+        except KeyError:
+            default = unitreg.Quantity(1., unit * rate_unit
+                                       ).to_reduced_units().u
+            return self._defaults.setdefault((unit, rate_unit), default)
 
     def _scalars(self, hiteff: HitEfficiency) -> list:
         """ (name, magnitude, unit, base unit) of each of `hiteff`'s scalars
@@ -124,12 +159,15 @@ class ScalarCalculator:
         factor, base = base_units(unit)
         return m * (scale * factor), unit, base
 
-    def calculate(self, sourceterm: SourceTerm) -> Optional[dict]:
+    def calculate(self, sourceterm: SourceTerm) -> Optional[TermScalars]:
         """ Multiply the sourceterm's emission rate by each of its hiteffs,
-        which are looked up in the `hiteffs` this was created with. Returns a
-        dict of the sum of each scalar, or None if there are no hiteffs
+        which are looked up in the `hiteffs` this was created with. The
+        values are the sum of each scalar. None if there are no hiteffs
         """
         parts = {}
+        bases = {}
+        defaults = {}
+        mismatched = set()
         rate = None
         found = False
         for ref in sourceterm._data.get('hiteffs') or []:
@@ -149,12 +187,13 @@ class ScalarCalculator:
                 if rate is None:
                     continue
                 product = _product(base, rate_base)
-                if self.units.setdefault(key, product) != product:
-                    self.mismatched.add(key)
-                if key not in self.default_units:
-                    self.default_units[key] = unitreg.Quantity(
-                        1., unit * rate_unit).to_reduced_units().u
+                if bases.setdefault(key, product) != product:
+                    mismatched.add(key)
+                if key not in defaults:
+                    defaults[key] = self._default_unit(unit, rate_unit)
                 parts.setdefault(key, []).append(m * rate_m)
         if not found:
             return None
-        return {key: sum_values(values) for key, values in parts.items()}
+        return TermScalars({key: sum_values(values)
+                            for key, values in parts.items()}, bases, defaults,
+                           frozenset(mismatched))

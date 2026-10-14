@@ -7,15 +7,17 @@ import json
 from collections import defaultdict
 import numpy as np
 from typing import List, NamedTuple, Optional, Tuple
+from bson import ObjectId
 from .component import Component, Assembly
 from .sourceterm import (CalculatedResults, SourceTerm, ResultsCache,
                          find_sourceterms, load_hiteffs, _cache_key, _cached,
                          _ref_id)
-from .settings import get_settings
+from .settings import get_settings, get_calc_token
 from .histogram import Histogram
 from .common import units as unitreg, DimensionalityError
 from .asymmetric import sum_values
-from .basecalc import ScalarCalculator, conversion_factor
+from .basecalc import (ScalarCalculator, TermScalars, UnitTracker,
+                       conversion_factor)
 
 GROUPBY = ('component', 'isotope', 'material', 'category')
 NO_MATERIAL = '(no material)'
@@ -53,7 +55,7 @@ class Term(NamedTuple):
     groupby. The component key is the path of placement ids (as strings)
     from the object being broken down
     """
-    sourceterm: SourceTerm
+    sourceterm_id: ObjectId
     values: dict
     keys: dict
     # the confidence rating of the component the SourceTerm belongs to
@@ -72,15 +74,88 @@ class Terms(list):
     mismatched: frozenset = frozenset()
 
 
-def _component_path(st: SourceTerm, child_ids: set) -> Tuple[str, ...]:
-    """ The placement ids in `st`'s path below the object whose children's
-    placement ids are `child_ids`. Empty for the object's own sources
+def _component_path(placement_ids, child_ids: set) -> Tuple[str, ...]:
+    """ The placement ids (as strings) in a SourceTerm's path below the object
+    whose children's placement ids are `child_ids`. Empty for the object's own
+    sources
     """
-    pids = [str(pid) for pid in st.placement_ids or []]
+    pids = [str(pid) for pid in placement_ids or []]
     for i, pid in enumerate(pids):
         if pid in child_ids:
             return tuple(pids[i:])
     return ()
+
+
+class _TermEntry(NamedTuple):
+    """ What is kept of a SourceTerm between calculations: its scalars, and
+    the parts of its keys that don't depend on the object being broken down
+    """
+    sourceterm_id: ObjectId
+    scalars: Optional[TermScalars]
+    placement_ids: tuple
+    isotope: str
+    material: str
+    category: str
+    rating: Optional[int]
+
+
+# calculated scalars of single SourceTerms, by (id, stamp, calc token). The
+# stamp changes when the SourceTerm does, and the version's calc token when
+# anything else that the values depend on does, so entries are never stale
+# and the terms that didn't change are reused after an edit.
+_term_cache = ResultsCache(60000)
+# loading this many SourceTerms at once by id
+_LOAD_CHUNK = 2000
+
+
+def _term_entry(st: SourceTerm, scalars: Optional[TermScalars]) -> _TermEntry:
+    category = st.source.category
+    return _TermEntry(
+        st.id, scalars, tuple(str(pid) for pid in st.placement_ids or []),
+        st.source.name,
+        # a component without a material is listed by name
+        st.material or st.componentName or NO_MATERIAL,
+        category.value if category else NO_CATEGORY, st.confidence_rating)
+
+
+def _scalar_entries(query, token) -> list:
+    """ The _TermEntry of each SourceTerm in `query`, in order, loading and
+    calculating only those that aren't in the cache
+    """
+    stored = [(doc['_id'], doc.get('stamp')) for doc in
+              query.only('stamp').as_pymongo()]
+    cached = _term_cache.get_many((_id, stamp, token)
+                                  for _id, stamp in stored if stamp)
+    missing = [_id for _id, stamp in stored
+               if not stamp or (_id, stamp, token) not in cached]
+    # these are large and not needed here
+    query = query.exclude('assemblyPath', 'livetimes', 'assemblyPathStr')
+    if len(missing) == len(stored):
+        batches = [list(query)]
+    else:
+        batches = (list(query(id__in=missing[i:i + _LOAD_CHUNK]))
+                   for i in range(0, len(missing), _LOAD_CHUNK))
+    entries = {}
+    for sourceterms in batches:
+        calculator = ScalarCalculator(load_hiteffs(sourceterms, spectra=False))
+        new = {}
+        for st in sourceterms:
+            stamp = st.stamp
+            if not stamp:
+                # saved before SourceTerms had stamps
+                stamp = st.content_stamp()
+                SourceTerm.objects(id=st.id).update(set__stamp=stamp)
+            entry = _term_entry(st, calculator.calculate(st))
+            entries[st.id] = entry
+            new[st.id, stamp, token] = entry
+        _term_cache.put_many(new)
+    result = []
+    for _id, stamp in stored:
+        entry = cached.get((_id, stamp, token)) or entries.get(_id)
+        # a SourceTerm deleted since the ids were read is left out
+        if entry is not None:
+            result.append(entry)
+    return result
 
 
 def term_values(obj: Component, relativeto: Optional[Assembly] = None,
@@ -88,43 +163,59 @@ def term_values(obj: Component, relativeto: Optional[Assembly] = None,
     """ The scalar values (or if `spectra`, the spectra) of each SourceTerm
     of `obj` (optionally only as placed in `relativeto`) that has any. Scalars
     are in SI base units, see `Terms`. Kept in memory until any data in the
-    version changes, and shared, so must not be modified
+    version changes, and shared, so must not be modified. When it does, the
+    scalars of the SourceTerms that didn't change are reused.
     """
-    def calculate():
+    def exclude(query):
         # these are large and not needed here
-        sourceterms = list(find_sourceterms(obj, relativeto).exclude(
-            'assemblyPath', 'livetimes', 'assemblyPathStr'))
-        hiteffs = load_hiteffs(sourceterms, spectra=spectra)
+        return query.exclude('assemblyPath', 'livetimes', 'assemblyPathStr')
+
+    def calculate_spectra():
+        sourceterms = list(exclude(find_sourceterms(obj, relativeto)))
+        hiteffs = load_hiteffs(sourceterms, spectra=True)
         child_ids = {str(p.id) for p in getattr(obj, 'children', None) or []}
         terms = Terms()
-        calculator = None if spectra else ScalarCalculator(hiteffs)
         for st in sourceterms:
-            if spectra:
-                part = CalculatedResults._calculate(st, hiteffs, spectra=True)
-                values = (part or ({}, {}))[1]
-            else:
-                values = calculator.calculate(st) or {}
-            values = {name: value for name, value in values.items()
-                      if value is not None
-                      and isinstance(value, Histogram) == spectra}
+            part = CalculatedResults._calculate(st, hiteffs, spectra=True)
+            values = {name: value for name, value in (part or ({}, {}))[1]
+                      .items() if isinstance(value, Histogram)}
             if not values:
                 continue
             category = st.source.category
-            keys = dict(component=_component_path(st, child_ids),
+            keys = dict(component=_component_path(st.placement_ids, child_ids),
                         isotope=st.source.name,
-                        # a component without a material is listed by name
                         material=(st.material or st.componentName
                                   or NO_MATERIAL),
                         category=category.value if category else NO_CATEGORY)
-            terms.append(Term(st, values, keys, st.confidence_rating))
-        if calculator:
-            terms.units = calculator.units
-            terms.default_units = calculator.default_units
-            terms.mismatched = frozenset(calculator.mismatched)
+            terms.append(Term(st.id, values, keys, st.confidence_rating))
+        return terms
+
+    def calculate_scalars():
+        child_ids = {str(p.id) for p in getattr(obj, 'children', None) or []}
+        token = get_calc_token(obj.active_version)
+        entries = _scalar_entries(find_sourceterms(obj, relativeto), token)
+        terms = Terms()
+        tracker = UnitTracker()
+        for entry in entries:
+            if entry.scalars is None:
+                continue
+            tracker.add(entry.scalars)
+            values = {name: value for name, value in
+                      entry.scalars.values.items() if value is not None}
+            if not values:
+                continue
+            pids = entry.placement_ids
+            keys = dict(component=_component_path(pids, child_ids),
+                        isotope=entry.isotope, material=entry.material,
+                        category=entry.category)
+            terms.append(Term(entry.sourceterm_id, values, keys, entry.rating))
+        terms.units = tracker.units
+        terms.default_units = tracker.default_units
+        terms.mismatched = frozenset(tracker.mismatched)
         return terms
     key = _cache_key(obj, 'spectra' if spectra else 'terms', _ref_id(obj),
                      relativeto and _ref_id(relativeto))
-    return _cached(key, calculate)
+    return _cached(key, calculate_spectra if spectra else calculate_scalars)
 
 
 class BudgetFilter:
@@ -607,7 +698,7 @@ def _spectrum_sizes(obj, relativeto, name: str) -> dict:
     Cached like term_values
     """
     def calculate():
-        return {t.sourceterm.id: _spectrum_size(t.values[name])
+        return {t.sourceterm_id: _spectrum_size(t.values[name])
                 for t in term_values(obj, relativeto, spectra=True)
                 if name in t.values}
     return _cached(_cache_key(obj, 'spectrum sizes', _ref_id(obj),
@@ -662,7 +753,7 @@ def _spectrum_breakdown(obj, name, filters, relativeto, groupby, top):
     count = 0
     for term in terms:
         below = term.keys['component'][:len(root)] == root
-        size = term_sizes.get(term.sourceterm.id, 0.)
+        size = term_sizes.get(term.sourceterm_id, 0.)
         if groupby and below:
             sizes[group_key(term)] += size
         if not filters.matches(term.keys):

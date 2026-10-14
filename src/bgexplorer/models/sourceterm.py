@@ -625,6 +625,28 @@ class ResultsCache:
                 del self._flights[key]
             flight.done.set()
 
+    def get_many(self, keys: Iterable) -> dict:
+        """ The cached results of those of `keys` that have any, without
+        calculating the rest
+        """
+        found = {}
+        with self._lock:
+            for key in keys:
+                result = self._entries.get(key, _MISSING)
+                if result is not _MISSING:
+                    self._entries.move_to_end(key)
+                    found[key] = result
+        return found
+
+    def put_many(self, items: Dict) -> None:
+        """ Cache several results at once """
+        with self._lock:
+            self._entries.update(items)
+            for key in items:
+                self._entries.move_to_end(key)
+            while len(self._entries) > self.size:
+                self._entries.popitem(last=False)
+
     def clear(self):
         with self._lock:
             self._entries.clear()
