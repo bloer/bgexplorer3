@@ -69,14 +69,23 @@ class SourceTerm(VersionedDocument):
         except IndexError:
             return self.assemblyRoot
 
-    @cached_property
-    def emissionrate(self):
-        if self.source.rate is None:
-            return None
+    @property
+    def unweighted_rate(self):
+        """ The source's rate, in specific activity if it was a concentration,
+        before the weight and rate multiplier are applied. None if it has none
+        """
         rate = self.source.rate
         # convert ppb-like units to specific activity
-        if self.source.multiplier is Multiplier.mass and rate.dimensionless:
+        if (rate is not None and self.source.multiplier is Multiplier.mass
+                and rate.dimensionless):
             rate = concentration_to_rate(self.source.name, rate)
+        return rate
+
+    @cached_property
+    def emissionrate(self):
+        rate = self.unweighted_rate
+        if rate is None:
+            return None
         return rate * self.weight * self.rate_multiplier
 
 

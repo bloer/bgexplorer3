@@ -5,6 +5,7 @@ from bgexplorer.models.budget import (BudgetFilter, dashboard, NO_CATEGORY,
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
                                             SourceCategory)
+from bgexplorer.models.common import DimensionalityError, units as unitreg
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import get_settings, HitEffConfig
 from bgexplorer.models.sourceterm import CalculatedResults, find_sourceterms
@@ -271,7 +272,7 @@ class TestDashboard(AppTestCase):
         f = BudgetFilter(dict(isotope=[('K40', True)]))
         isotopes = {row['key']: row for row in
                     dashboard(self.a2, 'v1', f)['charts']['isotope']}
-        self.assertEqual(isotopes['Th232']['confidence']['mean'],
+        self.assertAlmostEqual(isotopes['Th232']['confidence']['mean'],
                          (4 * 5 + 3 * 2) / 7)
 
     def test_errors(self):
@@ -311,6 +312,42 @@ class TestDashboard(AppTestCase):
         self.assertIsNot(term_values(self.a2), terms)
         self.assertIsNot(dashboard(self.a2, 'v1', BudgetFilter.from_json(text)),
                          result)
+
+    def replace_hiteff(self, location, **scalars):
+        HitEfficiency.objects.get(source='Th232', location=location).delete()
+        HitEfficiency(source='Th232', location=location,
+                      scalars=scalars).save()
+
+    def test_mixed_units(self):
+        """ Results are summed in base units whatever their units were """
+        expected = dashboard(self.a2, 'v1')
+        self.replace_hiteff('c3', v1='500 +- 50 dru/Bq')
+        result = dashboard(self.a2, 'v1')
+        self.assertIsNot(result, expected)
+        self.assertEqual(result['units'], expected['units'])
+        self.assertSame(result['total'], expected['total'])
+        for new, old in zip(result['charts']['component'],
+                            expected['charts']['component']):
+            self.assertSame(new['value'], old['value'])
+        self.assertSame(dashboard(self.a2, 'v1', unit='mdru')['total'],
+                        expected['total'])
+        with self.assertRaises(DimensionalityError):
+            dashboard(self.a2, 'v1', unit='kg')
+
+    def test_mismatched_units(self):
+        """ Only the scalars with inconsistent dimensions fail """
+        self.replace_hiteff('c1', v1='0.1 +- 0.01 dru/mBq',
+                            other='1 +- 0.1 dru/mBq')
+        self.replace_hiteff('c3', v1='0.5 +- 0.05 dru/mBq',
+                            other='1 +- 0.1 dru/mBq')
+        # the display unit check rejects this, so go around it
+        hiteff = HitEfficiency.objects.get(source='Th232', location='c3')
+        hiteff.scalars['other'] = unitreg.Quantity(
+            hiteff.scalars['other'].m, '1/mBq')
+        hiteff.save(validate=False)
+        dashboard(self.a2, 'v1')
+        with self.assertRaises(DimensionalityError):
+            dashboard(self.a2, 'other')
 
     def show_columns(self):
         settings = get_settings('main')

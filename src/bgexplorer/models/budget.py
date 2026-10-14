@@ -13,8 +13,9 @@ from .sourceterm import (CalculatedResults, SourceTerm, ResultsCache,
                          _ref_id)
 from .settings import get_settings
 from .histogram import Histogram
-from .common import units as unitreg
+from .common import units as unitreg, DimensionalityError
 from .asymmetric import sum_values
+from .basecalc import ScalarCalculator, conversion_factor
 
 GROUPBY = ('component', 'isotope', 'material', 'category')
 NO_MATERIAL = '(no material)'
@@ -59,6 +60,18 @@ class Term(NamedTuple):
     rating: Optional[int] = None
 
 
+class Terms(list):
+    """ The Terms of a calculation. Scalar values are plain
+    AsymmetricUncertainties in SI base units (see basecalc), so `units` has
+    each scalar's base unit and `default_units` a readable one to display it
+    in. `mismatched` are scalars whose terms have different dimensions.
+    Spectra are Histograms with their own units
+    """
+    units: dict = {}
+    default_units: dict = {}
+    mismatched: frozenset = frozenset()
+
+
 def _component_path(st: SourceTerm, child_ids: set) -> Tuple[str, ...]:
     """ The placement ids in `st`'s path below the object whose children's
     placement ids are `child_ids`. Empty for the object's own sources
@@ -71,11 +84,11 @@ def _component_path(st: SourceTerm, child_ids: set) -> Tuple[str, ...]:
 
 
 def term_values(obj: Component, relativeto: Optional[Assembly] = None,
-                spectra: bool = False) -> List[Term]:
+                spectra: bool = False) -> Terms:
     """ The scalar values (or if `spectra`, the spectra) of each SourceTerm
-    of `obj` (optionally only as placed in `relativeto`) that has any. Kept
-    in memory until any data in the version changes, and shared, so must
-    not be modified
+    of `obj` (optionally only as placed in `relativeto`) that has any. Scalars
+    are in SI base units, see `Terms`. Kept in memory until any data in the
+    version changes, and shared, so must not be modified
     """
     def calculate():
         # these are large and not needed here
@@ -83,10 +96,14 @@ def term_values(obj: Component, relativeto: Optional[Assembly] = None,
             'assemblyPath', 'livetimes', 'assemblyPathStr'))
         hiteffs = load_hiteffs(sourceterms, spectra=spectra)
         child_ids = {str(p.id) for p in getattr(obj, 'children', None) or []}
-        terms = []
+        terms = Terms()
+        calculator = None if spectra else ScalarCalculator(hiteffs)
         for st in sourceterms:
-            part = CalculatedResults._calculate(st, hiteffs, spectra=spectra)
-            values = (part or ({}, {}))[1 if spectra else 0]
+            if spectra:
+                part = CalculatedResults._calculate(st, hiteffs, spectra=True)
+                values = (part or ({}, {}))[1]
+            else:
+                values = calculator.calculate(st) or {}
             values = {name: value for name, value in values.items()
                       if value is not None
                       and isinstance(value, Histogram) == spectra}
@@ -100,6 +117,10 @@ def term_values(obj: Component, relativeto: Optional[Assembly] = None,
                                   or NO_MATERIAL),
                         category=category.value if category else NO_CATEGORY)
             terms.append(Term(st, values, keys, st.confidence_rating))
+        if calculator:
+            terms.units = calculator.units
+            terms.default_units = calculator.default_units
+            terms.mismatched = frozenset(calculator.mismatched)
         return terms
     key = _cache_key(obj, 'spectra' if spectra else 'terms', _ref_id(obj),
                      relativeto and _ref_id(relativeto))
@@ -290,29 +311,52 @@ class _Group:
                     unrated=self.unrated_size / total if total else 0.)
 
 
-def _convert(value, unit):
-    return None if value is None else value.to_reduced_units().to(unit)
-
-
-def _size(value) -> float:
-    """ Where a value is drawn: its upper limit, or else its central value
+class _Conversion:
+    """ Converts sums of a scalar, which are in base units, to the unit to
+    display them in. Raises DimensionalityError if the unit is wrong, or the
+    terms' scalars have different dimensions
     """
-    if value is None:
-        return 0.
-    m = value.m
-    return float(m.get_upper_limit(0.9) if m.isupperlimit()
-                 else m.nominal_value)
+    def __init__(self, terms: Terms, version: str, scalar: str, unit):
+        if isinstance(unit, str):
+            unit = unitreg.Unit(unit) if unit else None
+        unit = unit or display_unit(version, scalar)
+        if unit is None:
+            unit = terms.default_units.get(scalar)
+        self.unit = unit
+        self.factor = 1.
+        if scalar in terms.units:
+            if scalar in terms.mismatched:
+                raise DimensionalityError(
+                    terms.units[scalar], terms.units[scalar],
+                    extra_msg=f": results named '{scalar}' have different "
+                              f"units")
+            self.factor = conversion_factor(terms.units[scalar], unit)
+
+    def quantity(self, value):
+        """ `value` (an AsymmetricUncertainty or None) as a Quantity """
+        if value is None:
+            return None
+        return unitreg.Quantity(value * self.factor, self.unit)
+
+    def size(self, value) -> float:
+        """ Where a value is drawn: its upper limit, or else its central
+        value, in the unit
+        """
+        if value is None:
+            return 0.
+        return float(value.get_upper_limit(0.9) if value.isupperlimit()
+                     else value.nominal_value) * self.factor
 
 
-def _rows(groups: dict, labels: dict, unit) -> List[dict]:
+def _rows(groups: dict, labels: dict, conv: _Conversion) -> List[dict]:
     """ Rows of converted sums from `groups` keyed by group key, largest
     unfiltered size first, so filtering doesn't reorder them. Rows with
     nothing passing the filters have value None
     """
     rows = [dict(key=key, label=labels.get(key, key), depth=0,
                  selected=group.selected,
-                 size=_size(_convert(group.unfiltered, unit)),
-                 value=_convert(group.value, unit),
+                 size=conv.size(group.unfiltered),
+                 value=conv.quantity(group.value),
                  confidence=group.confidence)
             for key, group in groups.items()]
     rows.sort(key=lambda row: row['size'], reverse=True)
@@ -320,7 +364,7 @@ def _rows(groups: dict, labels: dict, unit) -> List[dict]:
 
 
 def _component_rows(terms: List[Term], scalar: str, filters: BudgetFilter,
-                    chart_root: Component, depth: int, unit,
+                    chart_root: Component, depth: int, conv: _Conversion,
                     sizes: dict) -> List[dict]:
     """ Rows for each child of `chart_root` (at path `filters.root`), each
     followed by rows for its own children down to `depth` levels, from
@@ -344,7 +388,7 @@ def _component_rows(terms: List[Term], scalar: str, filters: BudgetFilter,
     labels = {path: names[path][0] if path in names
               else path[-1] if path else chart_root.name
               for path in groups}
-    rows = _rows(groups, labels, unit)
+    rows = _rows(groups, labels, conv)
     for row in rows:
         row['children'] = row['key'] in names and names[row['key']][1]
     # children after their parent, and full paths from obj as keys
@@ -361,15 +405,6 @@ def _component_rows(terms: List[Term], scalar: str, filters: BudgetFilter,
     for row in ordered:
         row['key'] = root + row['key'] if row['key'] else None
     return ordered
-
-
-def _unit(terms: List[Term], version: str, scalar: str, unit):
-    if isinstance(unit, str):
-        unit = unitreg.Unit(unit) if unit else None
-    unit = unit or display_unit(version, scalar)
-    if unit is None and terms:
-        unit = terms[0].values[scalar].to_reduced_units().u
-    return unit
 
 
 def _check_args(obj: Component, scalar: str, groupbys):
@@ -435,18 +470,20 @@ def dashboard(obj: Component, scalar: str,
 def _dashboard(obj, scalar, filters, relativeto, unit, groupbys, depth):
     _check_args(obj, scalar, groupbys)
     chart_root, breadcrumb = _resolve_root(obj, filters.root)
-    terms = [t for t in term_values(obj, relativeto) if scalar in t.values]
-    unit = _unit(terms, obj.active_version, scalar, unit)
+    all_terms = term_values(obj, relativeto)
+    terms = [t for t in all_terms if scalar in t.values]
+    conv = _Conversion(all_terms, obj.active_version, scalar, unit)
+    unit = conv.unit
 
     root = filters.root
     below = [t for t in terms if t.keys['component'][:len(root)] == root]
     # where each term is drawn, which is also its weight in the confidence
-    sizes = {id(t): _size(_convert(t.values[scalar], unit)) for t in below}
+    sizes = {id(t): conv.size(t.values[scalar]) for t in below}
     charts = {}
     for groupby in groupbys:
         if groupby == 'component':
             charts[groupby] = _component_rows(below, scalar, filters,
-                                              chart_root, depth, unit, sizes)
+                                              chart_root, depth, conv, sizes)
             continue
         groups = defaultdict(_Group)
         for term in below:
@@ -455,7 +492,7 @@ def _dashboard(obj, scalar, filters, relativeto, unit, groupbys, depth):
                                 filters.passes(groupby, key),
                                 filters.matches(term.keys, skip=groupby),
                                 sizes[id(term)], term.rating)
-        charts[groupby] = _rows(groups, {}, unit)
+        charts[groupby] = _rows(groups, {}, conv)
 
     total = _Group()
     unfiltered = _Group()
@@ -466,8 +503,8 @@ def _dashboard(obj, scalar, filters, relativeto, unit, groupbys, depth):
             total.add(term.values[scalar])
             count += 1
     return dict(scalar=scalar, units=unit, count=count, ntotal=len(terms),
-                total=_convert(total.value, unit),
-                unfiltered=_convert(unfiltered.value, unit),
+                total=conv.quantity(total.value),
+                unfiltered=conv.quantity(unfiltered.value),
                 breadcrumb=breadcrumb, charts=charts)
 
 
@@ -506,9 +543,9 @@ def _table(obj, filters, relativeto, depth):
     chart_root, breadcrumb = _resolve_root(obj, filters.root)
     terms = term_values(obj, relativeto)
     version = obj.active_version
-    columns = [dict(key=key, name=name,
-                    units=_unit([t for t in terms if key in t.values],
-                                version, key, None))
+    convs = {key: _Conversion(terms, version, key, None)
+             for key, name in table_columns(version)}
+    columns = [dict(key=key, name=name, units=convs[key].unit)
                for key, name in table_columns(version)]
     root = filters.root
     sums = defaultdict(lambda: defaultdict(list))
@@ -525,9 +562,8 @@ def _table(obj, filters, relativeto, depth):
 
     def values(path):
         group = sums.get(path, {})
-        return {c['key']: _convert(sum_values(group.get(c['key'], ())),
-                                   c['units'])
-                for c in columns}
+        return {key: conv.quantity(sum_values(group.get(key, ())))
+                for key, conv in convs.items()}
     rows = [dict(label=breadcrumb[-1][1], depth=0, values=values(()))]
     rows += [dict(label=name, depth=len(path), values=values(path))
              for path, (name, children)
