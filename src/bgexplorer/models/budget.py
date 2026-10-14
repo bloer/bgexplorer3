@@ -78,7 +78,9 @@ def term_values(obj: Component, relativeto: Optional[Assembly] = None,
     not be modified
     """
     def calculate():
-        sourceterms = list(find_sourceterms(obj, relativeto))
+        # these are large and not needed here
+        sourceterms = list(find_sourceterms(obj, relativeto).exclude(
+            'assemblyPath', 'livetimes', 'assemblyPathStr'))
         hiteffs = load_hiteffs(sourceterms, spectra=spectra)
         child_ids = {str(p.id) for p in getattr(obj, 'children', None) or []}
         terms = []
