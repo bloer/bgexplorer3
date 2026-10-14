@@ -528,17 +528,28 @@ class CalculatedResults(Document):
         return result
 
 
+class _Flight:
+    """ A calculation in progress, which other threads can wait for """
+    def __init__(self):
+        self.done = threading.Event()
+        self.thread = threading.get_ident()
+
+
 class ResultsCache:
     """ In-memory LRU cache of calculated results. Keys start with the
     version's cache token, which changes whenever any data in the version
     changes, so entries never need invalidating and it is safe with multiple
-    processes. Results are shared, so must not be modified
+    processes. Results are shared, so must not be modified.
+
+    If several threads want the same missing key at once, one calculates it
+    and the others wait for it, rather than all repeating a slow calculation.
     """
     instances = []
 
     def __init__(self, size: int):
         self.size = size
         self._entries = OrderedDict()
+        self._flights = {}
         self._lock = threading.Lock()
         ResultsCache.instances.append(self)
 
@@ -548,19 +559,34 @@ class ResultsCache:
         """
         if key is None:
             return calculate()
-        with self._lock:
-            result = self._entries.get(key, _MISSING)
-            if result is not _MISSING:
-                self._entries.move_to_end(key)
-                return result
+        while True:
+            with self._lock:
+                result = self._entries.get(key, _MISSING)
+                if result is not _MISSING:
+                    self._entries.move_to_end(key)
+                    return result
+                flight = self._flights.get(key)
+                if flight is None:
+                    flight = self._flights[key] = _Flight()
+                    break
+            if flight.thread == threading.get_ident():
+                # calculating this key needs this key
+                return calculate()
+            # if the calculation failed, try again ourselves
+            flight.done.wait()
         # if the data change while calculating, the result is stored with
         # the old token and never used
-        result = calculate()
-        with self._lock:
-            self._entries[key] = result
-            while len(self._entries) > self.size:
-                self._entries.popitem(last=False)
-        return result
+        try:
+            result = calculate()
+            with self._lock:
+                self._entries[key] = result
+                while len(self._entries) > self.size:
+                    self._entries.popitem(last=False)
+            return result
+        finally:
+            with self._lock:
+                del self._flights[key]
+            flight.done.set()
 
     def clear(self):
         with self._lock:

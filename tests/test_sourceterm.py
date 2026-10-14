@@ -8,7 +8,7 @@ from bgexplorer.models.component import (Component, Placement, Assembly,
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.assay import Assay
 from bgexplorer.models.sourceterm import (SourceTerm, CalculatedResults,
-                                          clear_results_cache)
+                                          ResultsCache, clear_results_cache)
 from bgexplorer.models.settings import VersionSettings, get_settings
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
@@ -620,3 +620,73 @@ class TestLocationOverride(unittest.TestCase):
         c1.location_overrides.append(LocationOverride(location="Package"))
         with self.assertRaises(ValidationError):
             c1.save()
+
+
+class TestResultsCache(unittest.TestCase):
+    def test_cached(self):
+        cache = ResultsCache(2)
+        calls = []
+        for key in ('a', 'a', 'b', 'c', 'a'):
+            cache.get((key,), lambda: calls.append(key) or key)
+        # 'a' was evicted by 'c', and None isn't cached
+        self.assertEqual(calls, ['a', 'b', 'c', 'a'])
+        cache.get(None, lambda: calls.append('none'))
+        cache.get(None, lambda: calls.append('none'))
+        self.assertEqual(calls[-2:], ['none', 'none'])
+
+    def test_single_flight(self):
+        """ concurrent requests for a key share one calculation """
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+        cache = ResultsCache(4)
+        calls = []
+        started = threading.Event()
+        release = threading.Event()
+
+        def calculate():
+            calls.append(1)
+            started.set()
+            release.wait(5)
+            return 'value'
+
+        with ThreadPoolExecutor(6) as pool:
+            first = pool.submit(cache.get, ('k',), calculate)
+            self.assertTrue(started.wait(5))
+            others = [pool.submit(cache.get, ('k',), calculate)
+                      for _ in range(4)]
+            # a different key isn't held up
+            self.assertEqual(cache.get(('other',), lambda: 'o'), 'o')
+            release.set()
+            results = [f.result(5) for f in [first] + others]
+        self.assertEqual(results, ['value'] * 5)
+        self.assertEqual(len(calls), 1)
+
+    def test_failure_not_shared(self):
+        """ a failed calculation isn't cached, and waiters try for themselves
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+        cache = ResultsCache(4)
+        started = threading.Event()
+        release = threading.Event()
+
+        def fails():
+            started.set()
+            release.wait(5)
+            raise RuntimeError("failed")
+
+        with ThreadPoolExecutor(2) as pool:
+            first = pool.submit(cache.get, ('k',), fails)
+            self.assertTrue(started.wait(5))
+            second = pool.submit(cache.get, ('k',), lambda: 'ok')
+            release.set()
+            with self.assertRaises(RuntimeError):
+                first.result(5)
+            self.assertEqual(second.result(5), 'ok')
+        self.assertEqual(cache.get(('k',), lambda: 'again'), 'ok')
+
+    def test_reentrant(self):
+        cache = ResultsCache(4)
+        self.assertEqual(
+            cache.get(('k',), lambda: cache.get(('k',), lambda: 'inner')),
+            'inner')
