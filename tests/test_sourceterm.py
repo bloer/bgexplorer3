@@ -379,6 +379,13 @@ class TestSourceTerm(unittest.TestCase):
         CalculatedResults.for_object(a1, save=True, spectra=False)
         self.assertEqual(CalculatedResults.objects.count(), 0)
 
+        # nothing is stored unless asked
+        CalculatedResults.for_object(a1, cache=False)
+        self.assertEqual(CalculatedResults.objects.count(), 0)
+        CalculatedResults.for_object(a1, save=True, cache=False)
+        self.assertEqual(CalculatedResults.objects.count(), 1)
+        CalculatedResults.drop_collection()
+
         # test that hiteffs are removed appropriately
         h1.location = 'somewhere else'
         h1.save()

@@ -113,7 +113,7 @@ class TestStoredCorrelations(unittest.TestCase):
         direct = CalculatedResults.for_object(a1, save=False, cache=False)
 
         def stored(component):
-            CalculatedResults.for_object(component, cache=False)
+            CalculatedResults.for_object(component, save=True, cache=False)
             sts = list(SourceTerm.objects(assemblyRoot=component))
             return CalculatedResults.from_db(sts)
         parts = stored(c1) + stored(c2)

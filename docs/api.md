@@ -85,7 +85,7 @@ These endpoints are part of the web pages, under
 | Path | Response |
 |------|----------|
 | `api/<id>` | the document's JSON, as on its Export tab |
-| `<id>/spectra.json` | a hit efficiency's or component's displayed spectra, by display name |
+| `<id>/spectra.json` | a hit efficiency's or component's displayed spectra, by display name. For components this is legacy: the Results tab uses `spectrum.json` |
 | `<id>/dashboard.json` | a component's budget breakdown, as used by the Results tab |
 | `<id>/spectrum.json` | a component's spectrum breakdown |
 | `../hitefflocations` | the list of hit efficiency locations in the version |

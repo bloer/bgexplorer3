@@ -265,7 +265,16 @@ def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource, HitEffi
 
 
 class CalculatedResults(Document):
-    """ Cache normalized HitEff results """
+    """ Normalized HitEff results stored in the database.
+
+    Legacy: nothing saves these any more. The budget pages sum the
+    SourceTerms in memory (`budget.term_values`) behind the in-memory
+    `ResultsCache`s, and `for_object` only stores results if called with
+    `save=True`. The machinery is kept because the stored expressions
+    (`scalars_expr`, `spectra_expr`) allow correlations to be reconstructed
+    from stored results, and is still invalidated when SourceTerms or
+    HitEfficiencies change.
+    """
     # TODO: should this be a versioned document? it's acting as a cache
     # TODO: how to make sure there are no scalars/rois collisions?
     scalars = MapField(UncertainQuantityField(allownone=True,
@@ -323,11 +332,12 @@ class CalculatedResults(Document):
 
     @classmethod
     def for_object(cls, obj, relativeto: Optional[Assembly] = None,
-                   save: bool = True, spectra: bool = True,
+                   save: bool = False, spectra: bool = True,
                    cache: bool = True, correlations: bool = True):
         """ Calculate results for all SourceTerms of `obj`, optionally
         only the part in assembly `relativeto`. If `cache`, results are
-        kept in memory until any data in the version changes.
+        kept in memory until any data in the version changes. If `save`,
+        they are also stored in the database (see `CalculatedResults`).
 
         If not `correlations`, saved results are loaded without their
         correlations, which is faster when they're only shown.

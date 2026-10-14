@@ -184,6 +184,8 @@ then correlated with everything else sharing its leaves:
   inline;
 - stored results (`CalculatedResults`) keep theirs in separate fields, so
   that stored results can be combined as if they were calculated together.
+  Nothing stores results by default now, since the budget pages sum in
+  memory, so this is legacy machinery kept for possible on-disk caching.
 
 Expressions are much bigger than the values: a spectrum's expression includes
 each hit efficiency spectrum it was made from. Results that are only shown,
