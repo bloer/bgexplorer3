@@ -9,7 +9,7 @@ from collections import defaultdict
 from functools import reduce
 import threading
 from contextlib import contextmanager
-from typing import Union, Optional, Tuple
+from typing import Union, Optional, Tuple, Iterable
 from uncertainties import ufloat
 from difflib import SequenceMatcher
 import re
@@ -647,6 +647,20 @@ class AsymmetricUncertainty:
         return AsymmetricUncertainty(result.mode, result.s0, s1,
                                      expression=result._expression)
 
+    @classmethod
+    def sum_all(cls, values: Iterable) -> 'AsymmetricUncertainty':
+        """ The same as adding `values` (variables and/or constants) one by
+        one, but in one pass over their expressions
+        """
+        values = list(values)
+        if cls.get_ignore_correlations() or not all(
+                v.correlations_loaded for v in values
+                if isinstance(v, cls)):
+            return reduce(operator.add, values)
+        return LinearExpression.sum(
+            v.expression if isinstance(v, cls) else v for v in values
+        ).evaluate()
+
     def average(self, other, weight1=1, weight2=1):
         return (self*weight1).addtreatzero(other*weight2)/(weight1 + weight2)
 
@@ -1017,6 +1031,23 @@ class LinearExpression:
         result.coefficients.update(self.coefficients)
         return result
 
+    @classmethod
+    def sum(cls, items: Iterable) -> 'LinearExpression':
+        """ The sum of LinearExpressions and plain offsets in `items`, in
+        one pass. Adding them one by one copies the running total each time
+        """
+        result = cls()
+        coefficients = result.coefficients
+        for item in items:
+            terms = (item.coefficients.items()
+                     if isinstance(item, LinearExpression)
+                     else ((frozenset(), item),))
+            for key, val in terms:
+                # not +=, which would change arrays shared with the items
+                coefficients[key] = (coefficients[key] + val
+                                     if key in coefficients else val)
+        return result
+
     def __add__(self, other):
         if hasattr(other, 'expression'):
             other = other.expression
@@ -1092,3 +1123,26 @@ class LinearExpression:
             return self.coefficients == other.coefficients
         except AttributeError:
             return NotImplemented
+
+
+def sum_values(values: Iterable):
+    """ Add up `values`, skipping Nones; None if there are none left. The
+    same as adding them one by one, but when they are all
+    AsymmetricUncertainties or pint Quantities of them (in the units of the
+    first), in one pass
+    """
+    values = [v for v in values if v is not None]
+    if not values:
+        return None
+    first = values[0]
+    if len(values) == 1:
+        return first
+    if all(isinstance(v, AsymmetricUncertainty) for v in values):
+        return AsymmetricUncertainty.sum_all(values)
+    if all(hasattr(v, 'dimensionality')
+           and isinstance(v.m, AsymmetricUncertainty) for v in values):
+        unit = first.u
+        total = AsymmetricUncertainty.sum_all(
+            v.m if v.u == unit else v.to(unit).m for v in values)
+        return first.__class__(total, unit)
+    return reduce(operator.add, values)

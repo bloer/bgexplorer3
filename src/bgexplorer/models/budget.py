@@ -5,7 +5,6 @@ model, crossfilter style.
 """
 import json
 from collections import defaultdict
-from functools import reduce
 import numpy as np
 from typing import List, NamedTuple, Optional, Tuple
 from .component import Component, Assembly
@@ -15,6 +14,7 @@ from .sourceterm import (CalculatedResults, SourceTerm, ResultsCache,
 from .settings import get_settings
 from .histogram import Histogram
 from .common import units as unitreg
+from .asymmetric import sum_values
 
 GROUPBY = ('component', 'isotope', 'material', 'category')
 NO_MATERIAL = '(no material)'
@@ -240,19 +240,25 @@ class _Group:
     sizes (see `_size`), and the fraction of the size that is unrated
     """
     def __init__(self):
-        self.value = None
-        self.unfiltered = None
+        self._passing = []
+        self._all = []
         self.selected = False
         self.rated_sum = 0.
         self.rated_size = 0.
         self.unrated_size = 0.
 
-    @staticmethod
-    def _add(total, value):
-        return value if total is None else total + value
-
     def add(self, value):
-        self.value = self._add(self.value, value)
+        self._passing.append(value)
+
+    @property
+    def value(self):
+        """ The sum of the values passing, or None """
+        return sum_values(self._passing)
+
+    @property
+    def unfiltered(self):
+        """ The sum of all values, or None """
+        return sum_values(self._all)
 
     def include(self, value, selected: bool, passing: bool,
                 size: float = 0., rating: Optional[int] = None):
@@ -260,7 +266,7 @@ class _Group:
         confidence if `passing`. `size` is the `_size` of `value` in the
         units of the rows, `rating` the term's confidence rating
         """
-        self.unfiltered = self._add(self.unfiltered, value)
+        self._all.append(value)
         self.selected |= selected
         if passing:
             self.add(value)
@@ -503,7 +509,7 @@ def _table(obj, filters, relativeto, depth):
                                 version, key, None))
                for key, name in table_columns(version)]
     root = filters.root
-    sums = defaultdict(dict)
+    sums = defaultdict(lambda: defaultdict(list))
     count = 0
     for term in terms:
         if not filters.matches(term.keys):
@@ -513,11 +519,12 @@ def _table(obj, filters, relativeto, depth):
         for level in {0, min(len(path), 1), min(len(path), depth)}:
             group = sums[path[:level]]
             for name, value in term.values.items():
-                group[name] = _Group._add(group.get(name), value)
+                group[name].append(value)
 
     def values(path):
         group = sums.get(path, {})
-        return {c['key']: _convert(group.get(c['key']), c['units'])
+        return {c['key']: _convert(sum_values(group.get(c['key'], ())),
+                                   c['units'])
                 for c in columns}
     rows = [dict(label=breadcrumb[-1][1], depth=0, values=values(()))]
     rows += [dict(label=name, depth=len(path), values=values(path))
@@ -610,7 +617,7 @@ def _spectrum_breakdown(obj, name, filters, relativeto, groupby, top):
             return term.keys['component'][len(root):][:1]
         return term.keys[groupby]
     term_sizes = _spectrum_sizes(obj, relativeto, name) if groupby else {}
-    total = None
+    totals = []
     groups = defaultdict(list)
     sizes = defaultdict(float)
     filtered_sizes = defaultdict(float)
@@ -623,7 +630,7 @@ def _spectrum_breakdown(obj, name, filters, relativeto, groupby, top):
         if not filters.matches(term.keys):
             continue
         count += 1
-        total = _Group._add(total, term.values[name])
+        totals.append(term.values[name])
         if groupby:
             groups[group_key(term)].append(term.values[name])
             filtered_sizes[group_key(term)] += size
@@ -635,11 +642,11 @@ def _spectrum_breakdown(obj, name, filters, relativeto, groupby, top):
     # an "other" of a single group would just be that group
     shown = ordered if len(ordered) <= top + 1 else ordered[:top]
     curves = [dict(key=key, rank=rank[key],
-                   value=reduce(_Group._add, groups[key], None),
+                   value=sum_values(groups[key]),
                    label=(names[key][0] if key in names
                           else chart_root.name if key == () else key))
               for key in shown]
-    other = reduce(_Group._add, (v for key in ordered[len(shown):]
-                                 for v in groups[key]), None)
-    return dict(total=total, curves=curves, other=other, count=count,
+    other = sum_values(v for key in ordered[len(shown):]
+                       for v in groups[key])
+    return dict(total=sum_values(totals), curves=curves, other=other, count=count,
                 ntotal=len(terms))

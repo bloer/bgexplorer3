@@ -18,6 +18,7 @@ from .histogram import Histogram
 from .hiteff import HitEfficiency
 from .isotope import concentration_to_rate
 from .common import units, addnone, multnone
+from .asymmetric import sum_values
 from . import settings
 from typing import List, Optional, Union, Dict, Tuple, Iterable
 from collections import defaultdict, OrderedDict
@@ -461,18 +462,20 @@ class CalculatedResults(Document):
         """ Add up the output of `_calculate` for each of `sourceterms`.
         Returns None if none of them have hiteffs
         """
-        scalars, hists = {}, {}
+        scalar_parts, hist_parts = defaultdict(list), defaultdict(list)
         found = False
         for part in parts:
             if part is None:
                 continue
             found = True
             for key, val in part[0].items():
-                scalars[key] = addnone(scalars.get(key), val)
+                scalar_parts[key].append(val)
             for key, val in part[1].items():
-                hists[key] = addnone(hists.get(key), val)
+                hist_parts[key].append(val)
         if not found:
             return None
+        scalars = {key: sum_values(vals) for key, vals in scalar_parts.items()}
+        hists = {key: sum_values(vals) for key, vals in hist_parts.items()}
         return cls(scalars=scalars, spectra=hists,
                    sources=list(sourceterms)).ito_reduced_units()
 
