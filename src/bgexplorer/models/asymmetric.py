@@ -792,13 +792,15 @@ class AsymmetricUncertainty:
 
     # allow different instances to be dict keys based on id
     def __hash__(self):
-        return hash(self.id) if self.id else super().__hash__()
+        id = self._id
+        return hash(id) if id else super().__hash__()
 
     def __eq__(self, other):
         if not isinstance(other, AsymmetricUncertainty):
             return NotImplemented
-        if self.id:
-            return self.id == other.id
+        id = self._id
+        if id:
+            return id == other._id
         return super().__eq__(other)
 
     # array-specific stuff
@@ -964,8 +966,15 @@ class LinearExpression:
         if lazy and not AsymmetricUncertainty.get_ignore_correlations():
             return AsymmetricUncertainty(None, None, expression=self)
 
-        disjoint = (len(self.variables) ==
-                    sum(len(key) for key in self.coefficients.keys()))
+        # index the terms by leaf once, so that each partial derivative
+        # only visits the terms containing that leaf
+        by_leaf = defaultdict(list)
+        nleaves = 0
+        for key, coeff in self.coefficients.items():
+            nleaves += len(key)
+            for leaf in key:
+                by_leaf[leaf].append((key, coeff))
+        disjoint = len(by_leaf) == nleaves
         if disjoint:
             # all of these variables are uncorrelated
             with AsymmetricUncertainty.ignore_correlations():
@@ -984,8 +993,11 @@ class LinearExpression:
         mode = sum(reduce(operator.mul, (v.mode for v in key), coeff)
                    for key, coeff in self.coefficients.items())
         v0, v1 = (0, 0)
-        for variable in self.variables:
-            val = self.partialderivative(variable).evaluate(lazy=lazy)
+        for variable, entries in by_leaf.items():
+            partial = LinearExpression()
+            for key, coeff in entries:
+                partial.coefficients[key.difference({variable})] = coeff
+            val = partial.evaluate(lazy=lazy)
             v0 += (val.modesq + val.v0 / 2) * (
                 (val.mode >= 0) * variable.v0 + (val.mode < 0) * variable.v1)
             v1 += (val.modesq + val.v1 / 2) * (

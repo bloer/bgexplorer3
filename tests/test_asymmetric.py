@@ -154,6 +154,35 @@ class TestAsymmetric(unittest.TestCase):
         self.assertGreater(x.s0, z.s0)
         self.assertGreater(x.s1, z.s1)
 
+    def test5b_overlapping_leaves(self):
+        """ the leaf index gives the same variance as per-leaf derivatives """
+        rng = np.random.default_rng(3)
+        leaves = [AsymmetricUncertainty(rng.uniform(1, 5), rng.uniform(.1, 1),
+                                        rng.uniform(.1, 1))
+                  for _ in range(6)]
+        total = 0
+        for _ in range(12):
+            pick = rng.choice(len(leaves), size=rng.integers(1, 4),
+                              replace=False)
+            term = rng.uniform(-2, 2)
+            for i in pick:
+                term = term * leaves[i]
+            total = total + term
+        total = total + 1.5
+        expr = total.expression
+        mode = sum(np.prod([v.mode for v in key]) * coeff
+                   for key, coeff in expr.coefficients.items())
+        v0 = v1 = 0
+        for variable in expr.variables:
+            d = expr.partialderivative(variable).evaluate()
+            lo, hi = ((variable.v0, variable.v1) if d.mode >= 0
+                      else (variable.v1, variable.v0))
+            v0 += (d.modesq + d.v0 / 2) * lo
+            v1 += (d.modesq + d.v1 / 2) * hi
+        self.assertAlmostEqual(total.mode, mode)
+        self.assertAlmostEqual(total.s0, np.sqrt(v0))
+        self.assertAlmostEqual(total.s1, np.sqrt(v1))
+
     def test6_lazy(self):
         """ test that intermediate objects are not evaluated """
         i1 = self.a * self.lim1
