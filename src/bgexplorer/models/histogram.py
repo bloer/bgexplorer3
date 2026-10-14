@@ -169,6 +169,18 @@ class Histogram(object):
         result = self.integrate(a, b, binwidths) / (b-a)
         return result
 
+    @classmethod
+    def sum_all(cls, hists) -> 'Histogram':
+        """ The same as adding `hists` one by one, but the contents are added
+        in one pass if they are (Quantities of) AsymmetricUncertainties
+        """
+        from .asymmetric import sum_values
+        hists = list(hists)
+        first = hists[0]
+        for hist in hists[1:]:
+            hist._testbins(first)
+        return cls(sum_values(h.hist for h in hists), first.bin_edges)
+
     def __repr__(self):
         return f"Histogram<{len(self.hist)} bins>"
 

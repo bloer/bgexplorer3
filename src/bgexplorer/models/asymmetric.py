@@ -1129,7 +1129,7 @@ def sum_values(values: Iterable):
     """ Add up `values`, skipping Nones; None if there are none left. The
     same as adding them one by one, but when they are all
     AsymmetricUncertainties or pint Quantities of them (in the units of the
-    first), in one pass
+    first), or Histograms of them, in one pass
     """
     values = [v for v in values if v is not None]
     if not values:
@@ -1137,6 +1137,9 @@ def sum_values(values: Iterable):
     first = values[0]
     if len(values) == 1:
         return first
+    from .histogram import Histogram
+    if all(isinstance(v, Histogram) for v in values):
+        return Histogram.sum_all(values)
     if all(isinstance(v, AsymmetricUncertainty) for v in values):
         return AsymmetricUncertainty.sum_all(values)
     if all(hasattr(v, 'dimensionality')
