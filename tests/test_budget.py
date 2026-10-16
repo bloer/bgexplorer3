@@ -1,10 +1,14 @@
 """ Filtered budget breakdowns for the results dashboard """
 import unittest
+from unittest import mock
 from bgexplorer.models.budget import (BudgetFilter, dashboard, NO_CATEGORY,
                                       table, term_values)
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
                                             SourceCategory)
+from bgexplorer.models.basecalc import ScalarCalculator
+from bgexplorer.models.sourceterm import SourceTerm, clear_results_cache
+from bgexplorer.models.common import DimensionalityError, units as unitreg
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import get_settings, HitEffConfig
 from bgexplorer.models.sourceterm import CalculatedResults, find_sourceterms
@@ -230,6 +234,50 @@ class TestDashboard(AppTestCase):
         with self.assertRaises(ValueError):
             dashboard(self.a2, 'v1', BudgetFilter(root=[self.p_c1]))
 
+    def test_confidence(self):
+        """ Rows have the size-weighted mean rating of their terms """
+        for name, rating in (('c1', 5), ('c2', 2)):
+            comp = Component.select_version('main').get(name=name)
+            comp.confidence_rating = rating
+            comp.save()
+        result = dashboard(self.a2, 'v1')
+        isotopes = {row['key']: row for row in result['charts']['isotope']}
+        # c1 4 (rated 5), c2 3 (rated 2), c3 0.5 (unrated)
+        self.assertAlmostEqual(isotopes['Th232']['confidence']['mean'],
+                               (4 * 5 + 3 * 2) / 7)
+        self.assertAlmostEqual(isotopes['Th232']['confidence']['unrated'],
+                               0.5 / 7.5)
+        # a limit is weighted by its upper limit
+        limit = isotopes['K40']['size']
+        self.assertGreater(limit, 20.)
+        self.assertEqual(isotopes['K40']['confidence'],
+                         dict(mean=5., unrated=0.))
+
+        # an assembly averages all the terms below it, not its children
+        rows = {row['label']: row for row in result['charts']['component']}
+        self.assertAlmostEqual(rows['a1']['confidence']['mean'],
+                               (5 * (4 + limit) + 2 * 3) / (7 + limit))
+        self.assertEqual(rows['a1']['confidence']['unrated'], 0.)
+        self.assertEqual(rows['c2 label']['confidence'],
+                         dict(mean=2., unrated=0.))
+        self.assertEqual(rows['c3']['confidence'],
+                         dict(mean=None, unrated=1.))
+
+        # only the terms passing the filters count
+        f = BudgetFilter(dict(material=[('copper', False)]))
+        rows = {row['label']: row for row in
+                dashboard(self.a2, 'v1', f)['charts']['component']}
+        self.assertEqual(rows['a1']['confidence'], dict(mean=5., unrated=0.))
+        self.assertIsNone(rows['c2 label']['value'])
+        self.assertEqual(rows['c2 label']['confidence'],
+                         dict(mean=None, unrated=0.))
+        # and the unfiltered size is still what orders them
+        f = BudgetFilter(dict(isotope=[('K40', True)]))
+        isotopes = {row['key']: row for row in
+                    dashboard(self.a2, 'v1', f)['charts']['isotope']}
+        self.assertAlmostEqual(isotopes['Th232']['confidence']['mean'],
+                         (4 * 5 + 3 * 2) / 7)
+
     def test_errors(self):
         with self.assertRaises(ValueError):
             dashboard(self.a2, 'nope')
@@ -267,6 +315,88 @@ class TestDashboard(AppTestCase):
         self.assertIsNot(term_values(self.a2), terms)
         self.assertIsNot(dashboard(self.a2, 'v1', BudgetFilter.from_json(text)),
                          result)
+
+    def recalculated(self, **kwargs):
+        """ The Terms of a2 and how many SourceTerms had to be calculated """
+        with mock.patch.object(ScalarCalculator, 'calculate', autospec=True,
+                               side_effect=ScalarCalculator.calculate
+                               ) as calculate:
+            return term_values(self.a2, **kwargs), calculate.call_count
+
+    def test_unchanged_terms_reused(self):
+        terms, count = self.recalculated()
+        self.assertEqual(count, 5)
+        self.assertEqual(self.recalculated()[1], 0)
+        # editing one component only recalculates its own SourceTerms
+        self.c3.confidence_rating = 2
+        self.c3.save()
+        edited, count = self.recalculated()
+        self.assertEqual(count, 1)
+        self.assertIsNot(edited, terms)
+        # as does a change in a rate
+        self.e2.reload()
+        self.e2.sources[0].rate = '2 +- 0.5 mBq/kg'
+        self.e2.save()
+        self.assertEqual(self.recalculated()[1], 1)
+        # the result is the same as calculating everything
+        reused = dashboard(self.a2, 'v1')
+        clear_results_cache()
+        self.assertEqual(self.recalculated()[1], 5)
+        fresh = dashboard(self.a2, 'v1')
+        self.assertSame(reused['total'], fresh['total'])
+        self.assertEqual(reused['charts']['component'][-1]['key'],
+                         fresh['charts']['component'][-1]['key'])
+        # HitEfficiencies could change any of them
+        clear_results_cache()
+        term_values(self.a2)
+        self.replace_hiteff('c3', v1='0.7 +- 0.05 dru/mBq')
+        self.assertEqual(self.recalculated()[1], 5)
+
+    def test_unstamped_terms(self):
+        """ SourceTerms from before there were stamps are stamped when used """
+        SourceTerm._get_collection().update_many({}, {'$unset': {'stamp': ''}})
+        expected = dashboard(self.a2, 'v1')
+        clear_results_cache()
+        self.assertEqual(self.recalculated()[1], 5)
+        self.assertEqual(SourceTerm.objects(stamp__exists=True).count(), 5)
+        self.assertEqual(self.recalculated()[1], 0)
+        self.assertSame(dashboard(self.a2, 'v1')['total'], expected['total'])
+
+    def replace_hiteff(self, location, **scalars):
+        HitEfficiency.objects.get(source='Th232', location=location).delete()
+        HitEfficiency(source='Th232', location=location,
+                      scalars=scalars).save()
+
+    def test_mixed_units(self):
+        """ Results are summed in base units whatever their units were """
+        expected = dashboard(self.a2, 'v1')
+        self.replace_hiteff('c3', v1='500 +- 50 dru/Bq')
+        result = dashboard(self.a2, 'v1')
+        self.assertIsNot(result, expected)
+        self.assertEqual(result['units'], expected['units'])
+        self.assertSame(result['total'], expected['total'])
+        for new, old in zip(result['charts']['component'],
+                            expected['charts']['component']):
+            self.assertSame(new['value'], old['value'])
+        self.assertSame(dashboard(self.a2, 'v1', unit='mdru')['total'],
+                        expected['total'])
+        with self.assertRaises(DimensionalityError):
+            dashboard(self.a2, 'v1', unit='kg')
+
+    def test_mismatched_units(self):
+        """ Only the scalars with inconsistent dimensions fail """
+        self.replace_hiteff('c1', v1='0.1 +- 0.01 dru/mBq',
+                            other='1 +- 0.1 dru/mBq')
+        self.replace_hiteff('c3', v1='0.5 +- 0.05 dru/mBq',
+                            other='1 +- 0.1 dru/mBq')
+        # the display unit check rejects this, so go around it
+        hiteff = HitEfficiency.objects.get(source='Th232', location='c3')
+        hiteff.scalars['other'] = unitreg.Quantity(
+            hiteff.scalars['other'].m, '1/mBq')
+        hiteff.save(validate=False)
+        dashboard(self.a2, 'v1')
+        with self.assertRaises(DimensionalityError):
+            dashboard(self.a2, 'other')
 
     def show_columns(self):
         settings = get_settings('main')
@@ -362,6 +492,14 @@ class TestDashboard(AppTestCase):
                            data['total']['value'])
         isotopes = {row['key']: row for row in data['charts']['isotope']}
         self.assertTrue(isotopes['K40']['value']['is_limit'])
+        # nothing is rated yet
+        self.assertEqual(rows[1]['confidence'], dict(mean=None, unrated=1.))
+        c1 = Component.select_version('main').get(name='c1')
+        c1.confidence_rating = 4
+        c1.save()
+        data2 = self.client.get(url).get_json()
+        self.assertEqual(data2['charts']['component'][1]['confidence'],
+                         dict(mean=4., unrated=0.))
         # totals are also formatted, like the contributions table
         total = self.total(self.a2).to('dru').m
         self.assertEqual(data['total']['text'], '{:S}'.format(total))

@@ -85,7 +85,7 @@ These endpoints are part of the web pages, under
 | Path | Response |
 |------|----------|
 | `api/<id>` | the document's JSON, as on its Export tab |
-| `<id>/spectra.json` | a hit efficiency's or component's displayed spectra, by display name |
+| `<id>/spectra.json` | a hit efficiency's or component's displayed spectra, by display name. For components this is legacy: the Results tab uses `spectrum.json` |
 | `<id>/dashboard.json` | a component's budget breakdown, as used by the Results tab |
 | `<id>/spectrum.json` | a component's spectrum breakdown |
 | `../hitefflocations` | the list of hit efficiency locations in the version |
@@ -103,6 +103,11 @@ is JSON:
 
 `root` drills into the component tree by placement ids. For `component`
 filters, the keys are lists of placement ids.
+
+Each row of `dashboard.json` also has `confidence`: `{"mean": 4.2, "unrated":
+0.1}`, the size-weighted mean confidence rating of the source terms passing the
+filters (`null` if none is rated) and the fraction of their size that is
+unrated. See [Results](results.md).
 
 Values are returned as:
 

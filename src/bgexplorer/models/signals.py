@@ -34,7 +34,7 @@ def delete_component(sender, document, **kwargs):
         parent.children = [p for p in parent.children
                            if p.component.original_id != component.original_id]
         parent.save()
-    settings.touch(component.active_version)
+    settings.touch(component.active_version, terms_only=True)
 
 
 def update_component(sender, document, **kwargs):
@@ -57,7 +57,7 @@ def update_component(sender, document, **kwargs):
         update_parent(parent, component, sourceterms)
     # the generic post_save signal may have run before the sourceterms
     # were updated
-    settings.touch(component.active_version)
+    settings.touch(component.active_version, terms_only=True)
     return sourceterms
 
 def update_parent(assembly, component, child_sourceterms, scope=()):
@@ -117,7 +117,7 @@ def update_assembly(sender, document, component=None, placement=None,
     for parent in assembly.find_parents():
         update_parent(parent, assembly, sourceterms, scope)
         #update_assembly(sender=None, document=parent, component=assembly)
-    settings.touch(assembly.active_version)
+    settings.touch(assembly.active_version, terms_only=True)
 
 
 def update_placement(sender, document, **kwargs):

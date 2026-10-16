@@ -6,8 +6,13 @@ const bgplots = (function(){
 
     const COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
                     '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
-    const MEASURED_COLOR = '#d62728';
-    const LIMIT_COLOR = '#1f4fd6';
+    // Budget markers are coloured by the rounded mean confidence rating, 1 to 5.
+    // The ratings are ordinal, so these are the HCL qualitative palette "Dark 3"
+    // (colorspace, n = 5) rather than a ramp: equal contrast against the plot,
+    // and no two neighbouring ratings alike. Unrated is dark gray.
+    const CONFIDENCE_COLORS = ['#e16a86', '#aa9000', '#00aa5a', '#00a6ca', '#b675e0'];
+    const UNRATED_COLOR = '#495057';
+    const ERROR_BAR_COLOR = '#6c757d';
     // spectrum totals, and the sum of the parts not shown
     const TOTAL_COLOR = '#212529';
     const OTHER_COLOR = '#adb5bd';
@@ -318,13 +323,41 @@ const bgplots = (function(){
         draw();
     }
 
-    /* Traces for budget `rows`, each with a unique `id` for its y category
-     * and a `value`, the sum of its measurements and upper limits. Values
-     * are red points with error bars, and upper limits (if everything in
-     * the row is one) blue lines from the edge of the plot ending in an
-     * arrow at the 90% limit. Rows where `dim` is true are faded. Always the
-     * same four traces, so plotly can animate between filters: faded and
-     * unfaded limits, then faded and unfaded values
+    /* The rating class, 1 to 5, of a row's `confidence`, {mean, unrated}: its
+     * mean rounded half up. null if nothing in it is rated
+     */
+    function confidenceClass(confidence){
+        if(!confidence || confidence.mean === null || confidence.mean === undefined)
+            return null;
+        return Math.min(5, Math.max(1, Math.floor(confidence.mean + 0.5)));
+    }
+
+    function confidenceColor(confidence){
+        const cls = confidenceClass(confidence);
+        return cls === null ? UNRATED_COLOR : CONFIDENCE_COLORS[cls - 1];
+    }
+
+    /* Hover text for a row's `confidence`, which is only the terms passing
+     * the filters, weighted by their sizes
+     */
+    function confidenceText(confidence){
+        if(confidenceClass(confidence) === null)
+            return 'Confidence: not rated';
+        let text = `Confidence: ${confidence.mean.toFixed(2)}`;
+        const percent = 100 * confidence.unrated;
+        if(percent > 0)
+            text += ` (${percent < 1 ? '<1' : Math.round(percent)}% unrated)`;
+        return text;
+    }
+
+    /* Traces for budget `rows`, each with a unique `id` for its y category,
+     * a `value`, the sum of its measurements and upper limits, and its
+     * `confidence`. Values are circles with error bars, and upper limits (if
+     * everything in the row is one) triangles at the 90% limit with a line
+     * from the edge of the plot. Markers are coloured by confidence. Rows
+     * where `dim` is true are faded. Always the same four traces, so plotly
+     * can animate between filters: faded and unfaded limits, then faded and
+     * unfaded values
      */
     function budgetTraces(rows, dim, units){
         dim = dim || (() => false);
@@ -342,9 +375,11 @@ const bgplots = (function(){
                     error_x: {type: 'data', symmetric: false, width: 0, thickness: 2,
                               array: rows.map(() => 0),
                               arrayminus: rows.map(r => r.value.upper_limit * (1 - 1e-12)),
-                              color: LIMIT_COLOR},
-                    hovertemplate: `< %{x:.3g}${u}<extra></extra>`,
-                    marker: {symbol: 'triangle-left', size: 10, color: LIMIT_COLOR}};
+                              color: ERROR_BAR_COLOR},
+                    customdata: rows.map(r => [confidenceText(r.confidence)]),
+                    hovertemplate: `< %{x:.3g}${u}<br>%{customdata[0]}<extra></extra>`,
+                    marker: {symbol: 'triangle-left', size: 10,
+                             color: rows.map(r => confidenceColor(r.confidence))}};
         });
         const valueTraces = [true, false].map(faded => {
             const rows = values.filter(r => dim(r) === faded);
@@ -353,7 +388,8 @@ const bgplots = (function(){
                     ids: rows.map(r => r.id),
                     x: rows.map(r => r.value.value),
                     y: rows.map(r => r.id),
-                    customdata: rows.map(r => [r.value.err_plus, r.value.err_minus]),
+                    customdata: rows.map(r => [r.value.err_plus, r.value.err_minus,
+                                               confidenceText(r.confidence)]),
                     // TODO: the upper bar is value + err_plus, the usual 1 sigma
                     // error, but limits are drawn at their 90% upper limit. So
                     // a value plus a large limit (e.g. brass in the qis example)
@@ -365,10 +401,11 @@ const bgplots = (function(){
                               // keep the lower bar on a log axis
                               arrayminus: rows.map(r => Math.min(r.value.err_minus,
                                                                  0.999 * r.value.value)),
-                              color: MEASURED_COLOR},
+                              color: ERROR_BAR_COLOR},
                     hovertemplate: '%{x:.3g} (+%{customdata[0]:.2g} −%{customdata[1]:.2g})'
-                                 + `${u}<extra></extra>`,
-                    marker: {symbol: 'circle', size: 8, color: MEASURED_COLOR}};
+                                 + `${u}<br>%{customdata[2]}<extra></extra>`,
+                    marker: {symbol: 'circle', size: 8,
+                             color: rows.map(r => confidenceColor(r.confidence))}};
         });
         return limitTraces.concat(valueTraces);
     }
@@ -510,6 +547,25 @@ const bgplots = (function(){
         return rows;
     }
 
+    /* A key to the marker colours and shapes of the budget plots */
+    function confidenceKey(){
+        const swatch = color => el('span', {
+            'class': 'd-inline-block rounded-circle align-middle me-1',
+            style: `width: 0.8em; height: 0.8em; background-color: ${color}`});
+        const item = (color, text) => el('span', {'class': 'me-2 text-nowrap'},
+                                         [swatch(color), document.createTextNode(text)]);
+        const items = CONFIDENCE_COLORS.map((color, i) => item(color, String(i + 1)));
+        items.push(item(UNRATED_COLOR, 'unrated'));
+        return el('div', {
+            'class': 'dashboard-key small ms-auto',
+            title: 'Marker colour is the mean confidence rating of the contributions '
+                 + 'in the row, weighted by their size, rounded to 1-5. 5 is measured '
+                 + 'or precisely known, 1 a wild guess. Circles are values and '
+                 + 'triangles are upper limits'}, [
+            el('span', {'class': 'text-secondary me-1', text: 'Confidence:'}), ...items,
+            el('span', {'class': 'text-secondary ms-1', text: '● value  ◀ limit'})]);
+    }
+
     const GROUP_TITLES = {component: 'component', isotope: 'isotope',
                           material: 'material', category: 'source category'};
 
@@ -575,7 +631,7 @@ const bgplots = (function(){
         const controls = el('div', {'class': 'd-flex gap-2 align-items-center mb-2'}, [
             el('label', {'for': select.id, text: 'Result'}), select,
             el('label', {'class': 'ms-3', 'for': threshold.id, text: 'Hide below'}), threshold,
-            el('span', {text: '% of total'})]);
+            el('span', {text: '% of total'}), confidenceKey()]);
         const info = el('div', {'class': 'dashboard-info'});
         const breadcrumb = el('ol', {'class': 'breadcrumb mb-1 small'});
         const drill = el('div', {'class': 'dashboard-drill small'});

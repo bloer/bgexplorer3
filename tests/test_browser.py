@@ -440,6 +440,44 @@ class TestPlotsInBrowser(BrowserTestCase):
         self.assertIn('1 of 2 source terms', self.info(page))
         self.assertEqual(self.values(page, 'isotope'), ['K40'])
 
+    def test_budget_confidence_colours(self):
+        self.c1.confidence_rating = 5
+        self.c1.save()
+        page = self.open_dashboard(self.url('component.results', object=self.a1))
+
+        # the drawn markers, by row: fill colour, and the hover text
+        def drawn():
+            return page.evaluate(f"""() => {{
+                const p = {self.panel_js('component')};
+                const out = {{}};
+                for(const g of p.querySelectorAll('.scatterlayer .trace'))
+                    for(const pt of g.querySelectorAll('.point')) {{
+                        const trace = p.data[g.__data__[0].trace.index];
+                        const path = pt.matches('path') ? pt : pt.querySelector('path');
+                        out[trace.y[pt.__data__.i]] = [path.style.fill,
+                            trace.customdata[pt.__data__.i].slice(-1)[0]];
+                    }}
+                return out;}}""")
+
+        def rgb(colour):
+            return 'rgb(%d, %d, %d)' % tuple(
+                int(colour[i:i+2], 16) for i in (1, 3, 5))
+
+        points = drawn()
+        self.assertEqual(points['c1'][0], rgb('#b675e0'))
+        self.assertIn('5.0', points['c1'][1])
+        self.assertEqual(points['c2'][0], rgb('#495057'))
+        self.assertIn('not rated', points['c2'][1])
+
+        key = page.locator('#budgetplot .dashboard-key')
+        self.assertTrue(key.is_visible())
+        self.assertIn('unrated', key.inner_text())
+
+        # the colours survive filtering
+        self.click_row(page, 'material', 'copper')
+        self.assertDrawn(page)
+        self.assertEqual(drawn()['c1'][0], rgb('#b675e0'))
+
     def test_limit_bins(self):
         page = self.open(self.url('hitefficiency.view', object=self.hiteff))
         self.wait_plot(page, '#spectrumplot')

@@ -184,6 +184,8 @@ then correlated with everything else sharing its leaves:
   inline;
 - stored results (`CalculatedResults`) keep theirs in separate fields, so
   that stored results can be combined as if they were calculated together.
+  Nothing stores results by default now, since the budget pages sum in
+  memory, so this is legacy machinery kept for possible on-disk caching.
 
 Expressions are much bigger than the values: a spectrum's expression includes
 each hit efficiency spectrum it was made from. Results that are only shown,
@@ -197,6 +199,28 @@ stored results grow with the number of hit efficiency spectra they include,
 towards MongoDB's 16 MB document limit for big models. `LeafStore` is the
 interface for keeping leaves in one place instead; so far there is only an
 in-memory implementation.
+
+### Caching budget calculations
+
+The budget pages calculate in memory; there are three levels of caching, all
+per process and lost on restart:
+
+- results of whole assemblies and the filtered tables built from them, keyed
+  by the version's `cache_token`, which is replaced by every change to the
+  version;
+- the scalar values of each SourceTerm, keyed by the SourceTerm's `stamp`
+  and the version's `calc_token`. The stamp is a hash of everything stored on
+  the SourceTerm that its values depend on (source, weight, multiplier,
+  material, rating, placements and HitEfficiencies), so editing a component
+  only recalculates its own SourceTerms. The `calc_token` is replaced by
+  changes that could affect any SourceTerm's value (HitEfficiencies, version
+  settings, merges), but not by edits to components, specs or SourceTerms;
+- SourceTerms saved before stamps existed get theirs the first time they are
+  used.
+
+Scalars are multiplied as plain magnitudes in SI base units, and only
+converted to the display units when summed (`basecalc.py`). Spectra still use
+pint and are calculated only when asked for.
 
 ## Running tests
 

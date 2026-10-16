@@ -9,7 +9,7 @@ from collections import defaultdict
 from functools import reduce
 import threading
 from contextlib import contextmanager
-from typing import Union, Optional, Tuple
+from typing import Union, Optional, Tuple, Iterable
 from uncertainties import ufloat
 from uncertainties.formatting import to_superscript
 from difflib import SequenceMatcher
@@ -696,6 +696,20 @@ class AsymmetricUncertainty:
         return AsymmetricUncertainty(result.mode, result.s0, s1,
                                      expression=result._expression)
 
+    @classmethod
+    def sum_all(cls, values: Iterable) -> 'AsymmetricUncertainty':
+        """ The same as adding `values` (variables and/or constants) one by
+        one, but in one pass over their expressions
+        """
+        values = list(values)
+        if cls.get_ignore_correlations() or not all(
+                v.correlations_loaded for v in values
+                if isinstance(v, cls)):
+            return reduce(operator.add, values)
+        return LinearExpression.sum(
+            v.expression if isinstance(v, cls) else v for v in values
+        ).evaluate()
+
     def average(self, other, weight1=1, weight2=1):
         return (self*weight1).addtreatzero(other*weight2)/(weight1 + weight2)
 
@@ -841,13 +855,15 @@ class AsymmetricUncertainty:
 
     # allow different instances to be dict keys based on id
     def __hash__(self):
-        return hash(self.id) if self.id else super().__hash__()
+        id = self._id
+        return hash(id) if id else super().__hash__()
 
     def __eq__(self, other):
         if not isinstance(other, AsymmetricUncertainty):
             return NotImplemented
-        if self.id:
-            return self.id == other.id
+        id = self._id
+        if id:
+            return id == other._id
         return super().__eq__(other)
 
     # array-specific stuff
@@ -1013,8 +1029,15 @@ class LinearExpression:
         if lazy and not AsymmetricUncertainty.get_ignore_correlations():
             return AsymmetricUncertainty(None, None, expression=self)
 
-        disjoint = (len(self.variables) ==
-                    sum(len(key) for key in self.coefficients.keys()))
+        # index the terms by leaf once, so that each partial derivative
+        # only visits the terms containing that leaf
+        by_leaf = defaultdict(list)
+        nleaves = 0
+        for key, coeff in self.coefficients.items():
+            nleaves += len(key)
+            for leaf in key:
+                by_leaf[leaf].append((key, coeff))
+        disjoint = len(by_leaf) == nleaves
         if disjoint:
             # all of these variables are uncorrelated
             with AsymmetricUncertainty.ignore_correlations():
@@ -1033,8 +1056,11 @@ class LinearExpression:
         mode = sum(reduce(operator.mul, (v.mode for v in key), coeff)
                    for key, coeff in self.coefficients.items())
         v0, v1 = (0, 0)
-        for variable in self.variables:
-            val = self.partialderivative(variable).evaluate(lazy=lazy)
+        for variable, entries in by_leaf.items():
+            partial = LinearExpression()
+            for key, coeff in entries:
+                partial.coefficients[key.difference({variable})] = coeff
+            val = partial.evaluate(lazy=lazy)
             v0 += (val.modesq + val.v0 / 2) * (
                 (val.mode >= 0) * variable.v0 + (val.mode < 0) * variable.v1)
             v1 += (val.modesq + val.v1 / 2) * (
@@ -1052,6 +1078,23 @@ class LinearExpression:
     def __copy__(self) -> 'LinearExpression':
         result = LinearExpression()
         result.coefficients.update(self.coefficients)
+        return result
+
+    @classmethod
+    def sum(cls, items: Iterable) -> 'LinearExpression':
+        """ The sum of LinearExpressions and plain offsets in `items`, in
+        one pass. Adding them one by one copies the running total each time
+        """
+        result = cls()
+        coefficients = result.coefficients
+        for item in items:
+            terms = (item.coefficients.items()
+                     if isinstance(item, LinearExpression)
+                     else ((frozenset(), item),))
+            for key, val in terms:
+                # not +=, which would change arrays shared with the items
+                coefficients[key] = (coefficients[key] + val
+                                     if key in coefficients else val)
         return result
 
     def __add__(self, other):
@@ -1129,3 +1172,29 @@ class LinearExpression:
             return self.coefficients == other.coefficients
         except AttributeError:
             return NotImplemented
+
+
+def sum_values(values: Iterable):
+    """ Add up `values`, skipping Nones; None if there are none left. The
+    same as adding them one by one, but when they are all
+    AsymmetricUncertainties or pint Quantities of them (in the units of the
+    first), or Histograms of them, in one pass
+    """
+    values = [v for v in values if v is not None]
+    if not values:
+        return None
+    first = values[0]
+    if len(values) == 1:
+        return first
+    from .histogram import Histogram
+    if all(isinstance(v, Histogram) for v in values):
+        return Histogram.sum_all(values)
+    if all(isinstance(v, AsymmetricUncertainty) for v in values):
+        return AsymmetricUncertainty.sum_all(values)
+    if all(hasattr(v, 'dimensionality')
+           and isinstance(v.m, AsymmetricUncertainty) for v in values):
+        unit = first.u
+        total = AsymmetricUncertainty.sum_all(
+            v.m if v.u == unit else v.to(unit).m for v in values)
+        return first.__class__(total, unit)
+    return reduce(operator.add, values)

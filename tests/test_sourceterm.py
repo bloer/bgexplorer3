@@ -8,7 +8,7 @@ from bgexplorer.models.component import (Component, Placement, Assembly,
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.assay import Assay
 from bgexplorer.models.sourceterm import (SourceTerm, CalculatedResults,
-                                          clear_results_cache)
+                                          ResultsCache, clear_results_cache)
 from bgexplorer.models.settings import VersionSettings, get_settings
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
@@ -164,6 +164,33 @@ class TestSourceTerm(unittest.TestCase):
         c1.save()
         expected.update({'a1/c1': 2, 'a2/a1/c1': 2})
         self.assertEqual(counts(), expected)
+
+    def test2_confidence_rating(self):
+        """ SourceTerms copy their leaf component's rating, and follow it """
+        e1 = EmissionSpec(name="e1", sources=[
+            EmissionSource(name="Th232", rate="10 mBq/kg")]).save()
+        c1 = Component(name="c1", mass="2 kg", specs=[e1],
+                       confidence_rating=4).save()
+        c2 = Component(name="c2", mass="2 kg", specs=[e1]).save()
+        a1 = Assembly(name="a1", components=[c1, c2]).save()
+
+        def ratings():
+            return {st.assemblyPathStr: st.confidence_rating
+                    for st in SourceTerm.objects}
+        self.assertEqual(ratings(), {'c1': 4, 'c2': None, 'a1/c1': 4,
+                                     'a1/c2': None})
+
+        c1.reload()
+        c1.confidence_rating = 2
+        c1.save()
+        c2.reload()
+        c2.confidence_rating = 5
+        c2.save()
+        self.assertEqual(ratings(), {'c1': 2, 'c2': 5, 'a1/c1': 2,
+                                     'a1/c2': 5})
+        c1.confidence_rating = None
+        c1.save()
+        self.assertEqual(ratings()['a1/c1'], None)
 
     def test3_hiteffs(self):
         """ Test that queries find HitEfficiencies """
@@ -352,6 +379,13 @@ class TestSourceTerm(unittest.TestCase):
         CalculatedResults.for_object(a1, save=True, spectra=False)
         self.assertEqual(CalculatedResults.objects.count(), 0)
 
+        # nothing is stored unless asked
+        CalculatedResults.for_object(a1, cache=False)
+        self.assertEqual(CalculatedResults.objects.count(), 0)
+        CalculatedResults.for_object(a1, save=True, cache=False)
+        self.assertEqual(CalculatedResults.objects.count(), 1)
+        CalculatedResults.drop_collection()
+
         # test that hiteffs are removed appropriately
         h1.location = 'somewhere else'
         h1.save()
@@ -428,6 +462,67 @@ class TestSourceTerm(unittest.TestCase):
         settings = get_settings()
         clone = settings.clone('other')
         self.assertNotEqual(settings.cache_token, clone.cache_token)
+
+    def test6_stamps(self):
+        """ A SourceTerm's stamp only changes when its content does """
+        VersionSettings.drop_collection()
+        settings = get_settings()
+        HitEfficiency(source="Co60", location="loc", scalars=dict(
+            v1=AsymmetricUncertainty(0.1, 0.01)*units('dru/mBq'))).save()
+        e1 = spec_of(EmissionSource(name="Co60", rate="10 +- 1 mBq/kg"))
+        c = Component(name="c", mass="2 kg", location="loc",
+                      specs=[e1]).save()
+        a = Assembly(name="a", components=[c]).save()
+
+        def stamps():
+            return {st.assemblyPathStr: st.stamp for st in SourceTerm.objects}
+        before = stamps()
+        self.assertEqual(len(before), 2)
+        self.assertEqual(len(set(before.values())), 2)
+        self.assertTrue(all(before.values()))
+        # saved and recalculated values agree
+        for st in SourceTerm.objects:
+            self.assertEqual(st.stamp, st.content_stamp())
+
+        def tokens():
+            settings.reload()
+            return settings.cache_token, settings.calc_token
+        tokens_before = tokens()
+        # saving again changes nothing about the terms, nor the stamps
+        c.reload()
+        c.save()
+        self.assertEqual(stamps(), before)
+        # edits to components change the cache token but not the
+        # calculation token, since the stamps cover them
+        self.assertNotEqual(tokens()[0], tokens_before[0])
+        self.assertEqual(tokens()[1], tokens_before[1])
+
+        c.confidence_rating = 3
+        c.save()
+        after = stamps()
+        self.assertNotEqual(after['c'], before['c'])
+        self.assertNotEqual(after['a/c'], before['a/c'])
+        self.assertEqual(
+            {st.assemblyPathStr: st.stamp == st.content_stamp()
+             for st in SourceTerm.objects}, {'c': True, 'a/c': True})
+
+        a.reload()
+        a.children[0].weight = 2
+        a.save()
+        weighted = stamps()
+        self.assertEqual(weighted['c'], after['c'])
+        self.assertNotEqual(weighted['a/c'], after['a/c'])
+
+        # HitEfficiencies change the calculation token, and the stamps of
+        # the SourceTerms using them
+        h = HitEfficiency.objects.get(source="Co60")
+        calc = tokens()[1]
+        h.scalars = dict(v1=AsymmetricUncertainty(0.2, 0.01)*units('dru/mBq'))
+        h.save()
+        self.assertNotEqual(tokens()[1], calc)
+        self.assertEqual(stamps(), weighted)
+        h.delete()
+        self.assertNotEqual(stamps()['c'], weighted['c'])
 
 
 class TestLocationOverride(unittest.TestCase):
@@ -586,3 +681,73 @@ class TestLocationOverride(unittest.TestCase):
         c1.location_overrides.append(LocationOverride(location="Package"))
         with self.assertRaises(ValidationError):
             c1.save()
+
+
+class TestResultsCache(unittest.TestCase):
+    def test_cached(self):
+        cache = ResultsCache(2)
+        calls = []
+        for key in ('a', 'a', 'b', 'c', 'a'):
+            cache.get((key,), lambda: calls.append(key) or key)
+        # 'a' was evicted by 'c', and None isn't cached
+        self.assertEqual(calls, ['a', 'b', 'c', 'a'])
+        cache.get(None, lambda: calls.append('none'))
+        cache.get(None, lambda: calls.append('none'))
+        self.assertEqual(calls[-2:], ['none', 'none'])
+
+    def test_single_flight(self):
+        """ concurrent requests for a key share one calculation """
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+        cache = ResultsCache(4)
+        calls = []
+        started = threading.Event()
+        release = threading.Event()
+
+        def calculate():
+            calls.append(1)
+            started.set()
+            release.wait(5)
+            return 'value'
+
+        with ThreadPoolExecutor(6) as pool:
+            first = pool.submit(cache.get, ('k',), calculate)
+            self.assertTrue(started.wait(5))
+            others = [pool.submit(cache.get, ('k',), calculate)
+                      for _ in range(4)]
+            # a different key isn't held up
+            self.assertEqual(cache.get(('other',), lambda: 'o'), 'o')
+            release.set()
+            results = [f.result(5) for f in [first] + others]
+        self.assertEqual(results, ['value'] * 5)
+        self.assertEqual(len(calls), 1)
+
+    def test_failure_not_shared(self):
+        """ a failed calculation isn't cached, and waiters try for themselves
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+        cache = ResultsCache(4)
+        started = threading.Event()
+        release = threading.Event()
+
+        def fails():
+            started.set()
+            release.wait(5)
+            raise RuntimeError("failed")
+
+        with ThreadPoolExecutor(2) as pool:
+            first = pool.submit(cache.get, ('k',), fails)
+            self.assertTrue(started.wait(5))
+            second = pool.submit(cache.get, ('k',), lambda: 'ok')
+            release.set()
+            with self.assertRaises(RuntimeError):
+                first.result(5)
+            self.assertEqual(second.result(5), 'ok')
+        self.assertEqual(cache.get(('k',), lambda: 'again'), 'ok')
+
+    def test_reentrant(self):
+        cache = ResultsCache(4)
+        self.assertEqual(
+            cache.get(('k',), lambda: cache.get(('k',), lambda: 'inner')),
+            'inner')

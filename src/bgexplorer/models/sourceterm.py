@@ -1,10 +1,11 @@
 from functools import cached_property, reduce
 import operator
+import hashlib
 from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
                          StringField, BooleanField, MapField, Document,
                          SortedListField, CASCADE, PULL, ReferenceField,
                          EmbeddedDocumentListField, ObjectIdField,
-                         ValidationError)
+                         ValidationError, IntField)
 from .verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedQuerySet, VersionedListField,
                      VersionedEmbeddedDocumentListField)
@@ -17,7 +18,8 @@ from .asymmetric import AsymmetricUncertainty, LinearExpression
 from .histogram import Histogram
 from .hiteff import HitEfficiency
 from .isotope import concentration_to_rate
-from .common import units, addnone, multnone
+from .common import units, addnone, multnone, Quantity
+from .asymmetric import sum_values
 from . import settings
 from typing import List, Optional, Union, Dict, Tuple, Iterable
 from collections import defaultdict, OrderedDict
@@ -54,8 +56,12 @@ class SourceTerm(VersionedDocument):
     componentName = StringField()
     assemblyPathStr = StringField()
     material = StringField()
+    confidence_rating = IntField(choices=[1, 2, 3, 4, 5])
     # make queries against placement path much easier to assemble
     placement_ids = ListField(ObjectIdField())
+    # identifies everything that determines this term's calculated values
+    # other than the HitEfficiencies' content, see `content_stamp`
+    stamp = StringField()
 
     meta = {'indexes': ['assemblyPath', 'source.id', 'hiteffs',
                         'assemblyPath.component', 'placement_ids']}
@@ -67,14 +73,23 @@ class SourceTerm(VersionedDocument):
         except IndexError:
             return self.assemblyRoot
 
-    @cached_property
-    def emissionrate(self):
-        if self.source.rate is None:
-            return None
+    @property
+    def unweighted_rate(self):
+        """ The source's rate, in specific activity if it was a concentration,
+        before the weight and rate multiplier are applied. None if it has none
+        """
         rate = self.source.rate
         # convert ppb-like units to specific activity
-        if self.source.multiplier is Multiplier.mass and rate.dimensionless:
+        if (rate is not None and self.source.multiplier is Multiplier.mass
+                and rate.dimensionless):
             rate = concentration_to_rate(self.source.name, rate)
+        return rate
+
+    @cached_property
+    def emissionrate(self):
+        rate = self.unweighted_rate
+        if rate is None:
+            return None
         return rate * self.weight * self.rate_multiplier
 
 
@@ -122,6 +137,25 @@ class SourceTerm(VersionedDocument):
                 (self.location_origin or '').startswith('override'))
 
 
+    def content_stamp(self) -> str:
+        """ A digest of everything about this SourceTerm that its values
+        and keys in a budget depend on, besides the content of its
+        HitEfficiencies. The same for SourceTerms with the same content
+        """
+        # the stored _id, which is what a reference that isn't dereferenced
+        # yet has (ref_id gives original_id for documents)
+        hiteffs = [str(h.id) for h in self._data.get('hiteffs') or []]
+        multiplier = self.rate_multiplier
+        if isinstance(multiplier, Quantity):
+            multiplier = (float(multiplier.m), str(multiplier.u))
+        else:
+            multiplier = (float(multiplier), '')
+        content = (self.source.to_mongo(), float(self.weight), multiplier,
+                   self.material,
+                   self.componentName, self.confidence_rating,
+                   [str(pid) for pid in self.placement_ids], hiteffs)
+        return hashlib.sha1(repr(content).encode()).hexdigest()[:20]
+
     def clean(self):
         super().clean()
         self.clear_results()
@@ -135,6 +169,7 @@ class SourceTerm(VersionedDocument):
         self.assemblyPathStr = '/'.join([self.assemblyRoot.name] +
                                         [p.name for p in self.assemblyPath])
         self.material = self.component.material
+        self.confidence_rating = self.component.confidence_rating
         # clear cached properties1
         try:
             del self.emissionrate
@@ -142,6 +177,7 @@ class SourceTerm(VersionedDocument):
             pass
         self.livetimes = [hit.get_livetime(self.emissionrate)
                           for hit in self.hiteffs]
+        self.stamp = self.content_stamp()
 
     @property
     def hiteffs_query(self) -> VersionedQuerySet:
@@ -199,6 +235,7 @@ class SourceTerm(VersionedDocument):
                            set__componentName=self.component.name,
                            set__assemblyPathStr=self.assemblyPathStr,
                            set__material=self.material,
+                           set__confidence_rating=self.confidence_rating,
                            )
         if not self.hiteffs_auto:
             update_dict['set__hiteffs_auto'] = self.hiteffs_auto
@@ -209,6 +246,10 @@ class SourceTerm(VersionedDocument):
         st.clear_results()
         if update_hiteffs and st.hiteffs_auto:
             st.find_hiteffs()
+        # find_hiteffs stamps it when it changes anything
+        if st.stamp != (stamp := st.content_stamp()):
+            st.update(set__stamp=stamp)
+            st.stamp = stamp
         return st
 
     @classmethod
@@ -262,7 +303,16 @@ def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource, HitEffi
 
 
 class CalculatedResults(Document):
-    """ Cache normalized HitEff results """
+    """ Normalized HitEff results stored in the database.
+
+    Legacy: nothing saves these any more. The budget pages sum the
+    SourceTerms in memory (`budget.term_values`) behind the in-memory
+    `ResultsCache`s, and `for_object` only stores results if called with
+    `save=True`. The machinery is kept because the stored expressions
+    (`scalars_expr`, `spectra_expr`) allow correlations to be reconstructed
+    from stored results, and is still invalidated when SourceTerms or
+    HitEfficiencies change.
+    """
     # TODO: should this be a versioned document? it's acting as a cache
     # TODO: how to make sure there are no scalars/rois collisions?
     scalars = MapField(UncertainQuantityField(allownone=True,
@@ -320,11 +370,12 @@ class CalculatedResults(Document):
 
     @classmethod
     def for_object(cls, obj, relativeto: Optional[Assembly] = None,
-                   save: bool = True, spectra: bool = True,
+                   save: bool = False, spectra: bool = True,
                    cache: bool = True, correlations: bool = True):
         """ Calculate results for all SourceTerms of `obj`, optionally
         only the part in assembly `relativeto`. If `cache`, results are
-        kept in memory until any data in the version changes.
+        kept in memory until any data in the version changes. If `save`,
+        they are also stored in the database (see `CalculatedResults`).
 
         If not `correlations`, saved results are loaded without their
         correlations, which is faster when they're only shown.
@@ -448,18 +499,20 @@ class CalculatedResults(Document):
         """ Add up the output of `_calculate` for each of `sourceterms`.
         Returns None if none of them have hiteffs
         """
-        scalars, hists = {}, {}
+        scalar_parts, hist_parts = defaultdict(list), defaultdict(list)
         found = False
         for part in parts:
             if part is None:
                 continue
             found = True
             for key, val in part[0].items():
-                scalars[key] = addnone(scalars.get(key), val)
+                scalar_parts[key].append(val)
             for key, val in part[1].items():
-                hists[key] = addnone(hists.get(key), val)
+                hist_parts[key].append(val)
         if not found:
             return None
+        scalars = {key: sum_values(vals) for key, vals in scalar_parts.items()}
+        hists = {key: sum_values(vals) for key, vals in hist_parts.items()}
         return cls(scalars=scalars, spectra=hists,
                    sources=list(sourceterms)).ito_reduced_units()
 
@@ -512,17 +565,28 @@ class CalculatedResults(Document):
         return result
 
 
+class _Flight:
+    """ A calculation in progress, which other threads can wait for """
+    def __init__(self):
+        self.done = threading.Event()
+        self.thread = threading.get_ident()
+
+
 class ResultsCache:
     """ In-memory LRU cache of calculated results. Keys start with the
     version's cache token, which changes whenever any data in the version
     changes, so entries never need invalidating and it is safe with multiple
-    processes. Results are shared, so must not be modified
+    processes. Results are shared, so must not be modified.
+
+    If several threads want the same missing key at once, one calculates it
+    and the others wait for it, rather than all repeating a slow calculation.
     """
     instances = []
 
     def __init__(self, size: int):
         self.size = size
         self._entries = OrderedDict()
+        self._flights = {}
         self._lock = threading.Lock()
         ResultsCache.instances.append(self)
 
@@ -532,19 +596,56 @@ class ResultsCache:
         """
         if key is None:
             return calculate()
-        with self._lock:
-            result = self._entries.get(key, _MISSING)
-            if result is not _MISSING:
-                self._entries.move_to_end(key)
-                return result
+        while True:
+            with self._lock:
+                result = self._entries.get(key, _MISSING)
+                if result is not _MISSING:
+                    self._entries.move_to_end(key)
+                    return result
+                flight = self._flights.get(key)
+                if flight is None:
+                    flight = self._flights[key] = _Flight()
+                    break
+            if flight.thread == threading.get_ident():
+                # calculating this key needs this key
+                return calculate()
+            # if the calculation failed, try again ourselves
+            flight.done.wait()
         # if the data change while calculating, the result is stored with
         # the old token and never used
-        result = calculate()
+        try:
+            result = calculate()
+            with self._lock:
+                self._entries[key] = result
+                while len(self._entries) > self.size:
+                    self._entries.popitem(last=False)
+            return result
+        finally:
+            with self._lock:
+                del self._flights[key]
+            flight.done.set()
+
+    def get_many(self, keys: Iterable) -> dict:
+        """ The cached results of those of `keys` that have any, without
+        calculating the rest
+        """
+        found = {}
         with self._lock:
-            self._entries[key] = result
+            for key in keys:
+                result = self._entries.get(key, _MISSING)
+                if result is not _MISSING:
+                    self._entries.move_to_end(key)
+                    found[key] = result
+        return found
+
+    def put_many(self, items: Dict) -> None:
+        """ Cache several results at once """
+        with self._lock:
+            self._entries.update(items)
+            for key in items:
+                self._entries.move_to_end(key)
             while len(self._entries) > self.size:
                 self._entries.popitem(last=False)
-        return result
 
     def clear(self):
         with self._lock:

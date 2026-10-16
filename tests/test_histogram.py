@@ -2,6 +2,8 @@ import unittest
 import numpy as np
 from numpy.testing import assert_array_equal, assert_array_almost_equal
 from bgexplorer.models.histogram import Histogram
+from bgexplorer.models.asymmetric import AsymmetricUncertainty, sum_values
+from bgexplorer.models.common import units, DimensionalityError
 
 
 class TestHistogram(unittest.TestCase):
@@ -73,6 +75,45 @@ class TestHistogram(unittest.TestCase):
     def test7_default_bins(self):
         h = Histogram(np.array([1., 2.]))
         assert_array_almost_equal(h.bin_edges, [0, 1, 2])
+
+    def uncertain(self, unit, *leaves):
+        """ A Histogram in `unit` with a bin made of each of `leaves` and
+        its scalings. The bins are one array-valued AsymmetricUncertainty
+        """
+        mode = np.array([leaf.mode * (i + 1) + 1
+                         for i, leaf in enumerate(leaves)])
+        sigma = np.array([leaf.s0 * (i + 1) for i, leaf in enumerate(leaves)])
+        value = AsymmetricUncertainty(mode, sigma, sigma, id=str(leaves))
+        return Histogram(units.Quantity(value, unit),
+                         units.Quantity(np.arange(len(leaves) + 1.), 'keV'))
+
+    def test8_sum_all(self):
+        a, b, c = (AsymmetricUncertainty(m, 0.1 * m, id=i)
+                   for m, i in [(10., 'a'), (5., 'b'), (2., 'c')])
+        hists = [self.uncertain('dru', a, b, c),
+                 self.uncertain('dru', b, b, a),
+                 self.uncertain('mdru', c, a, c)]
+        expected = hists[0] + hists[1] + hists[2]
+        total = sum_values(hists)
+        self.assertIsInstance(total, Histogram)
+        self.assertEqual(total.hist.u, units.dru)
+        assert_array_equal(total.bin_edges.m, hists[0].bin_edges.m)
+        for field in ('mode', 's0', 's1'):
+            assert_array_almost_equal(getattr(total.hist.m, field),
+                                      getattr(expected.hist.m, field))
+        # correlations are kept
+        diff = sum_values([hists[0], -hists[0]])
+        assert_array_almost_equal(diff.hist.m.mode, 0)
+        assert_array_almost_equal(diff.hist.m.s1, 0)
+        # the inputs are unchanged
+        assert_array_almost_equal(hists[0].hist.m.mode, [11, 11, 7])
+        # others are added as before
+        assert_array_equal(sum_values([self.h, self.h, self.h]).hist, [3, 6, 9])
+        # units must match and so must bins
+        with self.assertRaises(DimensionalityError):
+            sum_values([hists[0], self.uncertain('kg', a, b, c)])
+        with self.assertRaises(ValueError):
+            sum_values([hists[0], self.uncertain('dru', a, b)])
 
 
 if __name__ == '__main__':

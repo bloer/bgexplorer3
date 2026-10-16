@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from numpy.testing import *
 from bgexplorer.models.asymmetric import (AsymmetricUncertainty, LinearExpression,
-                                         InMemoryLeafStore,
+                                         InMemoryLeafStore, sum_values,
                                          CorrelationsNotLoaded)
 from bgexplorer.models.common import units, pint
 
@@ -153,6 +153,80 @@ class TestAsymmetric(unittest.TestCase):
         self.assertAlmostEqual(x.mode, z.mode)
         self.assertGreater(x.s0, z.s0)
         self.assertGreater(x.s1, z.s1)
+
+    def test5b_overlapping_leaves(self):
+        """ the leaf index gives the same variance as per-leaf derivatives """
+        rng = np.random.default_rng(3)
+        leaves = [AsymmetricUncertainty(rng.uniform(1, 5), rng.uniform(.1, 1),
+                                        rng.uniform(.1, 1))
+                  for _ in range(6)]
+        total = 0
+        for _ in range(12):
+            pick = rng.choice(len(leaves), size=rng.integers(1, 4),
+                              replace=False)
+            term = rng.uniform(-2, 2)
+            for i in pick:
+                term = term * leaves[i]
+            total = total + term
+        total = total + 1.5
+        expr = total.expression
+        mode = sum(np.prod([v.mode for v in key]) * coeff
+                   for key, coeff in expr.coefficients.items())
+        v0 = v1 = 0
+        for variable in expr.variables:
+            d = expr.partialderivative(variable).evaluate()
+            lo, hi = ((variable.v0, variable.v1) if d.mode >= 0
+                      else (variable.v1, variable.v0))
+            v0 += (d.modesq + d.v0 / 2) * lo
+            v1 += (d.modesq + d.v1 / 2) * hi
+        self.assertAlmostEqual(total.mode, mode)
+        self.assertAlmostEqual(total.s0, np.sqrt(v0))
+        self.assertAlmostEqual(total.s1, np.sqrt(v1))
+
+    def test5c_sum(self):
+        """ a one-pass sum is the same as adding one by one """
+        x = self.a * self.b
+        values = [x, self.a, 3 * self.a + self.c, self.b * self.c, 2.5,
+                  self.lim1]
+        expected = values[0]
+        for v in values[1:]:
+            expected = expected + v
+        result = AsymmetricUncertainty.sum_all(values)
+        self.assertAlmostEqual(result.mode, expected.mode)
+        self.assertAlmostEqual(result.s0, expected.s0)
+        self.assertAlmostEqual(result.s1, expected.s1)
+        # inputs aren't changed
+        self.assertAlmostEqual(x.mode, 50)
+        self.assertEqual(self.a.expression.coefficients,
+                         AsymmetricUncertainty(10, 0.2, id=self.a.id
+                                               ).expression.coefficients)
+        with AsymmetricUncertainty.ignore_correlations():
+            plain = AsymmetricUncertainty.sum_all(values)
+            expected = values[0] + values[1] + values[2] + values[3] + \
+                values[4] + values[5]
+        self.assertAlmostEqual(plain.s0, expected.s0)
+        # arrays are not changed in place
+        arr = AsymmetricUncertainty(np.array([1., 2.]), np.ones(2),
+                                    id='arr')
+        total = AsymmetricUncertainty.sum_all([arr, arr, 1])
+        assert_allclose(total.mode, [3, 5])
+        assert_allclose(arr.mode, [1, 2])
+
+    def test5d_sum_values(self):
+        self.assertIsNone(sum_values([]))
+        self.assertIsNone(sum_values([None, None]))
+        self.assertIs(sum_values([None, self.a]), self.a)
+        # pint quantities are converted to the first one's units
+        q = sum_values([self.a * units.kg, None, self.b * units.g,
+                        self.a * units.g])
+        self.assertEqual(q.u, units.kg)
+        expected = self.a + self.b / 1000 + self.a / 1000
+        self.assertAlmostEqual(q.m.mode, expected.mode)
+        self.assertAlmostEqual(q.m.s0, expected.s0)
+        with self.assertRaises(pint.DimensionalityError):
+            sum_values([self.a * units.kg, self.b * units.m])
+        # anything else is added up
+        self.assertEqual(sum_values([1, None, 2]), 3)
 
     def test6_lazy(self):
         """ test that intermediate objects are not evaluated """

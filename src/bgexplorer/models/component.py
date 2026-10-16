@@ -94,7 +94,11 @@ class Component(VersionedDocument):
     )
 
     hierarchy_level = IntField(default=1, help_text="how many levels of nested components are below us?")
-    # TODO: need to add some assay quality info
+    confidence_rating = IntField(
+        choices=[1, 2, 3, 4, 5],
+        help_text="How well known are the parameters; how precise is the "
+                  "matching to assays? 5 is the actual part, 1 a wild guess",
+    )
     material_purchaseinfo = EmbeddedDocumentField(PurchaseInfo)
     purchaseinfo = EmbeddedDocumentField(PurchaseInfo)
     extra_metadata = DictField()

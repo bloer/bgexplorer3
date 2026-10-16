@@ -100,6 +100,47 @@ class TestComponentPages(AppTestCase):
         self.assertIsNone(Component.select_version('main')
                           .get(name='c1').description)
 
+    def test_confidence_rating(self):
+        """ the rating is set from the component form, not the assembly's """
+        url = self.url('component.edit', 'b', object=self.c1)
+        self.assertIn('name="confidence_rating"',
+                      self.html(self.client.get(url)))
+        self.assertNotIn('name="confidence_rating"', self.html(
+            self.client.get(self.url('component.edit', 'b',
+                                     object=self.a1))))
+        self.assertNotIn('name="confidence_rating"', self.html(
+            self.client.get(self.url('component.edit', 'b',
+                                     type='assembly'))))
+        for submitted, expected in (('3', 3), ('', None)):
+            with self.subTest(submitted=submitted):
+                response = self.client.post(
+                    url, data={'confidence_rating': submitted})
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(Component.select_version('b').get(
+                    name='c1').confidence_rating, expected)
+        self.client.post(url, data={'confidence_rating': '3'})
+        html = self.html(self.client.get(url))
+        self.assertIn('<option value="3" selected>', html)
+        self.assertIn('<option value="">--</option>', html)
+        response = self.client.post(url, data={'confidence_rating': '6'})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('confidence_rating', self.html(response))
+
+        # the document JSON has it only when rated
+        c1 = Component.select_version('b').get(name='c1')
+        apiurl = self.url('component.get_json', 'b', object=c1)
+        self.client.post(url, data={'confidence_rating': '5'})
+        data = json.loads(self.client.get(apiurl).get_data())
+        self.assertEqual(data['confidence_rating'], 5)
+        self.client.post(url, data={'confidence_rating': ''})
+        data = json.loads(self.client.get(apiurl).get_data())
+        self.assertNotIn('confidence_rating', data)
+
+        self.assertIn('Confidence rating', self.html(self.client.get(
+            self.url('component.view', 'b', object=self.c1))))
+        self.assertNotIn('Confidence rating', self.html(self.client.get(
+            self.url('component.view', 'b', object=self.a1))))
+
     def test_clone(self):
         html = self.html(self.client.get(self.url('component.view', 'b',
                                                   object=self.a1)))
