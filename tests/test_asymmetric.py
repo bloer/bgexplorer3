@@ -230,6 +230,74 @@ class TestAsymmetric(unittest.TestCase):
         assert_equal(result.s1, arr.s1)
         self.assertEqual(result.u, units.keV)
 
+    def test9_format(self):
+        # (mode, s0, s1): {format_spec: expected}
+        cases = {
+            (12.3, 0.3, 9): {
+                '': '12.30 +9.00 -0.30',
+                'S': '12.30(9.00|0.30)',
+                'L': r'12.30^{+9.00}_{-0.30}',
+                'LS': r'12.30\left(^{9.00}_{0.30}\right)',
+                '.1u': '12.3 +9.0 -0.3',
+            },
+            (12.34, 0.12, 0.35): {
+                '': '12.34 +0.35 -0.12',
+                'S': '12.34(35|12)',
+                'LS': r'12.34\left(^{35}_{12}\right)',
+            },
+            # errors within 10%: symmetric, rounded by the average
+            (12.3, 0.30, 0.32): {
+                '': '12.30+/-0.31',
+                'S': '12.30(31)',
+                'L': r'12.30 \pm 0.31',
+            },
+            # ...but not if the average is more than half the mode
+            (0.5, 0.30, 0.32): {
+                '': '0.50 +0.32 -0.30',
+                'S': '0.50(32|30)',
+            },
+            (1.2e6, 3.4e5, 5e4): {
+                '': '(1.20 +0.05 -0.34)e+06',
+                'P': '(1.20 +0.05 -0.34)×10⁶',
+                'S': '1.20(5|34)e+06',
+                'L': r'\left(1.20^{+0.05}_{-0.34}\right) \times 10^{6}',
+                'LS': r'1.20\left(^{\phantom{0}5}_{34}\right) \times 10^{6}',
+            },
+            (0.00123, 0.0003, 0.009): {
+                '': '0.00123 +0.00900 -0.00030',
+                'S': '0.00123(900|30)',
+                'LS': r'0.00123\left(^{900}_{\phantom{0}30}\right)',
+            },
+            (12.3, 0.96, 3): {
+                '': '12.3 +3.0 -1.0',
+                'S': '12.3(3.0|1.0)',
+            },
+            (1234.5, 0.3, 950): {
+                '': '1234.50 +950.00 -0.30',
+                'L': r'1234.50^{+950.00}_{-\phantom{00}0.30}',
+            },
+            (-4.2, 0.5, 1.1): {'': '-4.2 +1.1 -0.5'},
+            (5, 0, 2): {'': '5.0 +2.0 -0'},
+        }
+        for args, specs in cases.items():
+            for spec, expected in specs.items():
+                with self.subTest(args=args, spec=spec):
+                    self.assertEqual(format(AsymmetricUncertainty(*args), spec),
+                                     expected)
+
+    def test9_format_roundtrip(self):
+        from bgexplorer.models.fields import QuantityField
+        field = QuantityField()
+        for args in ((12.3, 0.3, 9), (1.2e6, 3.4e5, 5e4), (-4.2, 0.5, 1.1),
+                     (0.00123, 0.0003, 0.009)):
+            with self.subTest(args=args):
+                val = AsymmetricUncertainty(*args)
+                result = field._fromstr(str(val)).m
+                for attr in ('mode', 's0', 's1'):
+                    self.assertAlmostEqual(getattr(result, attr),
+                                           getattr(val, attr), delta=0.01 *
+                                           max(abs(val.mode), val.s1))
+
 
 class TestLeaves(unittest.TestCase):
     """ Independent variables have ids and can't change """
