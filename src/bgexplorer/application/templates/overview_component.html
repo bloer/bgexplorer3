@@ -15,9 +15,15 @@
 <div class="col-5"><h1>Components</h1></div>
 <div class="col-7 d-flex justify-content-end align-items-center">
     {%- if can_edit %}
-    <a class="btn btn-success me-1" id="newcomponent" href="{{ url_for('.edit') }}">New Component</a>
-    <a class="btn btn-success me-1" id="newassembly" href="{{ url_for('.edit', type='assembly') }}">New Assembly</a>
-    <a class="btn btn-outline-primary" id="import" href="{{ url_for('.import_') }}">Import</a>
+    <button class="btn btn-success dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+        Create
+    </button>
+    <ul class="dropdown-menu">
+        <li><a class="dropdown-item" id="newcomponent" href="{{ url_for('.edit') }}">New Component</a></li>
+        <li><a class="dropdown-item" id="newassembly" href="{{ url_for('.edit', type='assembly') }}">New Assembly</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" id="import" href="{{ url_for('.import_') }}">Import</a></li>
+    </ul>
     {%- endif %}
 </div>
 {% endblock %}
@@ -47,4 +53,3 @@ batch {{ component.purchaseinfo.batch or component.purchaseinfo.material_batch }
     {% endfor %}
 {% endcall %}
 {% endblock %}
-

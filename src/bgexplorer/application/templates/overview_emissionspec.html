@@ -20,13 +20,19 @@
     <a class="btn btn-outline-secondary me-1" id="toggleowned" href="{{ url_for('.overview', owned=1) }}" title="Also list specs that belong to one component">Show component-specific</a>
     {%- endif %}
     {%- if can_edit %}
-    <a class="btn btn-success me-1" id="newemissionspec" href="{{ url_for('.edit') }}">New Emission Spec</a>
-    {%- for subclass in doc_cls._subclasses[1:] %}
-    {%- set typename = subclass.rsplit('.', 1)[-1] %}
-    <a class="btn btn-success me-1" id="new{{ typename | lower }}" href="{{ url_for('.edit', type=typename | lower) }}">New {{ typename }}</a>
-    {%- endfor %}
-    <a class="btn btn-outline-primary me-1" id="import" href="{{ url_for('.import_') }}">Import</a>
-    <a class="btn btn-outline-primary" id="importradiopurity" href="{{ url_for('radiopurity.search') }}">Import from radiopurity.org</a>
+    <button class="btn btn-success dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+        Create
+    </button>
+    <ul class="dropdown-menu">
+        <li><a class="dropdown-item" id="newemissionspec" href="{{ url_for('.edit') }}">New generic spec</a></li>
+        {%- for subclass in doc_cls._subclasses[1:] %}
+        {%- set typename = subclass.rsplit('.', 1)[-1] %}
+         <li><a class="dropdown-item" id="new{{ typename | lower }}" href="{{ url_for('.edit', type=typename | lower) }}">New {{ typename }}</a></li>
+        {%- endfor %}
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" id="newradiopurity" href="{{ url_for('radiopurity.search') }}">Import from radiopurity.org</a></li>
+        <li><a class="dropdown-item" id="import" href="{{ url_for('.import_') }}">Import from file</a></li>
+    </ul>
     {%- endif %}
 </div>
 {% endblock %}
