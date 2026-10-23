@@ -91,7 +91,6 @@ class Multiplier(Enum):
 
 class SourceCategory(Enum):
     target = 'target'
-    estimate = 'estimate'
     assay = 'assay'
     activation = 'activation'
     dust = 'dust'

@@ -19,7 +19,7 @@ role and a branch (not a tag); see [Users and roles](admin.html#users-and-roles)
 A typical order of work:
 
 1. Import or create the **hit efficiencies** from your simulations.
-2. Create **emission specs** for your materials: assays, estimates, radon and
+2. Create **emission specs** for your materials: assays, rough estimates, radon and
    cosmogenic exposure.
 3. Create **components** with their materials and geometry, and attach specs.
 4. Build **assemblies** out of components, up to one root assembly for the
@@ -104,8 +104,10 @@ Every spec has a name, description, comment, a **category**, an optional
 **multiplier** and a list of **sources**. The spec's category is used for any
 source without its own.
 
-Categories: `target`, `estimate`, `assay`, `activation`, `dust`, `radon`,
+Categories: `target`, `assay`, `activation`, `dust`, `radon`,
 `radon_emanation`, `environment`, `other`. They are used to group results.
+A category says where a rate comes from, not how well it is known: rate the
+spec's **confidence** where it is attached to a component instead.
 
 Each source has a **name** (usually an isotope, e.g. `U238`), a **rate**, and
 optionally its own category, multiplier, particle, spectrum and comment.
