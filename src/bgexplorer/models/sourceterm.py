@@ -10,7 +10,8 @@ from .verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedQuerySet, VersionedListField,
                      VersionedEmbeddedDocumentListField)
 from .verdoc import ref_id as _ref_id
-from .component import Component, Placement, Assembly
+from .component import (Component, Placement, Assembly, ComponentSpec,
+                        LocationMode)
 from .emissionspec import EmissionSpec, EmissionSource, Multiplier
 from .fields import (QuantityField, UncertainQuantityField, HistogramField,
                      RawDictField)
@@ -99,37 +100,48 @@ class SourceTerm(VersionedDocument):
             self.location, self.location_origin = self.resolve_location()
         return self.location
 
-    def resolve_location(self) -> Tuple[str, str]:
-        """ Find the location to match HitEfficiencies against, and a
-        description of where it came from.
-
-        The component or placement closest to the leaf wins. At each level,
-        a component's location_overrides for our spec/source come before its
-        location, and its parent's overrides for that placement before the
-        placement's location. Falls back to the component name.
+    def inherited_location(self) -> Tuple[str, str]:
+        """ The location from the component or placement closest to the leaf
+        that sets one, ignoring the spec's own setting, and a description of
+        where it came from. Falls back to the component name.
         """
-        name = self.source.name
         path = self.assemblyPath
         parents = [self.assemblyRoot] + [p.component for p in path[:-1]]
         for placement, parent in zip(reversed(path), reversed(parents)):
             component = placement.component
-            if found := component.find_location_override(self.spec, name):
-                return found.location, f"override on {component.name}"
             if component.location:
                 return component.location, f"component {component.name}"
-            if found := parent.find_location_override(self.spec, name,
-                                                      placement.id):
-                return (found.location,
-                        f"override on {parent.name} for {placement.name}")
             if placement.location:
                 return (placement.location,
                         f"placement {parent.name}/{placement.name}")
         root = self.assemblyRoot
-        if found := root.find_location_override(self.spec, name):
-            return found.location, f"override on {root.name}"
         if root.location:
             return root.location, f"component {root.name}"
         return self.component.name, "component name"
+
+    @property
+    def component_spec(self) -> Optional[ComponentSpec]:
+        """ The settings for our spec on our component """
+        return self.component.find_spec_entry(self.spec)
+
+    def resolve_location(self) -> Tuple[str, str]:
+        """ Find the location to match HitEfficiencies against, and a
+        description of where it came from.
+
+        The component or placement closest to the leaf wins, then the
+        location set for the spec on the component replaces it, or is added
+        to its start or end.
+        """
+        entry = self.component_spec
+        if entry is None or not entry.location:
+            return self.inherited_location()
+        component = self.component
+        if entry.location_mode is LocationMode.replace:
+            return entry.location, f"override on {component.name}"
+        base, origin = self.inherited_location()
+        return (entry.apply(base),
+                f"override on {component.name}"
+                f" ({entry.location_mode.value} to {origin})")
 
     @property
     def location_overridden(self) -> bool:
@@ -169,7 +181,10 @@ class SourceTerm(VersionedDocument):
         self.assemblyPathStr = '/'.join([self.assemblyRoot.name] +
                                         [p.name for p in self.assemblyPath])
         self.material = self.component.material
-        self.confidence_rating = self.component.confidence_rating
+        entry = self.component_spec
+        self.confidence_rating = (
+            entry.confidence_rating if entry and entry.confidence_rating
+            else self.component.confidence_rating)
         # clear cached properties1
         try:
             del self.emissionrate

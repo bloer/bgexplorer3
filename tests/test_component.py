@@ -2,8 +2,9 @@ import unittest
 from mongoengine import (connect, disconnect, StringField, ReferenceField,
                          CASCADE, NULLIFY, PULL, ValidationError)
 from bgexplorer.models.component import (Component, Placement, Assembly,
-                                         LocationOverride)
+                                         ComponentSpec, LocationMode)
 from bgexplorer.models.common import units
+from bgexplorer.models.emissionspec import EmissionSpec
 from tests.dbutil import connect_test_db
 
 class TestComponent(unittest.TestCase):
@@ -99,10 +100,12 @@ class TestComponent(unittest.TestCase):
         with self.assertRaises(ValidationError):
             Assembly(name="a1", children=[p, Placement(id=p.id, component=c1)]
                      ).save()
-        o = LocationOverride(source="K40", location="x")
+        e1 = EmissionSpec(name="e1").save()
+        e2 = EmissionSpec(name="e2").save()
+        o = ComponentSpec(spec=e1)
         with self.assertRaises(ValidationError):
-            Component(name="c2", location_overrides=[o, LocationOverride(
-                id=o.id, source="U238", location="y")]).save()
+            Component(name="c2", spec_entries=[
+                o, ComponentSpec(id=o.id, spec=e2)]).save()
 
 
     def test6_confidence_rating(self):
@@ -119,3 +122,38 @@ class TestComponent(unittest.TestCase):
         self.assertEqual(c1.clone().confidence_rating, 4)
         self.assertNotIn('confidence_rating',
                          Component(name="c2").to_mongo())
+
+    def test7_component_spec(self):
+        e1 = EmissionSpec(name="e1").save()
+        e2 = EmissionSpec(name="e2").save()
+        entry = ComponentSpec(spec=e1)
+        self.assertIs(entry.location_mode, LocationMode.replace)
+        self.assertEqual(entry.apply("base"), "base")
+        for mode, location, expected in (
+                (LocationMode.replace, "x ", "x "),
+                (LocationMode.prefix, "x ", "x base"),
+                (LocationMode.suffix, " x", "base x")):
+            with self.subTest(mode=mode):
+                entry = ComponentSpec(spec=e1, location=location,
+                                      location_mode=mode)
+                self.assertEqual(entry.apply("base"), expected)
+        for rating in (0, 6):
+            with self.assertRaises(ValidationError):
+                ComponentSpec(spec=e1, confidence_rating=rating).validate()
+        with self.assertRaises(ValidationError):
+            ComponentSpec().validate()
+
+        c1 = Component(name="c1", specs=[e1, e2]).save()
+        c1.find_spec_entry(e2).confidence_rating = 3
+        c1.save()
+        c1 = Component.objects.get(name="c1")
+        self.assertEqual([s.name for s in c1.specs], ["e1", "e2"])
+        self.assertEqual(c1.find_spec_entry(e2).confidence_rating, 3)
+        self.assertIsNone(c1.find_spec_entry(e1).confidence_rating)
+        # copies keep the settings, with ids of their own
+        copy = c1.clone(name="c1 copy")
+        self.assertEqual([e.confidence_rating for e in copy.spec_entries],
+                         [None, 3])
+        self.assertNotEqual({e.id for e in copy.spec_entries},
+                            {e.id for e in c1.spec_entries})
+        self.assertEqual(Component.objects(spec_entries__spec=e2).count(), 1)

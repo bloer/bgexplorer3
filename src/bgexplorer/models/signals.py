@@ -4,6 +4,7 @@ from .emissionspec import EmissionSpec
 from .cosmogenic import ActivatedMaterial, CosmogenicActivation
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, CalculatedResults, find_sourceterms
+from .verdoc import ref_id
 from . import settings
 import logging
 log = logging.getLogger(__name__)
@@ -26,6 +27,8 @@ def delete_component(sender, document, **kwargs):
     # specs that only it uses go with it
     for spec in EmissionSpec.select_version(component.active_version)(
             owner=component):
+        # no need to update a component that is going away
+        spec.owner_deleting = True
         spec.delete()
 
     # find all Assemblies referencing us and remove from children
@@ -35,6 +38,21 @@ def delete_component(sender, document, **kwargs):
                            if p.component.original_id != component.original_id]
         parent.save()
     settings.touch(component.active_version, terms_only=True)
+
+
+def delete_emissionspec(sender, document, **kwargs):
+    """ Detach a deleted spec. Reverse delete rules aren't allowed inside
+    the embedded documents that hold the references
+    """
+    spec = document
+    if getattr(spec, 'owner_deleting', False):
+        return
+    for component in Component.select_version(spec.active_version)(
+            spec_entries__spec=spec):
+        component.spec_entries = [
+            e for e in component.spec_entries
+            if ref_id(e._data.get('spec')) != spec.original_id]
+        component.save()
 
 
 def update_component(sender, document, **kwargs):
@@ -131,7 +149,7 @@ def update_emissionspec(sender, document, **kwargs):
     spec = document
     # find all components that own a reference to us and call update_component
     for component in Component.objects(version_tags=spec.active_version,
-                                       specs=spec):
+                                       spec_entries__spec=spec):
         update_component(sender=None, document=component)
 
 
@@ -231,6 +249,8 @@ def post_save(sender, document, **kwargs):
 def pre_delete(sender, document, **kwargs):
     if isinstance(document, Component):
         delete_component(sender, document, **kwargs)
+    elif isinstance(document, EmissionSpec):
+        delete_emissionspec(sender, document, **kwargs)
     elif isinstance(document, HitEfficiency):
         before_delete_hiteff(sender, document, **kwargs)
     elif isinstance(document, ActivatedMaterial):

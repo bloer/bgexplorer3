@@ -4,7 +4,7 @@ from mongoengine import (connect, disconnect, StringField, ReferenceField,
                          ValidationError,
                          CASCADE, NULLIFY, PULL)
 from bgexplorer.models.component import (Component, Placement, Assembly,
-                                         LocationOverride)
+                                         ComponentSpec, LocationMode)
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.assay import Assay
 from bgexplorer.models.sourceterm import (SourceTerm, CalculatedResults,
@@ -191,6 +191,16 @@ class TestSourceTerm(unittest.TestCase):
         c1.confidence_rating = None
         c1.save()
         self.assertEqual(ratings()['a1/c1'], None)
+
+        # a rating on the attached spec beats the component's
+        e2 = EmissionSpec(name="e2", sources=[
+            EmissionSource(name="K40", rate="10 mBq/kg")]).save()
+        c1.attach(e2, confidence_rating=1)
+        c1.confidence_rating = 3
+        c1.save()
+        ratings = {st.source.name: st.confidence_rating
+                   for st in SourceTerm.objects(assemblyPathStr='a1/c1')}
+        self.assertEqual(ratings, {'Th232': 3, 'K40': 1})
 
     def test3_hiteffs(self):
         """ Test that queries find HitEfficiencies """
@@ -567,120 +577,138 @@ class TestLocationOverride(unittest.TestCase):
               if (st.spec and st.spec.name) == spec][0]
         return [h.location for h in st.hiteffs]
 
-    def test_component_override(self):
+    def test_replace(self):
         inner = Component(name="inner", mass="1 kg",
                           location="Connector Inside",
-                          specs=[self.becu],
-                          location_overrides=[LocationOverride(
-                              spec=self.becu, source="Pb-210",
-                              location="Packge Inner Surface")]).save()
+                          specs=[self.becu]).save()
         outer = Component(name="outer", mass="1 kg",
                           location="Connector Outside",
                           specs=[self.becu]).save()
-        package = Component(name="package", mass="1 kg", location="Package",
-                            specs=[self.becu, self.radon],
-                            location_overrides=[LocationOverride(
-                                spec=self.radon,
-                                location="Package Outer Surface")]).save()
+        package = Component(name="package", mass="1 kg", location="Package")
+        package.attach(self.becu)
+        package.attach(self.radon, location="Package Outer Surface")
+        package.save()
+        inner.attach(self.radon, location="Packge Inner Surface")
+        inner.save()
         self.assertEqual(self.locations(), {
             ('inner', 'BeCu', 'U238'): 'Connector Inside',
-            ('inner', 'BeCu', 'Pb210'): 'Packge Inner Surface',
+            ('inner', 'BeCu', 'Pb210'): 'Connector Inside',
+            ('inner', 'radon', 'Pb210'): 'Packge Inner Surface',
             ('outer', 'BeCu', 'U238'): 'Connector Outside',
             ('outer', 'BeCu', 'Pb210'): 'Connector Outside',
             ('package', 'BeCu', 'U238'): 'Package',
             ('package', 'BeCu', 'Pb210'): 'Package',
             ('package', 'radon', 'Pb210'): 'Package Outer Surface',
         })
-        self.assertEqual(self.hiteff_locations('inner', 'BeCu', 'Pb210'),
+        self.assertEqual(self.hiteff_locations('inner', 'radon', 'Pb210'),
                          ['Packge Inner Surface'])
         st = SourceTerm.objects(assemblyPathStr='package',
                                 spec=self.radon).get()
         self.assertEqual(st.location_origin, "override on package")
         self.assertTrue(st.location_overridden)
+        self.assertFalse(SourceTerm.objects(assemblyPathStr='package',
+                                            spec=self.becu,
+                                            source__name='U238')
+                         .get().location_overridden)
 
-        # placing them keeps their own overrides
+        # placing them keeps their own settings
         a1 = Assembly(name="a1", location="Package", components=[
             inner, outer, package]).save()
         self.assertEqual(self.locations(assemblyRoot=a1)[
-            ('a1/inner', 'BeCu', 'Pb210')], 'Packge Inner Surface')
+            ('a1/inner', 'radon', 'Pb210')], 'Packge Inner Surface')
 
-        # a new hiteff at an override location gets attached
+        # a new hiteff at the override location gets attached
         HitEfficiency(source='Pb210', location='Packge Inner Surface',
                       scalars=dict(v2=AsymmetricUncertainty(0.01, 0.001)
                                    * units('dru/mBq'))).save()
-        self.assertEqual(len(self.hiteff_locations('a1/inner', 'BeCu',
+        self.assertEqual(len(self.hiteff_locations('a1/inner', 'radon',
                                                    'Pb210')), 2)
 
-        # removing the override reverts matching
+        # clearing the location reverts matching
         inner.reload()
-        inner.location_overrides = []
+        inner.find_spec_entry(self.radon).location = None
         inner.save()
-        self.assertEqual(self.hiteff_locations('a1/inner', 'BeCu', 'Pb210'),
+        self.assertEqual(self.hiteff_locations('a1/inner', 'radon', 'Pb210'),
                          ['Connector Inside'])
 
-        # overrides are config, so survive rebuilding the sourceterms
+        # settings are config, so survive rebuilding the sourceterms
         SourceTerm.drop_collection()
         for component in (inner, outer, package):
             component.reload().save()
         self.assertEqual(self.locations(assemblyRoot=package)[
             ('package', 'radon', 'Pb210')], 'Package Outer Surface')
 
-    def test_placement_override(self):
-        screws = Component(name="screws", mass="1 kg",
-                           specs=[self.becu, self.radon]).save()
+    def test_prefix_suffix(self):
+        screws = Component(name="screws", mass="1 kg")
+        screws.attach(self.becu)
+        screws.attach(self.radon, location=" Outer Surface",
+                      location_mode=LocationMode.prefix)
+        screws.save()
         a1 = Assembly(name="a1", children=[
             Placement(component=screws, label="in", location="Package"),
-            Placement(component=screws, label="out", location="Package"),
-        ])
-        a1.location_overrides = [
-            LocationOverride(placement=a1.children[0].id, spec=self.radon,
-                             location="Packge Inner Surface"),
-            LocationOverride(placement=a1.children[1].id, spec=self.radon,
-                             location="Package Outer Surface"),
-        ]
-        a1.save()
+            Placement(component=screws, label="out", location="Connector"),
+        ]).save()
         locations = self.locations(assemblyRoot=a1)
         self.assertEqual(locations[('a1/in', 'radon', 'Pb210')],
-                         'Packge Inner Surface')
+                         " Outer SurfacePackage")
         self.assertEqual(locations[('a1/out', 'radon', 'Pb210')],
-                         'Package Outer Surface')
-        self.assertEqual(locations[('a1/in', 'BeCu', 'Pb210')], 'Package')
-        st = SourceTerm.objects(assemblyPathStr='a1/out',
-                                spec=self.radon).get()
-        self.assertEqual(st.location_origin, "override on a1 for out")
+                         " Outer SurfaceConnector")
+        self.assertEqual(locations[('a1/out', 'BeCu', 'Pb210')], 'Connector')
 
-        # the child's own override is closer to the leaf, so wins
         screws.reload()
-        screws.location_overrides = [LocationOverride(
-            spec=self.radon, location="Connector Outside")]
+        entry = screws.find_spec_entry(self.radon)
+        entry.location = " Outer Surface"
+        entry.location_mode = LocationMode.suffix
         screws.save()
         locations = self.locations(assemblyRoot=a1)
         self.assertEqual(locations[('a1/in', 'radon', 'Pb210')],
-                         'Connector Outside')
+                         "Package Outer Surface")
+        st = SourceTerm.objects(assemblyPathStr='a1/out',
+                                spec=self.radon).get()
+        self.assertEqual(st.location, "Connector Outer Surface")
+        self.assertEqual(st.location_origin,
+                         "override on screws (suffix to placement a1/out)")
+        self.assertTrue(st.location_overridden)
 
-    def test_source_overrides_and_cleanup(self):
-        # an override by source name applies to every spec
+        # with no location set anywhere, the component's name is the base
+        bare = Component(name="bare", mass="1 kg")
+        bare.attach(self.radon, location=" surface",
+                    location_mode=LocationMode.prefix)
+        bare.save()
+        self.assertEqual(self.locations(assemblyRoot=bare),
+                         {('bare', 'radon', 'Pb210'): ' surfacebare'})
+
+    def test_specs_and_cleanup(self):
         c1 = Component(name="c1", mass="1 kg", location="Package",
-                       specs=[self.becu, self.radon],
-                       location_overrides=[
-                           LocationOverride(source="Pb210",
-                                            location="Connector Inside"),
-                           LocationOverride(spec=self.radon, source="Pb210",
-                                            location="Package Outer Surface"),
-                       ]).save()
-        self.assertEqual(self.locations(), {
-            ('c1', 'BeCu', 'U238'): 'Package',
-            ('c1', 'BeCu', 'Pb210'): 'Connector Inside',
-            ('c1', 'radon', 'Pb210'): 'Package Outer Surface',
-        })
-        # overrides for a removed spec are dropped
-        c1.specs = [self.becu]
+                       specs=[self.becu, self.radon])
+        self.assertEqual([e.spec.name for e in c1.spec_entries],
+                         ['BeCu', 'radon'])
+        with self.assertRaises(ValueError):
+            Component(name="c", specs=[self.becu],
+                      spec_entries=[ComponentSpec(spec=self.radon)])
+        c1.find_spec_entry(self.radon).location = "Package Outer Surface"
         c1.save()
-        self.assertEqual(len(c1.reload().location_overrides), 1)
-        # an override must say what it applies to
-        c1.location_overrides.append(LocationOverride(location="Package"))
+        # replacing the specs keeps the settings of those that remain
+        c1.specs = [self.radon]
+        self.assertEqual(c1.find_spec_entry(self.radon).location,
+                         "Package Outer Surface")
+        self.assertIsNone(c1.find_spec_entry(self.becu))
+        c1.save()
+        self.assertEqual(self.locations(), {
+            ('c1', 'radon', 'Pb210'): 'Package Outer Surface'})
+        # a spec can only be attached once
+        c1.attach(self.radon)
         with self.assertRaises(ValidationError):
             c1.save()
+
+    def test_delete_spec(self):
+        c1 = Component(name="c1", mass="1 kg", specs=[self.becu, self.radon],
+                       confidence_rating=2).save()
+        self.radon.delete()
+        c1 = Component.objects.get(name="c1")
+        self.assertEqual([s.name for s in c1.specs], ['BeCu'])
+        self.assertEqual(self.locations(), {
+            ('c1', 'BeCu', 'U238'): 'c1', ('c1', 'BeCu', 'Pb210'): 'c1'})
 
 
 class TestResultsCache(unittest.TestCase):

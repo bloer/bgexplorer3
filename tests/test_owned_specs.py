@@ -2,7 +2,7 @@
 import unittest
 from mongoengine import disconnect, ValidationError
 from bgexplorer.models.component import (Component, Assembly, Placement,
-                                         LocationOverride)
+                                         LocationMode)
 from bgexplorer.models.emissionspec import EmissionSpec
 from bgexplorer.models.exposure import RadonExposure, RadonPeriod
 from bgexplorer.models.settings import VersionSettings
@@ -34,15 +34,21 @@ class TestOwnedSpecs(unittest.TestCase):
         return cls.select_version(version).get(name=name)
 
     def test_add_owned_spec(self):
-        own = self.c2.add_owned_spec(EmissionSpec(
-            name='c2 assay', sources=dict(K40='1 mBq/kg')))
+        own = self.c2.add_owned_spec(
+            EmissionSpec(name='c2 assay', sources=dict(K40='1 mBq/kg')),
+            confidence_rating=4, location='c2 assay spot',
+            location_mode=LocationMode.suffix)
         c2 = self.get(Component, 'c2')
         self.assertEqual([s.name for s in c2.specs], ['c2 assay'])
         self.assertEqual(own.owner.name, 'c2')
+        self.assertEqual((c2.spec_entries[0].confidence_rating,
+                          c2.spec_entries[0].location,
+                          c2.spec_entries[0].location_mode),
+                         (4, 'c2 assay spot', LocationMode.suffix))
         self.assertEqual(SourceTerm.objects(assemblyRoot=c2).count(), 1)
         # it can't be attached to anything else
         c1 = self.get(Component, 'c1')
-        c1.specs.append(own)
+        c1.attach(own)
         with self.assertRaises(ValidationError):
             c1.save()
         with self.assertRaises(ValueError):
@@ -62,8 +68,9 @@ class TestOwnedSpecs(unittest.TestCase):
 
     def test_make_specific(self):
         c1 = self.get(Component, 'c1')
-        c1.location_overrides = [LocationOverride(
-            spec=self.nominal, location='c1 surface')]
+        entry = c1.find_spec_entry(self.nominal)
+        entry.location = 'c1 surface'
+        entry.confidence_rating = 2
         c1.save()
         own = c1.make_specific(self.nominal)
         self.assertEqual(own.name, '1 day cleanroom (c1)')
@@ -71,8 +78,9 @@ class TestOwnedSpecs(unittest.TestCase):
         c1 = self.get(Component, 'c1')
         self.assertEqual([s.original_id for s in c1.specs],
                          [own.original_id])
-        self.assertEqual(c1.location_overrides[0].spec.original_id,
-                         own.original_id)
+        # the settings follow the copy
+        self.assertEqual(c1.spec_entries[0].location, 'c1 surface')
+        self.assertEqual(c1.spec_entries[0].confidence_rating, 2)
         st = SourceTerm.objects(assemblyRoot=c1, source__name='Pb210').get()
         self.assertEqual(st.spec.original_id, own.original_id)
         self.assertEqual(st.location, 'c1 surface')
@@ -87,8 +95,7 @@ class TestOwnedSpecs(unittest.TestCase):
         c1 = self.get(Component, 'c1')
         own = c1.make_specific(self.nominal)
         c1 = self.get(Component, 'c1')
-        c1.location_overrides = [LocationOverride(spec=own,
-                                                  location='c1 surface')]
+        c1.find_spec_entry(own).location = 'c1 surface'
         c1.save()
         copy = c1.clone(name='c1 copy')
         copy.save()
@@ -97,23 +104,9 @@ class TestOwnedSpecs(unittest.TestCase):
         self.assertNotEqual(spec.original_id, own.original_id)
         self.assertEqual(spec.owner.original_id, copy.original_id)
         self.assertEqual(spec.name, own.name)
-        self.assertEqual(copy.location_overrides[0].spec.original_id,
-                         spec.original_id)
+        self.assertEqual(copy.spec_entries[0].location, 'c1 surface')
+        self.assertNotEqual(copy.spec_entries[0].id, c1.spec_entries[0].id)
         self.assertEqual(SourceTerm.objects(assemblyRoot=copy).count(), 1)
-
-    def test_clone_placement_overrides(self):
-        """ placements get new ids in a copy, which overrides follow """
-        a1 = Assembly(name='a1', children=[Placement(component=self.c1)])
-        a1.location_overrides = [LocationOverride(
-            placement=a1.children[0].id, spec=self.nominal,
-            location='a1 spot')]
-        a1.save()
-        copy = a1.clone(name='a2')
-        copy.save()
-        copy = self.get(Assembly, 'a2')
-        self.assertEqual(copy.location_overrides[0].placement,
-                         copy.children[0].id)
-        self.assertNotEqual(copy.children[0].id, a1.children[0].id)
 
     def test_delete(self):
         """ deleting a component deletes its specs, only in that version """

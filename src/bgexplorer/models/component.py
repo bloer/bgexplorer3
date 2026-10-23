@@ -2,18 +2,16 @@ from mongoengine import (EmbeddedDocument, StringField, DateField,
                          DateTimeField, DynamicEmbeddedDocument, BooleanField,
                          EmbeddedDocumentField, DictField, ValidationError,
                          EmbeddedDocumentListField, ListField, FloatField,
-                         URLField, ObjectIdField,
-                         PULL, NULLIFY, IntField)
+                         URLField, ObjectIdField, EnumField, IntField)
 from bson import ObjectId
+from enum import Enum
 from typing import Optional
 
 from .verdoc import (VersionedDocument, VersionedReferenceField,
-                     VersionedListField, VersionedEmbeddedDocumentListField,
-                     ref_id)
+                     VersionedEmbeddedDocumentListField, ref_id)
 from .fields import QuantityField, AttachmentsField
 from .emissionspec import EmissionSpec
 from .common import units, validate_unique_ids
-from .isotope import compare_source_names
 
 
 class PurchaseInfo(EmbeddedDocument):
@@ -36,38 +34,46 @@ class HistoryEntry(DynamicEmbeddedDocument):
     comment = StringField()
 
 
-class LocationOverride(EmbeddedDocument):
-    """ Use `location` to find HitEfficiencies for the sources of a component
-    from `spec` and/or named `source`, instead of the component's location.
-    On an Assembly, `placement` limits it to that child Placement, ahead of
-    the placement's location. Blank `spec` or `source` match any.
+class LocationMode(Enum):
+    replace = 'replace'
+    prefix = 'prefix'
+    suffix = 'suffix'
+
+
+class ComponentSpec(EmbeddedDocument):
+    """ An EmissionSpec attached to a Component, with settings that apply to
+    it on this component only
     """
     id = ObjectIdField(required=True, default=ObjectId)
-    placement = ObjectIdField()
-    spec = VersionedReferenceField(EmissionSpec, endpoint='emissionspec')
-    source = StringField(help_text="Source name, e.g. Pb210; blank for any")
+    spec = VersionedReferenceField(EmissionSpec, required=True,
+                                   endpoint='emissionspec')
+    confidence_rating = IntField(
+        choices=[1, 2, 3, 4, 5],
+        help_text="Overrides the component's rating for this spec",
+    )
+    location_mode = EnumField(
+        LocationMode, default=LocationMode.replace,
+        help_text="How the location below changes the one inherited from "
+                  "the component or its placements",
+    )
     location = StringField(
-        required=True,
         label="Hit Efficiency Location",
-        help_text="Key to match against locations in HitEfficieny database",
+        help_text="Used to find HitEfficiencies for this spec's sources, "
+                  "instead of the component's location, or added to it",
         autocomplete="hitefflocations",
     )
 
-    def matches(self, spec, source_name: str, placement_id=None) -> bool:
-        """ Does this apply to sources named `source_name` from `spec`, for
-        the component itself or, if `placement_id`, for that child placement?
+    def apply(self, base: str) -> str:
+        """ The location to use for a spec whose location would be `base`
+        without us. Text is joined as is, so include any separator
         """
-        myspec = ref_id(self._data.get('spec'))
-        return (self.placement == placement_id and
-                (myspec is None or myspec == ref_id(spec)) and
-                (not self.source or
-                 compare_source_names(self.source, source_name)))
-
-    @property
-    def specificity(self) -> int:
-        """ Higher wins when more than one override matches """
-        return (2 * (self._data.get('spec') is not None) +
-                bool(self.source))
+        if not self.location:
+            return base
+        if self.location_mode is LocationMode.prefix:
+            return self.location + base
+        if self.location_mode is LocationMode.suffix:
+            return base + self.location
+        return self.location
 
 
 def _noslash(value):
@@ -105,17 +111,20 @@ class Component(VersionedDocument):
     attachments = AttachmentsField()
     history = EmbeddedDocumentListField(HistoryEntry)
 
-    specs = VersionedListField(VersionedReferenceField(EmissionSpec,
-                               reverse_delete_rule=PULL,
-                               endpoint='emissionspec',
-                               ))
-    location_overrides = VersionedEmbeddedDocumentListField(LocationOverride)
+    spec_entries = VersionedEmbeddedDocumentListField(ComponentSpec)
 
     meta = {'allow_inheritance': True}
 
-    def __init__(self, *args, surface_area=None, **kwargs):
+    def __init__(self, *args, surface_area=None, specs=None, **kwargs):
+        """ `surface_area` is a shortcut for the outer surface area, and
+        `specs` a list of EmissionSpecs to attach with default settings
+        """
         if surface_area is not None:
             kwargs['outer_surface_area'] = surface_area
+        if specs is not None:
+            if 'spec_entries' in kwargs:
+                raise ValueError("'spec_entries' and 'specs' both provided")
+            kwargs['spec_entries'] = [ComponentSpec(spec=s) for s in specs]
         super().__init__(*args, **kwargs)
 
     def __str__(self):
@@ -125,26 +134,49 @@ class Component(VersionedDocument):
     def surface_area(self):
         return self.inner_surface_area + self.outer_surface_area
 
+    @property
+    def specs(self) -> tuple:
+        """ The attached EmissionSpecs. Use `attach` or edit `spec_entries`
+        to change their settings
+        """
+        return tuple(entry.spec for entry in self.spec_entries)
+
+    @specs.setter
+    def specs(self, specs) -> None:
+        """ Attach exactly `specs`, keeping the settings of any that were
+        already attached
+        """
+        old = {ref_id(e._data.get('spec')): e for e in self.spec_entries}
+        old.pop(None, None)
+        self.spec_entries = [old.get(ref_id(s)) or ComponentSpec(spec=s)
+                             for s in specs]
+
+    def find_spec_entry(self, spec) -> Optional[ComponentSpec]:
+        """ The ComponentSpec attached to us for `spec`, if any """
+        specid = ref_id(spec)
+        for entry in self.spec_entries:
+            if (ref_id(entry._data.get('spec')) == specid
+                    if specid is not None else entry.spec is spec):
+                return entry
+        return None
+
+    def attach(self, spec: EmissionSpec, **settings) -> ComponentSpec:
+        """ Attach `spec` with the given ComponentSpec settings
+        (confidence_rating, location, location_mode), without saving
+        """
+        entry = ComponentSpec(spec=spec, **settings)
+        self.spec_entries.append(entry)
+        return entry
+
     def clean(self):
         super().clean()
-        validate_unique_ids(self.location_overrides, 'location_overrides')
+        validate_unique_ids(self.spec_entries, 'spec_entries')
+        specids = [ref_id(e._data.get('spec')) for e in self.spec_entries]
+        specids = [i for i in specids if i is not None]
+        if len(specids) != len(set(specids)):
+            raise ValidationError("A spec can only be attached once",
+                                  field_name='spec_entries')
         self.check_owned_specs()
-        # overrides for specs or placements that were removed go with them
-        specs = {None: self._data.get('specs') or []}
-        for placement in getattr(self, 'children', None) or []:
-            specs[placement.id] = placement.component._data.get('specs') or []
-        self.location_overrides = [
-            o for o in self.location_overrides
-            if o.placement in specs and
-            (o._data.get('spec') is None or ref_id(o._data.get('spec')) in
-             {ref_id(spec) for spec in specs[o.placement]})]
-        # for everything, the component or placement location does that
-        for i, override in enumerate(self.location_overrides):
-            if not override.source and override._data.get('spec') is None:
-                raise ValidationError(
-                    "Choose a spec or source to override, or set the "
-                    "component or placement location instead",
-                    field_name=f'location_overrides.{i}.location')
 
     def check_owned_specs(self) -> None:
         """ Raise ValidationError if a spec owned by another component is
@@ -156,11 +188,11 @@ class Component(VersionedDocument):
             if owner is not None and owner != self.original_id:
                 raise ValidationError(
                     f"{spec.name} belongs to another component",
-                    field_name='specs')
+                    field_name='spec_entries')
 
-    def add_owned_spec(self, spec: EmissionSpec) -> EmissionSpec:
-        """ Save `spec` as belonging to us and attach it. We must already
-        be saved
+    def add_owned_spec(self, spec: EmissionSpec, **settings) -> EmissionSpec:
+        """ Save `spec` as belonging to us and attach it with the given
+        ComponentSpec settings. We must already be saved
         """
         if self.original_id is None:
             raise ValueError("Save the component before adding its own specs")
@@ -172,14 +204,14 @@ class Component(VersionedDocument):
             raise ValueError(f"{spec.name} is in another version")
         spec.owner = self
         spec.save()
-        self.specs.append(spec)
+        self.attach(spec, **settings)
         self.save()
         return spec
 
     def make_specific(self, spec: EmissionSpec) -> EmissionSpec:
         """ Replace the shared `spec` with a copy belonging to us, e.g. to
-        track an exposure that started as a nominal estimate. Location
-        overrides follow the copy. Returns the saved copy
+        track an exposure that started as a nominal estimate. Its confidence
+        and location settings follow the copy. Returns the saved copy
         """
         copy = spec.clone(owner=self, name=f"{spec.name} ({self.name})")
         copy.save()
@@ -188,12 +220,11 @@ class Component(VersionedDocument):
         return copy
 
     def _replace_spec(self, old, new) -> None:
-        """ Swap `old` for `new` in specs and location_overrides """
+        """ Swap `old` for `new` in spec_entries, keeping the settings """
         oldid = ref_id(old)
-        self.specs = [new if ref_id(s) == oldid else s for s in self.specs]
-        for override in self.location_overrides:
-            if ref_id(override._data.get('spec')) == oldid:
-                override.spec = new
+        for entry in self.spec_entries:
+            if ref_id(entry._data.get('spec')) == oldid:
+                entry.spec = new
 
     def clone(self, **overrides) -> 'Component':
         """ See VersionedDocument.clone. Specs we own are copied too, and
@@ -201,13 +232,6 @@ class Component(VersionedDocument):
         component
         """
         copy = super().clone(**overrides)
-        # placements get new ids
-        placements = {old.id: new.id for old, new in
-                      zip(getattr(self, 'children', None) or [],
-                          getattr(copy, 'children', None) or [])}
-        for override in copy.location_overrides:
-            if override.placement is not None:
-                override.placement = placements.get(override.placement)
         copy._pending_specs = []
         for spec in self.specs:
             if ref_id(spec._data.get('owner')) == self.original_id:
@@ -224,16 +248,6 @@ class Component(VersionedDocument):
         for spec in self.__dict__.pop('_pending_specs', None) or []:
             spec.save()
         return super().save(*args, **kwargs)
-
-    def find_location_override(self, spec, source_name: str,
-                               placement_id=None
-                               ) -> Optional[LocationOverride]:
-        """ The most specific of our location_overrides matching sources
-        named `source_name` from `spec`, for us or for child `placement_id`
-        """
-        matches = [o for o in self.location_overrides
-                   if o.matches(spec, source_name, placement_id)]
-        return max(matches, key=lambda o: o.specificity, default=None)
 
     def find_parents(self):
         """ Locate all Assemblies with a Placement pointing to this component

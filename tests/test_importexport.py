@@ -93,9 +93,9 @@ class TestImport(unittest.TestCase):
         self.assertEqual(ids, {c.original_id for c in report.created
                                if c.name != 'a1'})
         self.assertEqual(a1.mass, self.a1.mass)
-        self.assertIn('specs', report.dropped_refs[0][1])
+        self.assertIn('spec_entries', report.dropped_refs[0][1])
         self.assertEqual(Component.select_version('b').get(name='c1').specs,
-                         [])
+                         ())
         # the spec is kept in 'c', which has it
         vc.create_version('c', 'main')
         report = import_documents(Component, export(self.c1), 'c')
@@ -150,4 +150,4 @@ class TestImport(unittest.TestCase):
         copy.save()
         self.assertEqual(copy.specs, c1.specs)
         with self.assertRaises(ValueError):
-            Component.select_version('c').exclude('specs').first().clone()
+            Component.select_version('c').exclude('spec_entries').first().clone()

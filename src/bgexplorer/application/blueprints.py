@@ -186,7 +186,7 @@ class CollectionViews(flask.Blueprint):
         if isinstance(obj, EmissionSpec):
             return [dict(text="Removed from these components:",
                          docs=list(Component.select_version(
-                             obj.active_version)(specs=obj)),
+                             obj.active_version)(spec_entries__spec=obj)),
                          endpoint='component')]
         if isinstance(obj, ActivatedMaterial):
             return [dict(text="These activations of it are deleted:",
@@ -267,7 +267,7 @@ class CollectionViews(flask.Blueprint):
         def view():
             components = []
             if self.clsname == 'emissionspec':
-                components = Component.select_version(flask.g.active_version)(specs=flask.g.object)
+                components = Component.select_version(flask.g.active_version)(spec_entries__spec=flask.g.object)
             activations = []
             if self.clsname == 'activatedmaterial':
                 activations = CosmogenicActivation.select_version(

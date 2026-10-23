@@ -4,7 +4,7 @@ from werkzeug.datastructures import MultiDict
 from datetime import datetime
 from bgexplorer.application.forms import update_object, LISTFIELDS_KEY
 from bgexplorer.models.component import (Component, HistoryEntry,
-                                         LocationOverride)
+                                         ComponentSpec)
 from bgexplorer.models.emissionspec import EmissionSpec
 
 
@@ -35,23 +35,20 @@ class TestForms(unittest.TestCase):
         """ Lists not in the form are left alone, but lists marked as
         present with no rows are cleared
         """
-        c1 = Component(name='c1', location_overrides=[
-                           LocationOverride(source='K40', location='x')],
+        c1 = Component(name='c1', specs=[EmissionSpec(name='e0')],
                        history=[HistoryEntry(date=datetime(2024, 1, 1),
                                              description='made')])
         c1 = update_object(c1, MultiDict([('name', 'c2')]))
         self.assertEqual(c1.name, 'c2')
-        self.assertEqual(len(c1.location_overrides), 1)
+        self.assertEqual(len(c1.spec_entries), 1)
         self.assertEqual(len(c1.history), 1)
 
         form = MultiDict([('name', 'c2'),
                           (LISTFIELDS_KEY, 'history'),
-                          (LISTFIELDS_KEY, 'specs')])
-        c1.specs = [EmissionSpec(name='e1')]
+                          (LISTFIELDS_KEY, 'spec_entries')])
         c1 = update_object(c1, form)
-        self.assertEqual(len(c1.location_overrides), 1)
         self.assertEqual(len(c1.history), 0)
-        self.assertEqual(len(c1.specs), 0)
+        self.assertEqual(len(c1.spec_entries), 0)
 
 if __name__ == '__main__':
     unittest.main()

@@ -457,7 +457,7 @@ def _update_sourceterms(target: str, plan: MergePlan) -> None:
     # updating each term separately costs more per term than a rebuild
     touched = components(__raw__={'$or': [
         {'original_id': {'$in': adopted.get(Component, [])}},
-        {'specs': {'$in': adopted.get(EmissionSpec, [])}}]}).count()
+        {'spec_entries.spec': {'$in': adopted.get(EmissionSpec, [])}}]}).count()
     if plan.replace_settings or touched > components.count() / 2:
         rebuild_sourceterms(target)
         return

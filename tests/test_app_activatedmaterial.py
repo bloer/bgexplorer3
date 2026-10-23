@@ -182,6 +182,6 @@ class TestCosmogenicActivationPages(AppTestCase):
             self.url('activatedmaterial.delete', 'b', object=self.cu))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(CosmogenicActivation.select_version('b').count(), 0)
-        self.assertEqual(self.get(Component, 'c1').specs, [])
+        self.assertEqual(self.get(Component, 'c1').specs, ())
         self.assertEqual(self.get(Component, 'c1', 'main').specs[0].name,
                          'Cu nominal')

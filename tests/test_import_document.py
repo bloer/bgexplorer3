@@ -95,7 +95,7 @@ class TestImportDocument(unittest.TestCase):
     def test_dangling_refs(self):
         e2 = EmissionSpec(name='e2', version_tag='b').save()
         c1 = self.get(Component, 'c1', 'b')
-        c1.specs.append(e2)
+        c1.attach(e2)
         c1.save()
         with self.assertRaises(VersionControlError) as cm:
             import_document(Component, c1.original_id, 'b', 'main')
@@ -148,7 +148,7 @@ class TestImportPages(AppTestCase):
     def test_import_errors(self):
         e2 = EmissionSpec(name='e2', version_tag='b').save()
         c1 = Component.select_version('b').get(name='c1')
-        c1.specs.append(e2)
+        c1.attach(e2)
         c1.save()
         url = self.url('component.import_from', 'main',
                        itemid=str(c1.original_id), from_version='b')
