@@ -39,20 +39,49 @@
     {%- endif %}
 {% endmacro %}
 
-{% macro printspec(spec) %}
+{#- the location a spec's entry gives the component. Without a location of
+    its own the base depends on where the component is placed -#}
+{% macro printlocation(entry) %}
+    {%- if not entry.location -%}
+    <span class="text-secondary">inherited</span>
+    {%- elif entry.location_mode.value == 'replace' -%}
+    {{ entry.location }}
+    {%- else -%}
+    <span title="{{ entry.location_mode.value }} to the inherited location">{{ entry.apply(g.object.location or '[Inherited Location]') }}</span>
+    {%- if not g.object.location %} <span class="text-secondary" title="The component has no location of its own, so the placement, parent assemblies or the component's name decide">?</span>{% endif -%}
+    {%- endif -%}
+{% endmacro %}
+
+{% macro printspec(entry) %}
+    {%- set spec = entry.spec -%}
+    {%- set rowspan = [spec.sources|length, 1] | max -%}
     {%- set specname -%}
     <a href="{{ url_for('emissionspec.view', object=spec) }}">{{ spec.name }}</a> {{ speccontrols(spec) }}
     {%- endset -%}
     {% for source in spec.sources %}
                 <tr class="source {% if source.generated_from %}autogen{% endif %}">
-                    {% if loop.index0 == 0 %}<td class="spec" rowspan="{{ spec.sources|length }}">{{ specname }}</td> {% endif %}
+                    {% if loop.index0 == 0 %}
+                    <td class="spec" rowspan="{{ rowspan }}">{{ specname }}</td>
+                    <td class="confidence" rowspan="{{ rowspan }}">{{ printconfidence(entry) }}</td>
+                    <td class="speclocation" rowspan="{{ rowspan }}">{{ printlocation(entry) }}</td>
+                    {% endif %}
                     <td>{{ source.name }}</td>
                     <td>{{ source.category.name or '' }}</td>
                     <td>{{ source.rate | printquantity }}</td>
                 </tr>
     {% else %}
-                <tr class="source"><td class="spec">{{ specname }}</td><td colspan="3" class="text-secondary">no sources</td></tr>
+                <tr class="source"><td class="spec">{{ specname }}</td><td class="confidence">{{ printconfidence(entry) }}</td><td class="speclocation">{{ printlocation(entry) }}</td><td colspan="3" class="text-secondary">no sources</td></tr>
     {% endfor %}
+{% endmacro %}
+
+{% macro printconfidence(entry) %}
+    {%- if entry.confidence_rating is not none -%}
+    {{ entry.confidence_rating }}
+    {%- elif g.object.confidence_rating is not none -%}
+    <span class="text-secondary" title="Rating of the component">{{ g.object.confidence_rating }}</span>
+    {%- else -%}
+    <span class="text-secondary">not rated</span>
+    {%- endif -%}
 {% endmacro %}
 
 
@@ -130,44 +159,17 @@
 
     <div id="specs" class="col-md-6">
         {%- if can_edit and 'children' not in g.object._fields %}
-        <div class="dropdown float-end" id="newownspec">
-            <button class="btn btn-sm btn-outline-success dropdown-toggle" type="button" data-bs-toggle="dropdown">New spec for this component</button>
-            <ul class="dropdown-menu">
-                {%- for typename in spectypes %}
-                <li><a class="dropdown-item" href="{{ url_for('emissionspec.edit', type=typename | lower, owner=g.object.original_id) }}">{{ typename }}</a></li>
-                {%- endfor %}
-            </ul>
-        </div>
+        <button class="btn btn-sm btn-outline-success float-end" id="newownspec" type="button" data-bs-toggle="modal" data-bs-target="#newownspecmodal">New spec for this component</button>
         {%- endif %}
-        {% if g.object.specs %}
+        {% if g.object.spec_entries %}
         <h4>Radiation sources</h4>
-        <table class="table table-sm table-hover">
+        <table class="table table-sm table-hover" id="specstable">
             <thead>
-                <tr><th>Spec</th><th>Source</th><th>Category</th><th>Rate</th></tr>
+                <tr><th>Spec</th><th title="{{ specfields.confidence_rating.help_text }}">Confidence</th><th title="Hit efficiency location">Location</th><th>Source</th><th>Category</th><th>Rate</th></tr>
             </thead>
             <tbody class="table-group-divider">
-                {% for spec in g.object.specs %}
-                {{ printspec(spec) }}
-                {% endfor %}
-            </tbody>
-        </table>
-        {% endif %}
-        {% if g.object.location_overrides %}
-        <h4>Hit efficiency location overrides</h4>
-        <table class="table table-sm table-hover" id="locationoverrides">
-            <thead>
-                <tr>{% if g.object.children %}<th>Placement</th>{% endif %}<th>Spec</th><th>Source</th><th>Location</th></tr>
-            </thead>
-            <tbody class="table-group-divider">
-                {% for override in g.object.location_overrides %}
-                <tr>
-                    {%- if g.object.children %}
-                    <td>{% for placement in g.object.children if placement.id == override.placement %}{{ placement.name }}{% else %}all children{% endfor %}</td>
-                    {%- endif %}
-                    <td>{% if override.spec %}<a href="{{ url_for('emissionspec.view', object=override.spec) }}">{{ override.spec.name }}</a>{% else %}any{% endif %}</td>
-                    <td>{{ override.source or 'any' }}</td>
-                    <td>{{ override.location }}</td>
-                </tr>
+                {% for entry in g.object.spec_entries %}
+                {{ printspec(entry) }}
                 {% endfor %}
             </tbody>
         </table>
@@ -183,5 +185,73 @@
         {{ utils.other_versions(g.object) }}
     </div>
 </div>
+{%- if can_edit and 'children' not in g.object._fields %}
+<div class="modal fade" id="newownspecmodal" tabindex="-1" aria-labelledby="newownspecmodallabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <form method="GET" action="{{ url_for('emissionspec.edit') }}" class="modal-content" id="newownspecform">
+            <input type="hidden" name="owner" value="{{ g.object.original_id }}">
+            <div class="modal-header">
+                <h5 class="modal-title" id="newownspecmodallabel">New spec for {{ g.object.name }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="form-text">The spec is only used by this component. You will enter its sources next.</p>
+                <div class="mb-3">
+                    <label class="form-label" for="newownspectype">Type</label>
+                    <select class="form-select" name="type" id="newownspectype">
+                        {%- for typename in spectypes %}
+                        <option value="{{ typename | lower }}">{{ typename }}</option>
+                        {%- endfor %}
+                    </select>
+                </div>
+                {%- set entryfields = specfields -%}
+                <div class="mb-3">
+                    <label class="form-label" for="newownspecconfidence">Confidence rating</label>
+                    <select class="form-select" name="confidence_rating" id="newownspecconfidence">
+                        <option value="">-- (use the component's)</option>
+                        {%- for rating in entryfields.confidence_rating.choices %}
+                        <option value="{{ rating }}">{{ rating }}</option>
+                        {%- endfor %}
+                    </select>
+                    <div class="form-text">{{ entryfields.confidence_rating.help_text }}. 5 is the actual part, 1 a wild guess.</div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-4">
+                        <label class="form-label" for="newownspecmode">Location mode</label>
+                        <select class="form-select" name="location_mode" id="newownspecmode">
+                            {%- for mode in locationmodes %}
+                            <option value="{{ mode.value }}">{{ mode.name }}</option>
+                            {%- endfor %}
+                        </select>
+                    </div>
+                    <div class="col-8">
+                        <label class="form-label" for="newownspeclocation">Hit efficiency location</label>
+                        <input class="form-control" type="text" name="location" id="newownspeclocation" autocomplete="off" list="newownspeclocations">
+                        <datalist id="newownspeclocations" data-url="{{ url_for('hitefflocations') }}"></datalist>
+                    </div>
+                    <div class="form-text">{{ entryfields.location.help_text }}. Prefix and suffix text is added as typed, so include any separator. Leave blank to use the inherited location.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-success" id="newownspecsubmit">Continue</button>
+            </div>
+        </form>
+    </div>
+</div>
+{%- endif %}
 {% endblock %}
 
+{% block pagescripts %}
+{%- if can_edit and 'children' not in g.object._fields %}
+<script>
+    document.querySelectorAll('datalist[data-url]').forEach(dlist => {
+        fetch(dlist.dataset.url).then(r => r.json()).then(options => options.forEach(value => {
+            const option = document.createElement('option');
+            option.value = value;
+            dlist.appendChild(option);
+        }));
+    });
+</script>
+{%- endif %}
+{% endblock pagescripts %}

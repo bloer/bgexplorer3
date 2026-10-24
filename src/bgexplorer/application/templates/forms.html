@@ -273,7 +273,7 @@ input{% if open %} type="{{ type }}"{% endif -%}
             {% else -%}
             {%- for subfieldname in subdoc._fields_ordered -%}
             {%- set subfield = subdoc._fields[subfieldname] -%}
-            <th {%- if input_type(subfield) == "hidden" %} style="display:none;"{%- endif %} title="{{ subfield.help_text | default('') }}" {%- if subfield.required %} class="required-field" {%- endif -%}>{{ subfieldname | title }}</th>
+            <th {%- if input_type(subfield) == "hidden" %} style="display:none;"{%- endif %} title="{{ subfield.help_text | default('') }}" {%- if subfield.required %} class="required-field" {%- endif -%}>{{ subfieldname | replace('_', ' ') | title }}</th>
             {% endfor -%}
             {%- endif -%}
             <th></th>

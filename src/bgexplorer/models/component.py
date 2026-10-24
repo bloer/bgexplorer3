@@ -52,7 +52,7 @@ class ComponentSpec(EmbeddedDocument):
         help_text="Overrides the component's rating for this spec",
     )
     location_mode = EnumField(
-        LocationMode, default=LocationMode.replace,
+        LocationMode, default=LocationMode.replace, required=True,
         help_text="How the location below changes the one inherited from "
                   "the component or its placements",
     )

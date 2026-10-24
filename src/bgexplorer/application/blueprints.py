@@ -8,7 +8,8 @@ from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
                              spectrum_breakdown, spectrum_names,
                              cached_filtered,
                              BudgetFilter)
-from ..models.component import Component, Assembly
+from ..models.component import (Component, Assembly, ComponentSpec,
+                               LocationMode)
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
 from ..models.cosmogenic import ActivatedMaterial, CosmogenicActivation
@@ -41,6 +42,22 @@ REFERENCED_CLASSES = ((Component, 'component'),
                       (EmissionSpec, 'emissionspec'),
                       (HitEfficiency, 'hitefficiency'),
                       (ActivatedMaterial, 'activatedmaterial'))
+
+
+def owner_spec_settings(args) -> dict:
+    """ ComponentSpec settings from the query string of the form for a new
+    spec owned by a component """
+    settings = {}
+    try:
+        if rating := args.get('confidence_rating'):
+            settings['confidence_rating'] = int(rating)
+        if location := args.get('location'):
+            settings['location'] = location
+            settings['location_mode'] = LocationMode(
+                args.get('location_mode') or LocationMode.replace.value)
+    except ValueError as e:
+        flask.abort(400, str(e))
+    return settings
 
 
 def describe_refs(ids, version: str) -> dict:
@@ -278,7 +295,9 @@ class CollectionViews(flask.Blueprint):
             return flask.render_template(f'view_{self.clsname}.html',
                                          components=components,
                                          activations=activations,
-                                         spectypes=spectypes)
+                                         spectypes=spectypes,
+                                         specfields=ComponentSpec._fields,
+                                         locationmodes=list(LocationMode))
 
         @self.get('/diff/<itemid>/<other_version>')
         def diff(itemid, other_version):
@@ -343,6 +362,7 @@ class CollectionViews(flask.Blueprint):
             req = flask.request
             errors = {}
             owner = None
+            settings = {}
             if 'object' not in flask.g:
                 flask.g.object = self.new_document(req.args.get('type'))
                 # a new spec for one component, see Component.add_owned_spec
@@ -350,6 +370,7 @@ class CollectionViews(flask.Blueprint):
                     owner = get_or_404(Component.select_version(
                         flask.g.active_version), ownerid)
                     flask.g.object.owner = owner
+                    settings = owner_spec_settings(req.args)
             if req.method == 'POST':
                 obj = flask.g.object
                 # generated emission sources the user edits become overrides
@@ -361,7 +382,7 @@ class CollectionViews(flask.Blueprint):
                 if not errors:
                     try:
                         if owner:
-                            owner.add_owned_spec(obj)
+                            owner.add_owned_spec(obj, **settings)
                         else:
                             obj.save()
                     except me.ValidationError as e:

@@ -21,80 +21,6 @@
     </div>
 {%- endmacro -%}
 
-{#- specs whose sources can be overridden: our own, or each child's -#}
-{%- macro overridespecs() -%}
-{%- if isassembly -%}
-{%- for placement in g.object.children -%}
-{%- for spec in placement.component.specs -%}
-{{ caller(spec, placement) }}
-{%- endfor -%}
-{%- endfor -%}
-{%- else -%}
-{%- for spec in g.object.specs -%}
-{{ caller(spec, none) }}
-{%- endfor -%}
-{%- endif -%}
-{%- endmacro -%}
-
-{%- macro overriderow(entry=none, index=none) -%}
-{%- set fields = g.object._fields.location_overrides.field.document_type._fields -%}
-{%- set prefix = 'location_overrides.' -%}
-{%- set specid = (entry.spec.original_id | string) if entry and entry.spec else '' -%}
-    <tr>
-        <td style="display:none"><input type="hidden" name="{{ prefix }}id" value="{{ entry.id if entry else '' }}"></td>
-        {%- if isassembly %}
-        <td><select class="form-select overrideplacement" name="{{ prefix }}placement" onchange="filterOverrideSpecs(this);">
-            <option value="">all children</option>
-            {%- for placement in g.object.children %}
-            <option value="{{ placement.id }}" {%- if entry and entry.placement == placement.id %} selected{% endif %}>{{ placement.name }}</option>
-            {%- endfor %}
-        </select></td>
-        {%- endif %}
-        <td><select class="form-select overridespec" name="{{ prefix }}spec">
-            <option value="">any</option>
-            {%- set shown = [] -%}
-            {%- call(spec, placement) overridespecs() -%}
-            {%- set value = spec.original_id | string -%}
-            <option value="{{ value }}" {%- if placement %} data-placement="{{ placement.id }}"{% endif %}
-                {%- if value == specid and (not placement or entry.placement in (none, placement.id)) and value not in shown %} selected{% set _ = shown.append(value) %}{% endif %}>
-                {{- spec.name }}{% if placement %} ({{ placement.name }}){% endif %}</option>
-            {%- endcall %}
-        </select></td>
-        <td>{{ forminput(fields.source, entry.source if entry else '', prefix~'source', title=fields.source.help_text) }}</td>
-        {%- set errmsg = finderrmsg(['location_overrides', index, 'location']) if index is not none else '' %}
-        <td>{{ forminput(fields.location, entry.location if entry else '', prefix~'location', errmsg=errmsg) }}
-            {%- if errmsg -%}<div class="invalid-feedback">{{ errmsg }}</div>{%- endif -%}</td>
-        <td style="text-align:right"><a href="#" onclick="removeDynamicTableRow(this);" class="btn btn-danger" style="font-weight:bold">x</a></td>
-    </tr>
-{%- endmacro -%}
-
-{#- like forms.dynamictable, but specs and placements are chosen from ours -#}
-{%- macro overridestable() -%}
-<input type="hidden" name="_listfields" value="location_overrides">
-<table class="table embeddeddocumentlist" id="location_overrides">
-    <thead><tr>
-        {%- if isassembly %}<th title="Only for sources placed by this child">Placement</th>{% endif %}
-        <th>Spec</th><th title="Source name, e.g. Pb210; blank for any">Source</th>
-        <th class="required-field">Hit Efficiency Location</th><th></th>
-    </tr></thead>
-    <tbody>
-        {%- for entry in g.object.location_overrides %}
-        {{ overriderow(entry, loop.index0) }}
-        {%- endfor %}
-    </tbody>
-</table>
-<template id="location_overrides_template">
-    {{ overriderow() }}
-</template>
-<div class="d-flex justify-content-between">
-    <div class="form-text">Find hit efficiencies at a different location for the sources of a spec and/or with a source name.
-        To move all sources, set the {{ 'placement' if isassembly else 'component' }} location instead.
-        {%- if isassembly %} Placement overrides apply ahead of the placement's location, but a child's own location wins.{% endif %}
-        Save to choose newly added specs.</div>
-    <button class="btn btn-primary" type="button" data-tableid="location_overrides" data-templateid="location_overrides_template" onClick="addDynamicTableRow(this); filterOverrideSpecs();">Add</button>
-</div>
-{%- endmacro -%}
-
 {% block pageheader %}
 <div class="col-5">
     <h2>{% if isnew %}New {{ 'assembly' if isassembly else 'component' }}{% else %}Editing {{ 'assembly' if isassembly else 'component' }} <span class="text-primary">{{ g.object.name }}</span>{% endif %}</h2>
@@ -142,25 +68,22 @@
     </div>
     <div class="row mb-3">
         {%- if not isassembly %}
-        <fieldset class="col-sm-12 col-md-6">
+        <fieldset class="col-sm-12 col-md-8" id="specsfieldset">
             <legend>Radiation specifications</legend>
-            {% call(spec) dynamictable(g.object, 'specs', plainref=true) -%}
-            {%- if spec.owner %}<span class="badge text-bg-secondary owned me-1" title="Belongs to this component">own</span>{% endif -%}
+            {% call(entry) dynamictable(g.object, 'spec_entries') -%}
+            {%- if entry.spec and entry.spec.owner %}<span class="badge text-bg-secondary owned me-1" title="Belongs to this component">own</span>{% endif -%}
             {%- endcall %}
             <div class="form-text">Specs that belong to this component are created from its summary page.
-                Radon exposure and cosmogenic activation are specs too.</div>
+                Radon exposure and cosmogenic activation are specs too.
+                A spec's <em>location</em> replaces the hit efficiency location of this component or its placements,
+                or is added to its start (prefix) or end (suffix) as typed, so include any separator.
+                Leave blank to use the inherited one. A blank confidence uses the rating below.</div>
             {{ formfield(g.object, 'confidence_rating', outerclass='mt-3') }}
             <div class="form-text">5: this actual part was measured or is precisely known. 3: a close proxy,
                 such as an assay of the same material and vendor but another lot, or a rough mass or location.
                 1: a wild guess. Leave blank if not rated.</div>
         </fieldset>
         {% endif -%}
-    </div>
-    <div class="row mb-3">
-        <fieldset class="col-sm-12" id="locationoverrides">
-            <legend>Hit efficiency location overrides</legend>
-            {{ overridestable() }}
-        </fieldset>
     </div>
     <div class="row mb-3">
         <fieldset class="col-sm-12 col-md-6">
@@ -183,21 +106,5 @@
 
 {% block pagescripts %}
 {{ formscripts() }}
-<script>
-    // on assemblies, only offer the specs of the chosen placement
-    function filterOverrideSpecs(caller){
-        const selects = caller ? [caller] : document.querySelectorAll("#location_overrides select.overrideplacement");
-        selects.forEach(select => {
-            const placement = select.value;
-            const spec = select.closest("tr").querySelector("select.overridespec");
-            spec.querySelectorAll("option[data-placement]").forEach(option => {
-                option.hidden = placement !== "" && option.dataset.placement !== placement;
-                if(option.hidden && option.selected)
-                    spec.value = "";
-            });
-        });
-    }
-    filterOverrideSpecs();
-</script>
 {{ datatable.scripts(initialize=false) }}
 {% endblock pagescripts %}

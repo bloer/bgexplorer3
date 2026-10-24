@@ -240,7 +240,7 @@ class TestVersionFile(unittest.TestCase):
             [json_util.dumps(dict(first, mass='not a mass')).encode()]
             + lines[1:]))
         cases['dangling'] = with_(component__jsonl=b'\n'.join(
-            [json_util.dumps(dict(first, specs=[ObjectId()])).encode()]
+            [json_util.dumps(dict(first, spec_entries=[{'id': ObjectId(), 'spec': ObjectId()}])).encode()]
             + lines[1:]))
         for case, data in cases.items():
             with self.subTest(case=case):
@@ -251,7 +251,7 @@ class TestVersionFile(unittest.TestCase):
         lines = [json_util.loads(line)
                  for line in good['component.jsonl'].splitlines()]
         members = dict(good, **{'component.jsonl': b'\n'.join(
-            json_util.dumps(dict(son, specs=[ObjectId()])).encode()
+            json_util.dumps(dict(son, spec_entries=[{'id': ObjectId(), 'spec': ObjectId()}])).encode()
             for son in lines)})
         error = self.refused(make_file(members))
         self.assertEqual(len([p for p in error.problems

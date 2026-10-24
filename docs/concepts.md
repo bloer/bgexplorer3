@@ -101,7 +101,8 @@ Each SourceTerm is matched to the hit efficiencies whose:
 
 - `source` is the source's name;
 - `location` is the SourceTerm's location: by default the component's name, or
-  a location set on the component, its placement, or an override;
+  a location set on the component or its placement, changed by a location
+  set on the attached spec;
 - `material` is the component's material, or blank.
 
 The SourceTerm's results are its emission rate times each matching hit

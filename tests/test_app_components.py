@@ -155,85 +155,98 @@ class TestComponentPages(AppTestCase):
                          self.c1.original_id)
         self.assertEqual(Assembly.select_version('main').count(), 1)
 
-    def test_location_overrides(self):
-        """ overrides are edited in a table, and change SourceTerm locations
+    def test_spec_entries(self):
+        """ confidence and location are edited with each attached spec, and
+        change SourceTerm locations
         """
         c1url = self.url('component.edit', 'b', object=self.c1)
         html = self.html(self.client.get(c1url))
-        self.assertIn('id="location_overrides"', html)
+        self.assertIn('id="spec_entries"', html)
         self.assertIn(f'value="{self.e1.original_id}"', html)
-        response = self.client.post(c1url, data={
-            '_listfields': 'location_overrides',
-            'location_overrides.id': ['', ''],
-            'location_overrides.spec': [str(self.e1.original_id), ''],
-            'location_overrides.source': ['', 'Co60'],
-            'location_overrides.location': ['c1 surface', 'elsewhere'],
-        })
+        self.assertNotIn('location_overrides', html)
+        entry = self.c1.spec_entries[0]
+        data = {
+            '_listfields': 'spec_entries',
+            'spec_entries.id': str(entry.id),
+            'spec_entries.spec': str(self.e1.original_id),
+            'spec_entries.confidence_rating': '2',
+            'spec_entries.location_mode': 'replace',
+            'spec_entries.location': 'c1 surface',
+        }
+        response = self.client.post(c1url, data=data)
         self.assertEqual(response.status_code, 302)
         c1 = Component.select_version('b').get(name='c1')
-        self.assertEqual([(o.spec and o.spec.name, o.source, o.location)
-                          for o in c1.location_overrides],
-                         [('e1', None, 'c1 surface'),
-                          (None, 'Co60', 'elsewhere')])
+        self.assertEqual([(e.spec.name, e.confidence_rating, e.location,
+                           e.location_mode.value) for e in c1.spec_entries],
+                         [('e1', 2, 'c1 surface', 'replace')])
         st = SourceTerm.select_version('b').get(assemblyRoot=c1)
         self.assertEqual(st.location, 'c1 surface')
+        self.assertEqual(st.confidence_rating, 2)
+
         html = self.html(self.client.get(
             self.url('component.view', 'b', object=c1)))
-        self.assertIn('id="locationoverrides"', html)
+        self.assertIn('id="specstable"', html)
+        self.assertIn('c1 surface', html)
         html = self.html(self.client.get(
             self.url('component.sourceterms', 'b', object=c1)))
         self.assertIn('title="override on c1"', html)
 
-        # an assembly's overrides pick a placement
+        # an assembly places the component, and the spec still decides
         a1 = Assembly.select_version('b').get(name='a1')
-        a1url = self.url('component.edit', 'b', object=a1)
-        html = self.html(self.client.get(a1url))
-        self.assertIn(f'data-placement="{a1.children[0].id}"', html)
-        response = self.client.post(a1url, data={
-            '_listfields': 'location_overrides',
-            'location_overrides.id': [''],
-            'location_overrides.placement': [str(a1.children[0].id)],
-            'location_overrides.spec': [''],
-            'location_overrides.source': ['K40'],
-            'location_overrides.location': ['a1 spot'],
-        })
-        self.assertEqual(response.status_code, 302)
-        a1 = Assembly.select_version('b').get(name='a1')
-        self.assertEqual(a1.location_overrides[0].placement,
-                         a1.children[0].id)
-        # but c1's own override is closer to the leaf
         st = SourceTerm.select_version('b').get(assemblyRoot=a1)
         self.assertEqual(st.location, 'c1 surface')
 
-        # an override for nothing in particular is an error
-        response = self.client.post(c1url, data={
-            '_listfields': 'location_overrides',
-            'location_overrides.id': [''],
-            'location_overrides.spec': [''],
-            'location_overrides.source': [''],
-            'location_overrides.location': ['nowhere'],
-        })
-        self.assertEqual(response.status_code, 400)
-        self.assertIn('Choose a spec or source', self.html(response))
-        # including for one placement, which is the placement's location
-        response = self.client.post(a1url, data={
-            '_listfields': 'location_overrides',
-            'location_overrides.id': [''],
-            'location_overrides.placement': [str(a1.children[0].id)],
-            'location_overrides.spec': [''],
-            'location_overrides.source': [''],
-            'location_overrides.location': ['nowhere'],
-        })
-        self.assertEqual(response.status_code, 400)
+        # a prefix goes in front of whatever is inherited. The view says so
+        # when the component has no location of its own
+        data.update({'spec_entries.location_mode': 'prefix',
+                     'spec_entries.location': 'inner '})
+        self.assertEqual(self.client.post(c1url, data=data).status_code, 302)
+        html = self.html(self.client.get(
+            self.url('component.view', 'b', object=c1)))
+        self.assertIn('inner [Inherited Location]', html)
+        st = SourceTerm.select_version('b').get(assemblyRoot=c1)
+        self.assertEqual(st.location, 'inner c1')
+        data.update({'location': 'c1 loc'})
+        self.assertEqual(self.client.post(c1url, data=data).status_code, 302)
+        html = self.html(self.client.get(
+            self.url('component.view', 'b', object=c1)))
+        self.assertIn('inner c1 loc', html)
+        self.assertNotIn('[Inherited Location]', html)
+
+        # a blank location keeps the inherited one, and blank rating clears
+        data.update({'spec_entries.location': '',
+                     'spec_entries.confidence_rating': ''})
+        self.assertEqual(self.client.post(c1url, data=data).status_code, 302)
+        c1 = Component.select_version('b').get(name='c1')
+        self.assertIsNone(c1.spec_entries[0].confidence_rating)
+        self.assertEqual(SourceTerm.select_version('b').get(assemblyRoot=c1)
+                         .location, 'c1 loc')
+
+        # bad values are form errors
+        data.update({'spec_entries.confidence_rating': '9'})
+        self.assertEqual(self.client.post(c1url, data=data).status_code, 400)
+        data.update({'spec_entries.confidence_rating': '',
+                     'spec_entries.location_mode': 'middle'})
+        self.assertEqual(self.client.post(c1url, data=data).status_code, 400)
+
+        # removing the row detaches the spec
+        response = self.client.post(c1url, data={'_listfields':
+                                                 'spec_entries'})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Component.select_version('b').get(name='c1')
+                         .spec_entries, [])
         # main is untouched
         self.assertEqual(Component.select_version('main').get(name='c1')
-                         .location_overrides, [])
+                         .spec_entries[0].location, None)
 
     def test_owned_specs(self):
         """ a component can create specs of its own, or copy a shared one """
         html = self.html(self.client.get(self.url('component.view', 'b',
                                                   object=self.c1)))
         self.assertIn('id="newownspec"', html)
+        self.assertIn('id="newownspecmodal"', html)
+        self.assertIn('name="confidence_rating"', html)
+        self.assertIn('name="location"', html)
         self.assertIn('class="d-inline makespecific"', html)
         url = self.url('emissionspec.edit', 'b', type='emissionspec',
                        owner=self.c1.original_id)
@@ -292,6 +305,32 @@ class TestComponentPages(AppTestCase):
         self.assertEqual(EmissionSpec.select_version('b')(
             owner__ne=None).count(), 0)
         self.assertEqual(EmissionSpec.select_version('b').count(), 1)
+
+    def test_owned_spec_settings(self):
+        """ the new spec modal passes confidence and location along """
+        url = self.url('emissionspec.edit', 'b', type='emissionspec',
+                       owner=self.c1.original_id, confidence_rating=4,
+                       location_mode='suffix', location=' surface')
+        response = self.client.post(url, data={
+            'name': 'c1 own', '_listfields': 'sources', 'sources.id': '',
+            'sources.name': 'Co60', 'sources.rate': '1 mBq/kg'})
+        self.assertEqual(response.status_code, 302)
+        c1 = Component.select_version('b').get(name='c1')
+        entry = c1.find_spec_entry(c1.specs[1])
+        self.assertEqual((entry.confidence_rating, entry.location,
+                          entry.location_mode.value),
+                         (4, ' surface', 'suffix'))
+        self.assertIsNone(c1.spec_entries[0].confidence_rating)
+        sts = SourceTerm.select_version('b')(assemblyRoot=c1,
+                                             source__name='Co60')
+        self.assertEqual(sts.get().location, 'c1 surface')
+        # bad settings are rejected before anything is created
+        for bad in ({'confidence_rating': 'high'}, {'location': 'x',
+                                                    'location_mode': 'mid'}):
+            url = self.url('emissionspec.edit', 'b', type='emissionspec',
+                           owner=self.c1.original_id, **bad)
+            self.assertEqual(self.client.post(url, data={'name': 'x'})
+                             .status_code, 400)
 
     def import_file(self, version, data, filename):
         return self.client.post(

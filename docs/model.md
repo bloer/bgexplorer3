@@ -60,12 +60,21 @@ The `1.2(3)` notation and negative values aren't supported yet.
 | Material | free text, e.g. `copper`. Used to match hit efficiencies that give a material (for e.g. (alpha,n) neutron yields), and to group results |
 | Mass, volume, inner and outer surface area, length, width, height | geometry, defaulting to 0. The surface area used for rates is inner + outer by default |
 | Hit Efficiency Location | the `location` to match in the hit efficiency database; blank uses the component's name if not given in a parent Placement. Autocompletes from existing locations |
-| Specs | the radiation emission specs that apply. Opens a search form. |
-| Confidence rating | optional, 1 to 5 (components only): how well known the inputs are, and how closely the assays match this part. 5 is the actual part measured or precisely known; 3 is a close proxy, such as an assay of the same material and vendor but another lot, or a rough mass or location; 1 is a wild guess. Blank means not rated, which is not the same as 1. It is included in the component's JSON on the Export tab and `api/<id>` only when set |
-| Location overrides | send some sources to another location, see [below](#location-overrides) |
+| Specs | the radiation emission specs that apply, one row each with its own confidence rating and location, see [below](#attached-specs). **Add** opens a search form. |
+| Confidence rating | optional, 1 to 5: how well known the inputs are, and how closely the assays match this part. It is the default for every attached spec that has no rating of its own. 5 is the actual part measured or precisely known; 3 is a close proxy, such as an assay of the same material and vendor but another lot, or a rough mass or location; 1 is a wild guess. Blank means not rated, which is not the same as 1. It is included in the component's JSON on the Export tab and `api/<id>` only when set |
 | Purchase info, material purchase info | optional vendor, part number, batch, order, dates… |
 | History | handling records: date, location, duration, worker… |
 | Attachments, extra metadata | anything else |
+
+### Attached specs
+
+Each spec attached to a component has its own row in the component's table of
+specs, with settings that apply to that spec on this component only:
+
+| Field | Meaning |
+|-------|---------|
+| Confidence rating | optional, 1 to 5, as for the component. Blank uses the component's rating, so one poorly known spec doesn't have to downgrade the rest |
+| Location mode, location | optional hit efficiency location for this spec's sources, see [location overrides](#location-overrides). Blank uses the inherited location |
 
 ### Assemblies
 
@@ -88,14 +97,16 @@ Assemblies can't contain themselves.
 
 A spec can be *owned* by a single component. It is then only used by that
 component, isn't offered for other components, and is deleted with it. Create
-one with **New spec for this component** on the component's page. Owned specs
+one with **New spec for this component** on the component's page, which also
+asks for the confidence and location it will be attached with. Owned specs
 have an "own" badge, and are hidden from the emission spec overview unless you
 choose **Show component-specific**. This is strictly a convenience to keep search
 tables from getting cluttered with per-component information and can be completely
 ignored.
 Use **make specific** to replace a shared spec on one component with a private
 copy, named `<spec> (<component>)` (the **make specific** button next to the
-spec in the component's Radiation sources table), e.g. to give one component its own radon
+spec in the component's Radiation sources table; the copy keeps the confidence and
+location settings), e.g. to give one component its own radon
 history. Cloning a component also clones the specs it owns.
 
 ## Emission specs
@@ -280,12 +291,13 @@ separately, and the new result will replace the original.
 The location is decided from the most specific setting, starting at the
 component itself and walking up to the root assembly:
 
-1. a location override on the component for this spec or source;
-2. the component's Hit Efficiency Location;
-3. an override on the parent assembly for this placement;
-4. the placement's location;
-5. then the same on each assembly further up;
-6. finally, the component's name.
+1. the component's Hit Efficiency Location;
+2. the location of the parent assembly's placement;
+3. then the same on each assembly further up;
+4. finally, the component's name.
+
+That is the *inherited* location. A location set on the component's attached
+spec then replaces it or is added to it, see [below](#location-overrides).
 
 This scheme allows correct hit efficiency assignment for multiply-placed items.
 For example, if we have assayed a bag of screws, their radioactivity contribution
@@ -298,18 +310,33 @@ e.g. "override on Tower" or "component name".
 
 ### Location overrides
 
-An override sends the sources of one spec, or one source name, or both, to a
-different location. For example, put the radon plate-out on a component's
-surface at the `CuCanSurface` location while its bulk assay stays at `CuCan`.
-As with other locations, this is an exact string match against the hit efficiency
-table, so it's critical to observe consisten naming conventions.
+An attached spec can send its sources to a different location from the rest of
+the component. For example, put the radon plate-out on a component's surface at
+the `CuCanSurface` location while its bulk assay stays at `CuCan`. The
+**location mode** says how the spec's location is combined with the inherited
+one:
 
-On an assembly, an override can also be limited to one placement. When several
-overrides match, the more specific one wins (a spec counts more than a source
-name). Overrides for specs or placements that are removed go with them.
+| Mode | Result |
+|------|--------|
+| replace | the spec's location, whatever is inherited |
+| prefix | the spec's location followed by the inherited location, e.g. `Hot ` + `Package` |
+| suffix | the inherited location followed by the spec's location |
+
+The text is joined exactly as typed, so include any separator: `Hot ` and
+` Surface`. Prefix and suffix are useful with placement-based locations, where
+the same component sits in different places. A component's page previews the
+result. If the component has no location of its own, the base depends on its
+placement, so a prefix is shown like `Hot [Inherited Location]`.
+
+As with other locations, the result is an exact string match against the hit
+efficiency table, so it's critical to observe consistent naming conventions.
+The same override applies to every placement of the component; use a location
+on the placement to differ between them. Detaching a spec removes its
+settings. The **Source Terms** tab shows where each location came from, e.g.
+"override on Tower".
 
 ### Isotope names
 
 Isotope names are recognized as `U238`, `U-238` or `238U`, and can have a suffix,
 like `U238 lower`. These are treated as the same isotope for generated sources,
-overrides, concentrations and activation. **Hit efficiency matching uses the exact string**, so pick one spelling for your simulations and specs.
+concentrations and activation. **Hit efficiency matching uses the exact string**, so pick one spelling for your simulations and specs.

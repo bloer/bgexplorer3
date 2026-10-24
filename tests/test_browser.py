@@ -578,7 +578,7 @@ class TestReferencePicker(BrowserTestCase):
         self.errors[:] = [e for e in self.errors if '(BAD REQUEST)' not in e]
 
 
-class TestLocationOverrideEditor(BrowserTestCase):
+class TestSpecEntryEditor(BrowserTestCase):
     def setUp(self):
         super().setUp()
         vc.create_version('main')
@@ -588,57 +588,66 @@ class TestLocationOverrideEditor(BrowserTestCase):
             Pb210='1 mBq/kg')).save()
         HitEfficiency(source='Pb210', location='Package Outer Surface'
                       ).save()
-        inner = Component(name='inner', mass='1 kg', location='Inside',
-                          specs=[self.becu]).save()
-        package = Component(name='package', mass='1 kg', location='Package',
-                            specs=[self.becu, self.radon]).save()
-        self.a1 = Assembly(name='a1', components=[inner, package]).save()
+        self.package = Component(name='package', mass='1 kg',
+                                 location='Package', specs=[self.becu]
+                                 ).save()
 
-    def test_placement_filters_specs(self):
-        page = self.open(self.url('component.edit', object=self.a1))
-        page.click('#locationoverrides button:text-is("Add")')
-        row = page.locator('#location_overrides tbody tr').last
-        spec = row.locator('select.overridespec')
-
-        def shown():
-            return spec.locator('option').evaluate_all(
-                "options => options.filter(o => !o.hidden)"
-                ".map(o => o.textContent.trim())")
-        self.assertEqual(shown(), ['any', 'BeCu (inner)', 'BeCu (package)',
-                                   'radon (package)'])
+    def test_attach_with_settings(self):
+        page = self.open(self.url('component.edit', object=self.package))
+        page.click('#specsfieldset button:text-is("Add")')
+        # adding a row opens the picker for its spec
+        page.wait_for_function("document.getElementById("
+                               "'selectReferenceModal').classList"
+                               ".contains('show')")
+        page.wait_for_timeout(500)
+        page.locator('#selectReferenceModalBody a:text-is("radon")').click()
+        page.wait_for_selector('#selectReferenceModal', state='hidden')
+        row = page.locator('#spec_entries tbody tr').last
+        row.locator('select[name="spec_entries.confidence_rating"]'
+                    ).select_option('2')
+        row.locator('select[name="spec_entries.location_mode"]'
+                    ).select_option('suffix')
         # locations autocomplete in added rows too
         page.wait_for_function(
-            "document.querySelector('#location_overrides tbody tr:last-child"
-            " datalist').options.length > 0")
-        row.locator('select.overrideplacement').select_option(
-            label='package')
-        self.assertEqual(shown(), ['any', 'BeCu (package)',
-                                   'radon (package)'])
-        spec.select_option(label='radon (package)')
-        # a spec of another placement is cleared when it's hidden
-        row.locator('select.overrideplacement').select_option(label='inner')
-        self.assertEqual(shown(), ['any', 'BeCu (inner)'])
-        self.assertEqual(spec.input_value(), '')
-
-        row.locator('select.overrideplacement').select_option(
-            label='package')
-        spec.select_option(label='radon (package)')
-        row.locator('input[name="location_overrides.location"]').fill(
-            'Package Outer Surface')
+            "document.querySelector('#spec_entries tbody tr:last-child "
+            "datalist').options.length > 0")
+        row.locator('input[name="spec_entries.location"]').fill(' Outer')
         page.click('#mainform button[type=submit] >> nth=0')
         page.wait_for_url(self.base + self.url('component.view',
-                                               object=self.a1))
-        a1 = Assembly.objects.get(name='a1')
-        override = a1.location_overrides[0]
-        self.assertEqual(override.placement, a1.children[1].id)
-        self.assertEqual(override.spec.name, 'radon')
+                                               object=self.package))
+        package = Component.objects.get(name='package')
+        entry = package.find_spec_entry(self.radon)
+        self.assertEqual((entry.confidence_rating, entry.location,
+                          entry.location_mode.value),
+                         (2, ' Outer', 'suffix'))
+        # the page previews the result
+        self.assertIn('Package Outer', page.locator('#specstable').inner_text())
 
-        # reopening keeps the choices, filtered
-        page.goto(self.base + self.url('component.edit', object=self.a1))
-        self.assertEqual(spec.locator('option:checked').inner_text().strip(),
-                         'radon (package)')
-        self.assertEqual(shown(), ['any', 'BeCu (package)',
-                                   'radon (package)'])
+    def test_new_spec_modal(self):
+        page = self.open(self.url('component.view', object=self.package))
+        page.click('#newownspec')
+        page.wait_for_selector('#newownspecmodal.show')
+        page.wait_for_timeout(500)
+        page.select_option('#newownspectype', 'emissionspec')
+        page.select_option('#newownspecconfidence', '3')
+        page.select_option('#newownspecmode', 'prefix')
+        page.wait_for_function(
+            "document.querySelector('#newownspeclocations').options.length"
+            " > 0")
+        page.fill('#newownspeclocation', 'Hot ')
+        page.click('#newownspecsubmit')
+        page.wait_for_selector('#mainform')
+        page.fill('#name', 'own spec')
+        page.click('#mainform button[type=submit] >> nth=0')
+        page.wait_for_url(self.base + self.url('component.view',
+                                               object=self.package))
+        package = Component.objects.get(name='package')
+        entry = package.spec_entries[-1]
+        self.assertEqual(entry.spec.name, 'own spec')
+        self.assertEqual((entry.confidence_rating, entry.location,
+                          entry.location_mode.value),
+                         (3, 'Hot ', 'prefix'))
+        self.assertIn('Hot Package', page.locator('#specstable').inner_text())
 
 
 class TestRadonExposureEditor(BrowserTestCase):
