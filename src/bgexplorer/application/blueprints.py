@@ -3,7 +3,7 @@ import mongoengine as me
 from bson import ObjectId
 from bson.errors import InvalidId
 from io import BytesIO
-from ..models.sourceterm import find_sourceterms, CalculatedResults
+from ..models.sourceterm import find_sourceterms
 from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
                              spectrum_breakdown, spectrum_names,
                              cached_filtered,
@@ -19,7 +19,6 @@ from ..models.verdoc import check_writable
 from ..models.versiondiff import compare_document, find_refs
 from ..models.versioncontrol import (version_exists, import_document,
                                      VersionControlError)
-from ..models.settings import get_settings
 from .api import validation_fields
 from .auth import require_for_changes, Role
 from .forms import update_object, list_snapshot, edited_rows
@@ -542,19 +541,13 @@ class CollectionViews(flask.Blueprint):
         """ Data for the spectra and budget plots of a Component """
         @self.get('/<objid>/spectra.json')
         def spectra_json():
-            # only shown, so stored spectra don't need their expressions
-            results = CalculatedResults.for_object(
-                flask.g.object, flask.g.get('relativeto'),
-                correlations=False)
-            config = get_settings(flask.g.active_version)\
-                .hiteffdbconfig.display_spectra
             spectra = {}
-            for name, hist in (results.spectra if results else {}).items():
-                cfg = config.get(name)
-                if hist is None or (cfg and cfg.hide):
-                    continue
-                spectra[(cfg and cfg.display_name) or name] = \
-                    histogram_json(hist, cfg and cfg.display_unit)
+            for name, label in spectrum_names(flask.g.active_version):
+                total = spectrum_breakdown(
+                    flask.g.object, name,
+                    relativeto=flask.g.get('relativeto'))['total']
+                if total is not None:
+                    spectra[label] = histogram_json(total)
             return flask.jsonify(spectra)
 
         @self.get('/<objid>/spectrum.json')
@@ -569,13 +562,10 @@ class CollectionViews(flask.Blueprint):
             if names and name not in dict(names):
                 return flask.jsonify(error=dict(
                     message=f"Unknown spectrum '{name}'")), 400
-            config = get_settings(flask.g.active_version)\
-                .hiteffdbconfig.display_spectra
-            unit = name in config and config[name].display_unit or None
             relativeto = flask.g.get('relativeto')
 
             def hist_json(hist):
-                return hist and histogram_json(hist, unit)
+                return hist and histogram_json(hist)
 
             def calculate():
                 result = spectrum_breakdown(flask.g.object, name, filters,
@@ -594,8 +584,8 @@ class CollectionViews(flask.Blueprint):
                 filters = BudgetFilter.from_json(args.get('filters'))
                 # evaluating the sums is most of the work, so keep the JSON
                 data = cached_filtered(flask.g.object, filters, relativeto,
-                                       ('spectrum.json', name, groupby,
-                                        unit and str(unit)), calculate)
+                                       ('spectrum.json', name, groupby),
+                                       calculate)
             except (ValueError, PintError) as e:
                 return flask.jsonify(error=dict(message=str(e))), 400
             return flask.jsonify(

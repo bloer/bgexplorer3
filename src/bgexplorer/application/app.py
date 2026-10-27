@@ -8,6 +8,7 @@ import logging
 import importlib
 from ..models.settings import (get_settings, get_application_settings,
                                get_secret_key, ApplicationSettings)
+from ..models.common import UnitMismatchError
 from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
@@ -121,6 +122,17 @@ def create_app(config_file=None, config=None):
             return flask.jsonify(error=dict(message=str(e))), 403
         return flask.render_template('error.html', title="Not allowed",
                                      message=str(e)), 403
+
+    @app.errorhandler(UnitMismatchError)
+    def unit_mismatch(e):
+        """ Saved data whose units don't fit together (the audit after an
+        import or merge reports these, see `check_version_units`)
+        """
+        message = f"Units in the saved data don't match: {e}"
+        if wants_json() or flask.request.path.endswith('.json'):
+            return flask.jsonify(error=dict(message=message)), 500
+        return flask.render_template('error.html', title="Unit mismatch",
+                                     message=message), 500
 
     @app.template_global()
     def bgexplorer_version():

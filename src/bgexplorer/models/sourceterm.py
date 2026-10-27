@@ -29,6 +29,8 @@ from itertools import chain
 import logging
 import threading
 log = logging.getLogger(__name__)
+NO_MATERIAL = '(no material)'
+NO_CATEGORY = '(uncategorized)'
 
 
 class SourceTerm(VersionedDocument):
@@ -93,6 +95,18 @@ class SourceTerm(VersionedDocument):
             return None
         return rate * self.weight * self.rate_multiplier
 
+
+    def group_keys(self) -> dict:
+        """ What this term is grouped by in a budget breakdown. The component
+        key is the path of placement ids (as strings) from the assembly root
+        """
+        category = self.source.category
+        return dict(
+            component=tuple(str(pid) for pid in self.placement_ids or []),
+            isotope=self.source.name,
+            # a component without a material is listed by name
+            material=self.material or self.componentName or NO_MATERIAL,
+            category=category.value if category else NO_CATEGORY)
 
     def set_location(self):
         """ Update the `location` attribute if it is auto """

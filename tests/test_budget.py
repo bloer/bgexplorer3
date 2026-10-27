@@ -1,14 +1,16 @@
 """ Filtered budget breakdowns for the results dashboard """
 import unittest
 from unittest import mock
-from bgexplorer.models.budget import (BudgetFilter, dashboard, NO_CATEGORY,
-                                      table, term_values)
+from bgexplorer.models.budget import (BudgetFilter, dashboard, table,
+                                      term_values)
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
                                             SourceCategory)
-from bgexplorer.models.basecalc import ScalarCalculator
-from bgexplorer.models.sourceterm import SourceTerm, clear_results_cache
-from bgexplorer.models.common import DimensionalityError, units as unitreg
+from bgexplorer.models.termcalc import TermCalculator
+from bgexplorer.models.sourceterm import (SourceTerm, clear_results_cache,
+                                          NO_CATEGORY)
+from bgexplorer.models.common import (DimensionalityError, UnitMismatchError,
+                                      units as unitreg)
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import get_settings, HitEffConfig
 from bgexplorer.models.sourceterm import CalculatedResults, find_sourceterms
@@ -318,8 +320,8 @@ class TestDashboard(AppTestCase):
 
     def recalculated(self, **kwargs):
         """ The Terms of a2 and how many SourceTerms had to be calculated """
-        with mock.patch.object(ScalarCalculator, 'calculate', autospec=True,
-                               side_effect=ScalarCalculator.calculate
+        with mock.patch.object(TermCalculator, 'scalars', autospec=True,
+                               side_effect=TermCalculator.scalars
                                ) as calculate:
             return term_values(self.a2, **kwargs), calculate.call_count
 
@@ -368,7 +370,8 @@ class TestDashboard(AppTestCase):
                       scalars=scalars).save()
 
     def test_mixed_units(self):
-        """ Results are summed in base units whatever their units were """
+        """ Results are summed in the display units whatever their units
+        were """
         expected = dashboard(self.a2, 'v1')
         self.replace_hiteff('c3', v1='500 +- 50 dru/Bq')
         result = dashboard(self.a2, 'v1')
@@ -384,18 +387,21 @@ class TestDashboard(AppTestCase):
             dashboard(self.a2, 'v1', unit='kg')
 
     def test_mismatched_units(self):
-        """ Only the scalars with inconsistent dimensions fail """
+        """ Saved data that doesn't fit the display units is an error, not a
+        wrong sum
+        """
         self.replace_hiteff('c1', v1='0.1 +- 0.01 dru/mBq',
                             other='1 +- 0.1 dru/mBq')
         self.replace_hiteff('c3', v1='0.5 +- 0.05 dru/mBq',
                             other='1 +- 0.1 dru/mBq')
-        # the display unit check rejects this, so go around it
+        # validation rejects this, so go around it
         hiteff = HitEfficiency.objects.get(source='Th232', location='c3')
         hiteff.scalars['other'] = unitreg.Quantity(
             hiteff.scalars['other'].m, '1/mBq')
         hiteff.save(validate=False)
-        dashboard(self.a2, 'v1')
-        with self.assertRaises(DimensionalityError):
+        with self.assertRaises(UnitMismatchError):
+            dashboard(self.a2, 'v1')
+        with self.assertRaises(UnitMismatchError):
             dashboard(self.a2, 'other')
 
     def show_columns(self):
