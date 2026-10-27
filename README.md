@@ -218,9 +218,20 @@ per process and lost on restart:
 - SourceTerms saved before stamps existed get theirs the first time they are
   used.
 
-Scalars are multiplied as plain magnitudes in SI base units, and only
-converted to the display units when summed (`basecalc.py`). Spectra still use
-pint and are calculated only when asked for.
+Each SourceTerm's scalars, ROIs and spectra are converted to the display
+units once, by `TermCalculator` (`models/termcalc.py`), and summed as plain
+magnitudes from then on. Every scalar, spectrum and ROI therefore has a display
+unit in the version settings, meaning the unit of the hit efficiency value
+times its norm.
+
+Unit mismatches are caught when data is saved, rather than when results are
+calculated: `SourceTerm.clean` and `HitEfficiency.clean` dry-run the
+conversion and raise a `ValidationError`. Imports and merges write directly
+and defer these checks (`unit_checks_deferred`); `check_version_units` then
+audits the version, logs warnings and reports `unit_problems` in the history
+event without blocking. Data that is still mismatched raises
+`UnitMismatchError` (a `ValueError`) when calculated, which the app shows as
+an error page rather than an unexplained 500.
 
 ## Running tests
 

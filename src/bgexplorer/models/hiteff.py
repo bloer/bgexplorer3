@@ -4,7 +4,7 @@ from mongoengine.fields import (StringField, MapField, UUIDField, ListField,
 from mongoengine.errors import ValidationError
 from .verdoc import DynamicVersionedDocument
 from .fields import QuantityField, UncertainQuantityField, HistogramField
-from .common import units as unitreg
+from .common import units as unitreg, UnitMismatchError
 from .histogram import Histogram
 from . import settings
 from enum import Enum
@@ -147,10 +147,30 @@ class HitEfficiency(DynamicVersionedDocument):
         for roi in dbconfig.rois:
             roi.evaluate(self, store=True)
 
+    def check_sourceterms(self, dbconfig):
+        """ Make sure our scalars and ROIs can be calculated, in the display
+        units of `dbconfig`, for the emission rates of the SourceTerms we
+        apply to. Raise ValidationError if not. Without any SourceTerms this
+        has nothing to check, but `check_dbconfig` has already compared our
+        units to the display units.
+        """
+        # these imports are circular
+        from .sourceterm import hiteff_rate_units, _unit_checks_deferred
+        from .termcalc import TermCalculator
+        if _unit_checks_deferred.get() or not self.is_loaded('scalars'):
+            return
+        calculator = TermCalculator(dbconfig, strict=False)
+        try:
+            for rate_unit in hiteff_rate_units(self):
+                calculator.check_hiteff(self, rate_unit)
+        except UnitMismatchError as e:
+            raise ValidationError(str(e)) from e
+
     def clean(self):
         super().clean()
         dbconfig = settings.get_settings(self.active_version).hiteffdbconfig
         self.check_dbconfig(dbconfig)
+        self.check_sourceterms(dbconfig)
         if self.is_loaded('scalars'):
             self.scalars_keys = list(self.scalars)
         if self.is_loaded('spectra'):

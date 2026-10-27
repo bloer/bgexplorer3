@@ -55,12 +55,16 @@ added. A unit that isn't compatible with existing hit efficiencies is
 rejected. Similarly, adding a new hit efficiency with incompatible units is
 rejected. If these aren't filled, the first inserted hit efficiency sets the units.
 
+The display unit is the unit of the hit efficiency value times its norm, e.g.
+`dru/mBq` with a rate norm is shown in `dru`. A hit efficiency whose norm doesn't fit the
+emission rate of the SourceTerms it applies to is rejected, and so is a
+SourceTerm whose rate doesn't fit its hit efficiencies. After importing or
+merging a version, any remaining mismatches are listed in the history event.
+
 **Extra columns** lists extra hit efficiency fields, e.g. `material`, to show
 as columns on the Hit Efficiencies overview.
 
 ### Regions of interest
-
-**NOTE** ROI implementation is not tested yet; evaluate the scalars outside.
 
 A region of interest (ROI) makes a new scalar from a spectrum, e.g. the rate
 between 2400 and 2500 keV. It has:
@@ -71,7 +75,7 @@ between 2400 and 2500 keV. It has:
 | Start, stop | the energy range, e.g. `2400 keV` |
 | Mode | `average` (the default) or `integrate` over the range |
 | Bin widths | whether to account for bin widths |
-| Display name, display unit | as above; the name defaults to "*spectrum*, *mode* *start* to *stop*" |
+| Display name, display unit | as above, with the unit meaning value times norm; the name defaults to "*spectrum*, *mode* *start* to *stop*" |
 
 ROIs are evaluated for every hit efficiency when the settings are saved, and
 then act like any other scalar.

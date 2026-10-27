@@ -3,7 +3,8 @@ from .component import Component, Assembly
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .cosmogenic import ActivatedMaterial
-from .sourceterm import SourceTerm, CalculatedResults
+from .sourceterm import (SourceTerm, CalculatedResults, check_version_units,
+                         unit_checks_deferred)
 from .settings import VersionSettings, get_settings, touch, hold_locks
 from .verdoc import (VersionedDocument, ReadOnlyVersionError, check_unlocked,
                      check_writable, strip_identity, current_user_name)
@@ -298,6 +299,8 @@ class MergePlan:
     replace_settings: bool
     fingerprint: str
     problems: List[str] = field(default_factory=list)
+    # set once the merge is done: units that don't agree in the merged version
+    unit_problems: List[str] = field(default_factory=list)
 
     @property
     def changes(self) -> bool:
@@ -518,7 +521,10 @@ def merge_version(source: str, target: str,
                 # some hit efficiencies' ROIs were evaluated with the other
                 # version's settings
                 _update_rois(target)
-            _update_sourceterms(target, plan)
+            with unit_checks_deferred():
+                _update_sourceterms(target, plan)
+            # the merged documents were not validated together
+            plan.unit_problems = check_version_units(target)
         except Exception as e:
             log.exception(f"Merge of '{source}' into '{target}' failed, "
                           "restoring it")
@@ -541,7 +547,8 @@ def merge_version(source: str, target: str,
         touch(target)
     log_event(EventAction.merge, target, source, message=_merge_summary(plan),
               rule=rule.value, counts=plan.counts(),
-              settings=plan.replace_settings)
+              settings=plan.replace_settings,
+              unit_problems=plan.unit_problems)
     return plan
 
 

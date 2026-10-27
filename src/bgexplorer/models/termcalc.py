@@ -49,11 +49,15 @@ class TermCalculator:
 
     Raises UnitMismatchError if a SourceTerm's rate doesn't fit its hit
     efficiencies' norm, or a result can't be shown in its display unit, or
-    has none.
+    has none. If not `strict`, results with no display unit are left out
+    rather than raising, for checks made before a new hit efficiency's units
+    are added to the settings.
     """
-    def __init__(self, config, hiteffs: Optional[Dict] = None):
+    def __init__(self, config, hiteffs: Optional[Dict] = None,
+                 strict: bool = True):
         self.config = config
         self.hiteffs = hiteffs or {}
+        self.strict = strict
         self._scaled = {}
         self._norms = {}
 
@@ -84,6 +88,13 @@ class TermCalculator:
         elif multiplier is not None:
             scale = scale * multiplier
         return m * scale, unit
+
+    @classmethod
+    def rate_unit(cls, sourceterm):
+        """ The unit of the sourceterm's emission rate, or None if it has none
+        """
+        rate = cls._rate(sourceterm)
+        return None if rate is None else rate[1]
 
     @staticmethod
     def _describe(hiteff) -> str:
@@ -134,8 +145,10 @@ class TermCalculator:
             if val is None:
                 continue
             m, unit = _split(val)
-            factor = self._factor(hiteff, key, unit * rate_unit,
-                                  self.config.scalar_unit(key))
+            display = self.config.scalar_unit(key)
+            if display is None and not self.strict:
+                continue
+            factor = self._factor(hiteff, key, unit * rate_unit, display)
             scaled.append((key, m if factor == 1. else m * factor))
         # the id is only unique while hiteff is alive
         self._scaled[cache_key] = (hiteff, scaled)
@@ -164,16 +177,25 @@ class TermCalculator:
         self._scaled[cache_key] = (hiteff, scaled)
         return scaled
 
-    def check(self, sourceterm) -> None:
+    def check(self, sourceterm, hiteffs=None) -> None:
         """ Raise UnitMismatchError if any of the sourceterm's scalars or ROIs
-        can't be calculated. The spectra's units are checked against the
-        display units when they are saved, so only their norm is checked
+        can't be calculated, with the given `hiteffs` instead of its own. The
+        spectra's units are checked against the display units when they are
+        saved, so only their norm is checked
         """
-        rate = self._rate(sourceterm)
-        if rate is None:
+        rate_unit = self.rate_unit(sourceterm)
+        if rate_unit is None:
             return
-        for hiteff in self._hiteffs(sourceterm):
-            self._scaled_scalars(hiteff, rate[1])
+        if hiteffs is None:
+            hiteffs = self._hiteffs(sourceterm)
+        for hiteff in hiteffs:
+            self.check_hiteff(hiteff, rate_unit)
+
+    def check_hiteff(self, hiteff, rate_unit) -> None:
+        """ Raise UnitMismatchError if the scalars and ROIs of `hiteff` can't
+        be calculated for emission rates in `rate_unit`
+        """
+        self._scaled_scalars(hiteff, rate_unit)
 
     def scalars(self, sourceterm) -> dict:
         """ The sourceterm's scalars and ROIs, summed over its hit
