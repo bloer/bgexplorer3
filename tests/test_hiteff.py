@@ -112,7 +112,69 @@ class TestHitEFficiency(unittest.TestCase):
         self.assertAlmostEqual(result.s0, np.sqrt(12)/7)
         self.assertAlmostEqual(result.s1, np.sqrt(12)/7)
 
+    def _spectrum_hiteff(self, norm='rate', **kwargs):
+        return HitEfficiency(
+            source="h", location="h", norm=norm, spectra=dict(v1=Histogram(
+                AsymmetricUncertainty.fromcounts(np.arange(10))
+                * units('dru/mBq'), np.arange(11) * units.keV)), **kwargs)
 
+    def test_missing_display_units_filled(self):
+        """ A display unit that is cleared is set from the hit efficiencies
+        again when the settings are saved
+        """
+        self._spectrum_hiteff(scalars=dict(v1='10 +- 1 dru/mBq')).save()
+        config = get_settings(HitEfficiency.get_default_tag())
+        config.hiteffdbconfig.display_scalars['v1'].display_unit = None
+        config.hiteffdbconfig.display_spectra['v1'].display_unit = None
+        config.save()
+        config.reload()
+        for cfg in (config.hiteffdbconfig.display_scalars['v1'],
+                    config.hiteffdbconfig.display_spectra['v1']):
+            self.assertTrue(cfg.display_unit.is_compatible_with('dru'))
+
+    def test_roi_display_unit(self):
+        """ ROI display units are for the value times the norm, like scalars
+        """
+        config = get_settings(HitEfficiency.get_default_tag())
+        config.hiteffdbconfig.rois = [
+            SpectrumROI(spectrum='v1', start=0*units.keV, stop=5*units.keV,
+                        mode='integrate')]
+        config.save()
+        self._spectrum_hiteff().save()
+        config.reload()
+        roi = config.hiteffdbconfig.rois[0]
+        self.assertTrue(roi.display_unit.is_compatible_with('1/kg/day'))
+        self.assertEqual(config.hiteffdbconfig.scalar_unit(roi.key),
+                         roi.display_unit)
+        self.assertIsNone(config.hiteffdbconfig.scalar_unit('nothing'))
+        # a flux norm changes the result's dimensions
+        with self.assertRaises(ValidationError):
+            self._spectrum_hiteff(norm='flux').save()
+
+    def test_roi_display_unit_conflict(self):
+        """ A new ROI display unit is checked against the hit efficiencies,
+        and an unset one is filled from them
+        """
+        self._spectrum_hiteff().save()
+        config = get_settings(HitEfficiency.get_default_tag())
+        config.hiteffdbconfig.rois = [
+            SpectrumROI(spectrum='v1', start=0*units.keV, stop=5*units.keV,
+                        mode='average', display_unit='Hz')]
+        with self.assertRaises(ValidationError):
+            config.save()
+        config.hiteffdbconfig.rois[0].display_unit = None
+        config.save()
+        config.reload()
+        self.assertTrue(config.hiteffdbconfig.rois[0].display_unit
+                        .is_compatible_with('1/kg/day/keV'))
+
+    def test_roi_that_cant_evaluate(self):
+        self._spectrum_hiteff().save()
+        config = get_settings(HitEfficiency.get_default_tag())
+        config.hiteffdbconfig.rois = [
+            SpectrumROI(spectrum='v1', start=0*units.kg, stop=5*units.keV)]
+        with self.assertRaises(ValidationError):
+            config.save()
 
 
 class TestPartialLoad(unittest.TestCase):

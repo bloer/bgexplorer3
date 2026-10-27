@@ -5,6 +5,7 @@ from mongoengine import (Document, DateTimeField, StringField, BooleanField,
                          ValidationError, ObjectIdField, NotUniqueError)
 from mongoengine.connection import get_db
 from bson import ObjectId
+from pint.errors import PintError
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from .fields import UnitField, QuantityField
@@ -288,15 +289,22 @@ class SpectrumROI(HitEffConfig):
         return self.title
 
     def evaluate(self, hiteff, store: bool = True):
-        """ Evaluate the given ROI """
+        """ Evaluate the given ROI. Like a hit efficiency's scalars, the
+        result must have units that `display_unit` accepts once multiplied
+        by the hit efficiency's norm. Raises ValidationError if not
+        """
         result = None
-        if (hist := hiteff.spectra.get(self.link_spectrum)) is not None:
-            func = getattr(hist, self.mode.name)
-            result = func(self.start, self.stop, self.binwidths)
-        if self.display_unit is not None and result is not None:
-            if not self.display_unit.is_compatible_with(result):
-                raise ValidationError(f"{self.key} hiteff {hiteff.id} units "
-                                      f"don't match {self.display_unit}")
+        try:
+            if (hist := hiteff.spectra.get(self.link_spectrum)) is not None:
+                func = getattr(hist, self.mode.name)
+                result = func(self.start, self.stop, self.binwidths)
+        except (PintError, ValueError) as e:
+            raise ValidationError(f"ROI {self.key} can't be evaluated for "
+                                  f"hiteff {hiteff.id}: {e}") from e
+        if result is not None and not hiteff.check_result_unit(
+                result, self.display_unit):
+            raise ValidationError(f"{self.key} hiteff {hiteff.id} units "
+                                  f"don't match {self.display_unit}")
         if store:
             hiteff.rois[self.key] = result
         return result
@@ -311,18 +319,38 @@ class HitEffDbConfig(EmbeddedDocument):
                                default=dict)
     extra_columns = ListField(StringField())
 
+    def scalar_unit(self, key: str):
+        """ The unit that the scalar or ROI `key` is displayed in, or None.
+        It is for the value times the hit efficiency's norm, which is the
+        scalar's unit in a background rate
+        """
+        if (cfg := self.display_scalars.get(key)) is not None:
+            if cfg.display_unit is not None:
+                return cfg.display_unit
+        for roi in self.rois:
+            if roi.key == key:
+                return roi.display_unit
+        return None
+
+    def spectrum_unit(self, key: str):
+        """ The unit that the spectrum `key` is displayed in, or None """
+        cfg = self.display_spectra.get(key)
+        return None if cfg is None else cfg.display_unit
+
     def update_from(self, hiteff):
-        """Update display settings from a HitEfficiency """
+        """ Give every scalar, spectrum and ROI of `hiteff` a display unit,
+        taken from `hiteff` if it doesn't have one
+        """
         for type_ in ('scalars', 'spectra'):
             for k, v in getattr(hiteff, type_).items():
                 register = getattr(self, f'display_{type_}')
                 cf = register.setdefault(k, HitEffConfig())
                 if cf.display_unit is None:
-                    unit = hiteff.get_result_unit(v)
-                    cf.display_unit = unit
-
-    # TODO: need a post-save signal to make sure the rois in all hiteffs
-    # are up-to-date
+                    cf.display_unit = hiteff.get_result_unit(v)
+        for roi in self.rois:
+            if (roi.display_unit is None
+                    and hiteff.rois.get(roi.key) is not None):
+                roi.display_unit = hiteff.get_result_unit(hiteff.rois[roi.key])
 
 
 class VersionLock(EmbeddedDocument):
@@ -378,49 +406,72 @@ class VersionSettings(Document):
         if self.id is not None:
             verdoc.check_writable(VersionSettings.objects(id=self.id)
                                   .scalar('version_tag').first())
-        # make sure we haven't set a display_unit that conflicts with
-        # an already-existing hiteff
+        # every scalar, spectrum and ROI needs a display unit that agrees
+        # with all of the HitEfficiencies in the version
+        config = self.hiteffdbconfig
         for type_ in ('scalars', 'spectra'):
-            register = getattr(self.hiteffdbconfig, f'display_{type_}')
-            for k, v in register.items():
-                if v.display_unit is None:
-                    continue
-                # get a list of all unique combinations of unit and norm type
-                # for HitEfficiencies in the db
-                # values are stored as the string a user typed, either
-                # plain or as a dict with 'str' and 'id', or as a dict with
-                # 'units'
-                value = f'${type_}.{k}'
-                isstr = {'$eq': [{'$type': value}, 'string']}
-                unitlist = hiteff.HitEfficiency\
-                    .select_version(self.version_tag)\
-                    .aggregate([
-                        {'$project': {'norm': 1,
-                                      'str': {'$cond': [isstr, value,
-                                                        f'{value}.str']},
-                                      'units': f'{value}.units'}},
-                        {'$group': {'_id': ['$units', '$norm', '$str']}}])
-                for entry in unitlist:
-                    ustr, normstr, typed = entry['_id']
-                    if typed is not None:
-                        val = hiteff.HitEfficiency.scalars.field\
-                            .to_python(typed)
-                        ustr = str(val.u)
-                    elif ustr is None:
-                        # this hiteff doesn't have this key
-                        continue
-                    else:
-                        val = 1 * units(ustr)
-                    testhe = hiteff.HitEfficiency(norm=normstr)
-                    if not testhe.check_result_unit(val, v.display_unit):
-                        errmsg = (f"display_{type_}: {k} the unit "
-                                  f"{v.display_unit} conflicts with at least "
-                                  f"one HitEfficiency document, which has "
-                                  f"units of {ustr}")
-                        raise ValidationError(
-                            errmsg,
-                            field_name=f"hiteffdbconfig.display_{type_}")
-        # TODO: need to also check rois display_units based on spectra
+            for key, cfg in getattr(config, f'display_{type_}').items():
+                self._check_display_unit(type_, key, cfg)
+        for roi in config.rois:
+            self._check_roi_unit(roi)
+
+    def _stored_units(self, type_: str, key: str) -> Iterator[tuple]:
+        """ (unit string, a value with that unit, norm) for each unique
+        combination of unit and norm type of `key` in the version's
+        HitEfficiencies, found in the database without loading them
+        """
+        # values are stored as the string a user typed, either
+        # plain or as a dict with 'str' and 'id', or as a dict with 'units'
+        value = f'${type_}.{key}'
+        isstr = {'$eq': [{'$type': value}, 'string']}
+        unitlist = hiteff.HitEfficiency.select_version(self.version_tag)\
+            .aggregate([
+                {'$project': {'norm': 1,
+                              'str': {'$cond': [isstr, value,
+                                                f'{value}.str']},
+                              'units': f'{value}.units'}},
+                {'$group': {'_id': ['$units', '$norm', '$str']}}])
+        for entry in unitlist:
+            ustr, normstr, typed = entry['_id']
+            if typed is not None:
+                val = hiteff.HitEfficiency.scalars.field.to_python(typed)
+                ustr = str(val.u)
+            elif ustr is None:
+                # this hiteff doesn't have this key
+                continue
+            else:
+                val = 1 * units(ustr)
+            yield ustr, val, normstr or 'rate'
+
+    def _check_display_unit(self, type_: str, key: str, cfg) -> None:
+        """ Raise ValidationError if the display unit of `cfg` conflicts with
+        a HitEfficiency. If it has none, it is set from the HitEfficiencies
+        """
+        for ustr, val, normstr in self._stored_units(type_, key):
+            testhe = hiteff.HitEfficiency(norm=normstr)
+            if cfg.display_unit is None:
+                cfg.display_unit = testhe.get_result_unit(val)
+            elif not testhe.check_result_unit(val, cfg.display_unit):
+                raise ValidationError(
+                    f"display_{type_}: {key} the unit {cfg.display_unit} "
+                    f"conflicts with at least one HitEfficiency document, "
+                    f"which has units of {ustr}",
+                    field_name=f"hiteffdbconfig.display_{type_}")
+
+    def _check_roi_unit(self, roi: 'SpectrumROI') -> None:
+        """ Raise ValidationError if `roi` can't be evaluated for, or has a
+        display unit that conflicts with, a HitEfficiency. If it has no
+        display unit, it is set from the HitEfficiencies
+        """
+        for he in hiteff.HitEfficiency.select_version(self.version_tag)(
+                spectra_keys=roi.link_spectrum):
+            try:
+                result = roi.evaluate(he, store=False)
+            except ValidationError as e:
+                raise ValidationError(
+                    str(e), field_name="hiteffdbconfig.rois") from e
+            if result is not None and roi.display_unit is None:
+                roi.display_unit = he.get_result_unit(result)
 
     @classmethod
     def post_save(cls, sender, document, **kwargs):

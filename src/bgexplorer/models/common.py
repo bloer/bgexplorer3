@@ -45,6 +45,13 @@ def _quantity_getattr(self, item):
 Quantity.__getattr__ = _quantity_getattr
 
 
+class UnitMismatchError(ValueError):
+    """ Data that is already saved has units that don't fit together or the
+    version's display units. Entering such data is rejected by validation, so
+    this means the validation was bypassed, e.g. by an import or merge
+    """
+
+
 def validate_unit(value, unit, allow_none=True):
     if value is None and not allow_none:
         raise ValidationError("Unit to validate must not be None")
