@@ -119,6 +119,13 @@ class HitEfficiency(DynamicVersionedDocument):
                     'scalars_keys', 'spectra_keys']
     }
 
+    @property
+    def all_scalars(self) -> dict:
+        """ Our scalars and ROIs by key. A scalar overrides an ROI with the
+        same key
+        """
+        return {**self.rois, **self.scalars}
+
     def check_dbconfig(self, dbconfig):
         """ Make sure we are compatible with the HitEffDBconfig
         Raise ValidationError if not. Scalars or spectra that weren't loaded

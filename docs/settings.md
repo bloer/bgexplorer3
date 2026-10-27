@@ -78,7 +78,8 @@ between 2400 and 2500 keV. It has:
 | Display name, display unit | as above, with the unit meaning value times norm; the name defaults to "*spectrum*, *mode* *start* to *stop*" |
 
 ROIs are evaluated for every hit efficiency when the settings are saved, and
-then act like any other scalar.
+then act like any other scalar. If a hit efficiency has a scalar with the same
+name as an ROI, the scalar is used.
 
 ## Description and editability
 

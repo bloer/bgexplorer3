@@ -112,6 +112,24 @@ class TestHitEFficiency(unittest.TestCase):
         self.assertAlmostEqual(result.s0, np.sqrt(12)/7)
         self.assertAlmostEqual(result.s1, np.sqrt(12)/7)
 
+    def test_all_scalars(self):
+        """ A scalar overrides an ROI with the same key """
+        config = get_settings(HitEfficiency.get_default_tag())
+        config.hiteffdbconfig.rois = [
+            SpectrumROI(spectrum='v1', display_name='roi1', mode='average',
+                        start=0*units.keV, stop=5*units.keV),
+            SpectrumROI(spectrum='v1', display_name='roi2', mode='average',
+                        start=0*units.keV, stop=10*units.keV)]
+        config.save()
+        h = self._spectrum_hiteff(scalars=dict(
+            roi2='7 +- 1 dru/mBq', other='1 +- 0.1 dru/mBq'))
+        h.save()
+        self.assertEqual(set(h.rois), {'roi1', 'roi2'})
+        self.assertEqual(set(h.all_scalars), {'roi1', 'roi2', 'other'})
+        self.assertIs(h.all_scalars['roi1'], h.rois['roi1'])
+        self.assertIs(h.all_scalars['roi2'], h.scalars['roi2'])
+        self.assertIsNot(h.all_scalars['roi2'], h.rois['roi2'])
+
     def _spectrum_hiteff(self, norm='rate', **kwargs):
         return HitEfficiency(
             source="h", location="h", norm=norm, spectra=dict(v1=Histogram(

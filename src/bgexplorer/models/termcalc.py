@@ -9,7 +9,6 @@ efficiency and rate unit, to work out the conversion factor, which is
 folded into the hit efficiency's values.
 """
 import logging
-from itertools import chain
 from typing import Dict, Optional, Tuple
 from pint.errors import PintError
 from .common import units as unitreg, Quantity, UnitMismatchError
@@ -141,7 +140,7 @@ class TermCalculator:
             pass
         self._check_norm(hiteff, rate_unit)
         scaled = []
-        for key, val in chain(hiteff.scalars.items(), hiteff.rois.items()):
+        for key, val in hiteff.all_scalars.items():
             if val is None:
                 continue
             m, unit = _split(val)

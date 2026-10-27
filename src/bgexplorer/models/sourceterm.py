@@ -26,7 +26,6 @@ from . import settings
 from typing import List, Optional, Union, Dict, Tuple, Iterable
 from collections import defaultdict, OrderedDict
 from bson import ObjectId
-from itertools import chain
 from contextlib import contextmanager
 from contextvars import ContextVar
 import logging
@@ -382,7 +381,6 @@ class CalculatedResults(Document):
     HitEfficiencies change.
     """
     # TODO: should this be a versioned document? it's acting as a cache
-    # TODO: how to make sure there are no scalars/rois collisions?
     scalars = MapField(UncertainQuantityField(allownone=True,
                                               expressions='separate'),
                        required=False, default=dict)
@@ -548,8 +546,7 @@ class CalculatedResults(Document):
             if not hiteff.norm.check(erate):
                 raise units.DimensionalityError(
                     "incompatible emissionrate units")
-            for key, val in chain(hiteff.scalars.items(),
-                                  hiteff.rois.items()):
+            for key, val in hiteff.all_scalars.items():
                 if val is not None:
                     scalars[key] = addnone(scalars.get(key),
                                            multnone(val, erate))

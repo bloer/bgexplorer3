@@ -1,14 +1,21 @@
 """ Unit mismatches are caught when data is saved or audited, not when results
 are calculated
 """
+import numpy as np
 from mongoengine import ValidationError
+from bgexplorer.models.asymmetric import AsymmetricUncertainty
+from bgexplorer.models.common import units
+from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.budget import dashboard
 from bgexplorer.models.common import UnitMismatchError
 from bgexplorer.models.component import Component
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency, NormMultiplier
-from bgexplorer.models.settings import get_settings, HitEffDbConfig
+from bgexplorer.models.settings import (get_settings, HitEffDbConfig,
+                                        SpectrumROI)
+from bgexplorer.models.termcalc import TermCalculator
 from bgexplorer.models.sourceterm import (SourceTerm, check_version_units,
+                                          load_hiteffs,
                                           unit_checks_deferred)
 from bgexplorer.models import versioncontrol as vc
 from tests.test_app_components import AppTestCase
@@ -121,3 +128,27 @@ class TestUnitChecks(AppTestCase):
                                             object=comp))
         self.assertEqual(response.status_code, 400)
         self.assertIn('normalized per', response.get_json()['error']['message'])
+
+    def test_roi_in_terms(self):
+        """ ROIs are results of the terms like scalars, and a scalar with the
+        same key replaces the ROI
+        """
+        settings = get_settings('main')
+        settings.hiteffdbconfig.rois = [
+            SpectrumROI(spectrum='s1', display_name='roi1', mode='average',
+                        start=0*units.keV, stop=5*units.keV),
+            SpectrumROI(spectrum='s1', display_name='roi2', mode='average',
+                        start=0*units.keV, stop=5*units.keV)]
+        settings.save()
+        hist = Histogram(AsymmetricUncertainty.fromcounts(np.arange(10))
+                         * units('dru/mBq'), np.arange(11) * units.keV)
+        HitEfficiency(source='Th232', location='c1', spectra=dict(s1=hist),
+                      scalars=dict(roi2='1000 +- 1 dru/mBq')).save()
+        self.component().save()
+        term = SourceTerm.objects.get()
+        config = get_settings('main').hiteffdbconfig
+        values = TermCalculator(config, load_hiteffs([term])).scalars(term)
+        self.assertEqual(set(values), {'roi1', 'roi2'})
+        rate = 20  # mBq
+        self.assertAlmostEqual(values['roi2'].mode / rate, 1000)
+        self.assertAlmostEqual(values['roi1'].mode / rate, 2, places=1)
