@@ -124,7 +124,7 @@ class HitEfficiency(DynamicVersionedDocument):
         """ Our scalars and ROIs by key. A scalar overrides an ROI with the
         same key
         """
-        return {**self.rois, **self.scalars}
+        return self.rois | self.scalars
 
     def check_dbconfig(self, dbconfig):
         """ Make sure we are compatible with the HitEffDBconfig
