@@ -151,10 +151,12 @@ class UnitField(BaseField):
 
 # regexes to test asymmetric quantities
 _refloat = r'([0-9.]+(?:[eE][+-]?\d+)?)'
+# the central value may be negative; errors and limits can't
+_revalue = r'(-?[0-9.]+(?:[eE][+-]?\d+)?)'
 _limit_test = re.compile(fr'< *{_refloat} *(\([0-9.]+%\))? *(.*)?')
-_sym_test = re.compile(fr'\(? *{_refloat} *(?:(?:±|\+ */? *-)'
+_sym_test = re.compile(fr'\(? *{_revalue} *(?:(?:±|\+ */? *-)'
                        fr' *{_refloat})? *\)? *([eE][+-]?\d+)? *(.*)?')
-_asym_test = re.compile(fr'\(? *{_refloat} *\+ *{_refloat} *'
+_asym_test = re.compile(fr'\(? *{_revalue} *\+ *{_refloat} *'
                         fr'- *{_refloat} *\)? *([eE][+-]?\d+)? *(.*)?')
 # TODO: handle uncertainties given in parentheses
 

@@ -84,7 +84,7 @@ def _noslash(value):
 class Component(VersionedDocument):
     name = StringField(required=True, validation=_noslash)
     description = StringField()
-    notes = StringField(input_type='textarea')
+    comment = StringField(input_type='textarea')
     material = StringField()
     mass = QuantityField(units='kg', default=0 * units.kg)
     volume = QuantityField(units='m**3', default=0 * units.m**3)
@@ -278,6 +278,10 @@ class Placement(EmbeddedDocument):
     @property
     def name(self):
         return self.label or self.component.name
+
+    @property
+    def specs(self):
+        return self.component.specs
 
 def test_circular_assembly(component, assemblyPath=[]):
     """ test for circular assembly chains """

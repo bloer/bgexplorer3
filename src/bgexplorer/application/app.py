@@ -161,7 +161,7 @@ def create_app(config_file=None, config=None):
         if unit:
             q = q.to(unit)
         else:
-            q = q.to_compact()
+            q = q.to_reduced_units()
         return '{:.2g~P}'.format(q)
 
     @app.template_filter('printstring')

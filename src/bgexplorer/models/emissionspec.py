@@ -51,11 +51,11 @@ class Multiplier(Enum):
         """ Get a list of valid units for this multiplier """
         return {
                 Multiplier.mass: ['Bq/kg', 'ppb'],
-                Multiplier.volume: ['Bq/m**3'],
-                Multiplier.surface: ['Bq/m**2'],
-                Multiplier.inner_surface: ['Bq/m**2'],
-                Multiplier.outer_surface: ['Bq/m**2'],
-                Multiplier.length: ['Bq/m'],
+                Multiplier.volume: ['Bq/m**3', 'g/m**3'],
+                Multiplier.surface: ['Bq/m**2', 'g/m**2'],
+                Multiplier.inner_surface: ['Bq/m**2', 'g/m**2'],
+                Multiplier.outer_surface: ['Bq/m**2', 'g/m**2'],
+                Multiplier.length: ['Bq/m', 'g/m'],
                 Multiplier.none: ['Bq', '1/cm**2/s', '1/cm**2/s/sr'],
                 }[self]
 
@@ -130,7 +130,8 @@ class EmissionSource(EmbeddedDocument):
 
             raise ValidationError("to specify rate as concentration, `name`"
                                   " must be an isotope", field_name='name')
-
+    def __str__(self):
+        return f"EmissionSource({self.name}, {self.rate})"
 
 class EmissionSpec(VersionedDocument):
     name = StringField(required=True)
@@ -165,7 +166,8 @@ class EmissionSpec(VersionedDocument):
         self.sourcemap = {s.name: s for s in self.sources}
 
     def __str__(self):
-        return self.name or f"new {type(self).__name__}"
+        # return self.name or f"new {type(self).__name__}"
+        return f"EmissionSpec({self.name}, { {source.name: str(source.rate) for source in self.sources} })"
 
     def get_sources(self, component):
         return self.sources
@@ -276,4 +278,3 @@ class EmissionSpec(VersionedDocument):
         for source in self.sources:
             source.category = source.category or self.category
         self.sourcemap = {s.name: s for s in self.sources}
-

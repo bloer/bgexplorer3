@@ -11,6 +11,7 @@ import threading
 from contextlib import contextmanager
 from typing import Union, Optional, Tuple, Iterable
 from uncertainties import ufloat
+from uncertainties.formatting import to_superscript
 from difflib import SequenceMatcher
 import re
 import logging
@@ -28,7 +29,81 @@ import uuid
 NumOrArray = Union[int, float, np.ndarray]
 log = logging.getLogger(__name__)
 
-refloat = re.compile(r'\d+\.?\d*')
+# uncertainties' plain output: 'M+/-E' or '(M+/-E)e+XX'
+_reufloat = re.compile(r'\(?(?P<m>.+?)\+/-(?P<e>[^)e]+)\)?(?:e(?P<x>[+-]\d+))?')
+
+
+def _latex_stack(up: str, down: str, signs: bool = True) -> str:
+    """ `up` and `down` as super- and subscript, aligned at the decimal point
+    with phantom digits
+    """
+    # (whole, '.frac'); only a zero error ('0') lacks the fraction
+    parts = [(v.partition('.')[0], ''.join(v.partition('.')[1:]))
+             for v in (up, down)]
+    nwhole = max(len(whole) for whole, _ in parts)
+    nfrac = max(len(frac) for _, frac in parts)
+    padded = []
+    for whole, frac in parts:
+        left = '0' * (nwhole - len(whole))
+        right = ('.' + '0' * nfrac)[len(frac):nfrac]
+        padded.append((f'\\phantom{{{left}}}' if left else '') + whole + frac
+                      + (f'\\phantom{{{right}}}' if right else ''))
+    if signs:
+        return f'^{{+{padded[0]}}}_{{-{padded[1]}}}'
+    return f'^{{{padded[0]}}}_{{{padded[1]}}}'
+
+
+def _format_asymmetric(mode: float, s0: float, s1: float,
+                       format_spec: str) -> str:
+    """ Format a scalar asymmetric uncertainty by the PDG rules: if the errors
+    differ by less than 10% of their average (and it is less than half the
+    mode), show the average as a symmetric error. Otherwise the narrower error
+    sets the rounding for both, and the mode matches its precision.
+
+    uncertainties makes all the rounding decisions for the narrower error;
+    the wider error is then written at the same decimal place and exponent.
+    In compact (S) notation, both errors are given as (up|down) in units of
+    the last digit, unless either is >= 1, in which case both are written as
+    decimals.
+    """
+    latex, pretty, compact = (c in format_spec for c in 'LPS')
+    avg = (s0 + s1) / 2
+    if abs(s1 - s0) < 0.1 * avg and avg < 0.5 * abs(mode):
+        return ufloat(mode, avg).__format__(format_spec)
+    narrow = min(s for s in (s0, s1) if s > 0)
+    canon = ufloat(mode, narrow).__format__(re.sub('[LPS]', '', format_spec))
+    match = _reufloat.fullmatch(canon)
+    if not match:  # not a format we know how to extend
+        return canon
+    mstr, exp = match['m'], int(match['x'] or 0)
+    ndec = len(match['e'].partition('.')[2])
+    up, down = (f'{s / 10**exp:.{ndec}f}' if s else '0' for s in (s1, s0))
+    if up == down:
+        return ufloat(mode, narrow).__format__(format_spec)
+
+    if compact:
+        if max(s1, s0) / 10**exp < 1:
+            up, down = (str(round(float(v) * 10**ndec)) for v in (up, down))
+        if latex:
+            body = f'{mstr}\\left({_latex_stack(up, down, signs=False)}\\right)'
+        else:
+            body = f'{mstr}({up}|{down})'
+    elif latex:
+        body = mstr + _latex_stack(up, down)
+        if exp:
+            body = f'\\left({body}\\right)'
+    else:
+        body = f'{mstr} +{up} -{down}'
+        if exp:
+            body = f'({body})'
+
+    if not exp:
+        return body
+    if latex:
+        return f'{body} \\times 10^{{{exp}}}'
+    if pretty:
+        return f'{body}×10{to_superscript(exp)}'
+    return f'{body}e{exp:+03d}'
 
 
 def new_id() -> str:
@@ -567,38 +642,12 @@ class AsymmetricUncertainty:
         elif len(s) == 3:
             if not np.isscalar(s[0]):
                 return ' '.join([str(s[0]), '+', str(s[2]), '-', str(s[1])])
-            str1 = ufloat(s[0], s[1]).__format__(format_spec)
-            str2 = ufloat(s[0], s[2]).__format__(format_spec)
-            if str1 == str2:
-                return str1
+            if np.all(np.isfinite(s)) and max(s[1], s[2]) > 0:
+                return _format_asymmetric(*s, format_spec)
             ss = [v.__format__(float_spec) for v in s]
             if 'L' in format_spec:
                 return '{}_{{-{}}}^{{+{}}}'.format(*ss)
             return '{} + {} - {}'.format(ss[0], ss[2], ss[1])
-
-            m0, s0 = list(refloat.finditer(str1))[:2]
-            m1, s1 = list(refloat.finditer(str2))[:2]
-            m0str = str1[m0.start():m0.end()]
-            s0str = str1[s0.start():s0.end()]
-            m1str = str2[m1.start():m1.end()]
-            s1str = str2[s1.start():s1.end()]
-            if s0str == s1str:
-                return str1
-            if m0str != m1str:
-                if 'L' in format_spec:
-                    return f'^{{+{str2}}}_{{-{str1}}}'
-                return ' , -'.join([str2, str1])
-            replacement = f'+{s1str},-{s0str}'
-            if 'L' in format_spec:
-                replacement = f'^{{{s1str}}}_{{{s0str}}}'
-            return ''.join([str1[:s0.start()], replacement, str1[s0.end():]])
-
-
-            latex = 'L' in format_spec
-            s = [v.__format__(float_spec) for v in s]
-            if latex:
-                return f"{s[0]}^{{+{s[2]}}}_{{-{s[1]}}}"
-            return f"{s[0]} + {s[2]} - {s[1]}"
 
     def __str__(self):
         return self.__format__('')

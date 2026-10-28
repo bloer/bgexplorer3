@@ -47,6 +47,8 @@ class RadonPeriod(EmbeddedDocument):
         return (deposited * _decayed(self.duration, _tau_pb210)
                 ).to('Bq/m**2')
 
+    def __str__(self):
+        return f"RadonPeriod({self.radonlevel}, {self.duration})"
 
 class RadonExposure(EmissionSpec):
     """ Pb210 on a surface from radon daughters plating out, calculated from
@@ -92,3 +94,6 @@ class RadonExposure(EmissionSpec):
                         f"period(s), {total:~.3g} total"))
         self._set_computed_sources(sources)
         super().clean()
+
+    def __str__(self):
+        return f"RadonExposure({self.name},[{', '.join(str(p) for p in self.periods)}])"
