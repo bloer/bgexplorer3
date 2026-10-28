@@ -294,7 +294,7 @@ class SpectrumROI(HitEffConfig):
             func = getattr(hist, self.mode.name)
             result = func(self.start, self.stop, self.binwidths)
         if self.display_unit is not None and result is not None:
-            if not self.display_unit.is_compatible_with(result):
+            if not hiteff.check_result_unit(result, self.display_unit):
                 raise ValidationError(f"{self.key} hiteff {hiteff.id} units "
                                       f"don't match {self.display_unit}")
         if store:

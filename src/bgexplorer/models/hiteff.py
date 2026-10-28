@@ -136,7 +136,7 @@ class HitEfficiency(DynamicVersionedDocument):
                 display_unit = display_register[key].display_unit
                 if display_unit is None:
                     continue
-                if not display_unit.is_compatible_with(self.get_result_unit(val)):
+                if not self.check_result_unit(val, display_unit):
                     msg = f"{type_} {key} {val} has incorrect units"
                     raise ValidationError(msg)
 

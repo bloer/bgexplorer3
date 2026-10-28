@@ -43,6 +43,9 @@ class CosmogenicIsotope(EmbeddedDocument):
                         self.activationrate * period.factor * decayed)
         return activity.to('Bq/kg')
 
+    def __str__(self):
+        return f"CosmogenicIsotope({self.isotope}, {self.activationrate})"
+
 
 class ActivatedMaterial(VersionedDocument):
     """ The cosmogenic isotopes produced in a material and their sea level
@@ -57,7 +60,7 @@ class ActivatedMaterial(VersionedDocument):
     attachments = AttachmentsField()
 
     def __str__(self):
-        return self.name or f"new {type(self).__name__}"
+        return f"ActivatedMaterial({self.name}, { {iso.isotope: str(iso.activationrate) for iso in self.isotopes} })"
 
     def clean(self):
         super().clean()
@@ -112,3 +115,6 @@ class CosmogenicActivation(EmissionSpec):
                        for iso in self.material.isotopes]
         self._set_computed_sources(sources)
         super().clean()
+
+    def __str__(self):
+        return f"CosmogenicActivation({self.name}, {self.material.name}, {len(self.periods)} periods)"

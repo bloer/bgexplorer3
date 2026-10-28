@@ -1,4 +1,5 @@
 import mongoengine
+from bson.dbref import DBRef
 from .component import Component, Assembly
 from .emissionspec import EmissionSpec
 from .cosmogenic import ActivatedMaterial, CosmogenicActivation
@@ -41,9 +42,12 @@ def update_component(sender, document, **kwargs):
     component = document
     log.debug("update_component for %s", component.name)
     # first, generate the list of all source terms for this component
+    if any(isinstance(spec, DBRef) for spec in component.specs):
+        log.warning("Component %s specs contain DBRefs: %s", component.name, component.specs)
+    # why are specs sometimes being converted to DBRefs between save and update??
     sourceterms = [SourceTerm.from_component_source(component, source, spec)
                    for spec in component.specs
-                   for source in spec.sources]
+                   for source in getattr(spec, 'sources', [])]
     # remove any that didn't match
     SourceTerm.objects(
         version_tags=component.active_version,
