@@ -21,7 +21,9 @@ class Multiplier(Enum):
     inner_surface = 'inner_surface_area'
     outer_surface = 'outer_surface_area'
     length = 'length'
-    none = 'none'
+    flux = 'flux'
+    flux_per_sr = 'flux_per_sr'
+    per_piece = 'per_piece'
 
     @classmethod
     def get_multiplier(cls, rate: Optional[units.Quantity]) -> 'Multiplier':
@@ -29,19 +31,19 @@ class Multiplier(Enum):
         multiplier. Raise ValidationError if multiplier can't be determined
         """
         if rate is None:
-            return Multiplier.none
+            return None
         # TODO: this will return mass for any dimensionless rate
         # should instead explicitly check for ppm, ppb, ppt
-        if units('Bq/kg').check(rate) or units('ppb').check(rate):
+        if units('Bq/kg').check(rate):
             return cls.mass
         elif units('Bq/m**3').check(rate):
             return cls.volume
         elif units('Bq/m**2').check(rate):
             return cls.surface
         elif units('Bq').check(rate):
-            return cls.none
+            return cls.per_piece
         elif units('1/cm**2/s/sr').check(rate):
-            return cls.none
+            return cls.flux_per_sr
         elif units('Bq/m').check(rate):
             return cls.length
         raise ValidationError(f"Unhandled rate units {rate.u}")
@@ -50,32 +52,39 @@ class Multiplier(Enum):
     def valid_units(self):
         """ Get a list of valid units for this multiplier """
         return {
-                Multiplier.mass: ['Bq/kg', 'ppb'],
-                Multiplier.volume: ['Bq/m**3', 'g/m**3'],
-                Multiplier.surface: ['Bq/m**2', 'g/m**2'],
-                Multiplier.inner_surface: ['Bq/m**2', 'g/m**2'],
-                Multiplier.outer_surface: ['Bq/m**2', 'g/m**2'],
-                Multiplier.length: ['Bq/m', 'g/m'],
-                Multiplier.none: ['Bq', '1/cm**2/s', '1/cm**2/s/sr'],
+                Multiplier.mass: 'Bq/kg',
+                Multiplier.volume: 'Bq/m**3',
+                Multiplier.surface: 'Bq/m**2',
+                Multiplier.inner_surface: 'Bq/m**2',
+                Multiplier.outer_surface: 'Bq/m**2',
+                Multiplier.length: 'Bq/m',
+                Multiplier.flux: 'Bq/cm**2',
+                Multiplier.flux_per_sr: 'Bq/cm**2/sr',
+                Multiplier.per_piece: 'Bq',
                 }[self]
 
-    def check_units(self, rate: units.Quantity) -> None:
+    def check_units(self, rate: units.Quantity,
+                    allow_mass_to_rate: bool = True) -> None:
         """ Verify that `rate` has appropriate units for us, raise
-        ValidationError otherwise
+        ValidationError otherwise. If `allow_mass_to_rate`, allow being off
+        by a factor of 1/g/s, because isotope mass can be converted to a decay
+        rate implicitly.
         """
         if rate is None:
-            return
-        for u in self.valid_units:
-            if units(u).check(rate):
-                return True
+            return True
+        if self.valid_units.check(rate):
+            return True
+        elif allow_mass_to_rate and self.valid_units.check(rate*units('1/g/s')):
+            return True
         # if we get here, none match
         raise ValidationError(f"Rate units {rate.u} invalid"
                               f" for multiplier {self.name}")
 
-    def accepts(self, rate: Optional[units.Quantity]) -> bool:
+    def accepts(self, rate: Optional[units.Quantity],
+                allow_mass_to_rate: bool = True) -> bool:
         """ Does `rate` have appropriate units for us? """
         try:
-            self.check_units(rate)
+            self.check_units(rate, allow_mass_to_rate)
         except ValidationError:
             return False
         return True
@@ -83,7 +92,7 @@ class Multiplier(Enum):
     def getvalue(self, component) -> Union[float, units.Quantity]:
         """ Extract the numerical value of the multipler from component """
         mult = 1
-        if self is not Multiplier.none:
+        if self not in (Multiplier.flux, Multiplier.flux_per_sr, Multiplier.per_piece):
             # values name the Component attributes, e.g. surface_area
             mult = getattr(component, self.value)
         return mult
@@ -112,24 +121,44 @@ class EmissionSource(EmbeddedDocument):
     spectrum = StringField()
     generated_from = ObjectIdField()
 
+    def get_isotope(self):
+        return get_isotope(self.name)
+
+    @property
+    def is_isotope(self):
+        return self.get_isotope() is not None
+
+    @property
+    def standardized_rate(self) -> Optional[units.Quantity]:
+        """ Return the rate converted to standardized units for this multiplier """
+        if self.rate is None:
+            return None
+        elif self.multiplier is None:
+            raise ValueError("Multiplier is not set")
+        elif self.multiplier.accepts(self.rate, allow_mass_to_rate=False):
+            rate = self.rate
+        elif self.is_isotope:
+            rate = concentration_to_rate(self.rate, self.get_isotope())
+        else:
+            raise ValueError("Cannot standardize rate: incompatible units")
+        return rate
+
     def clean(self):
         """ make sure multiplier has a sensible value """
-        try:
-            if self.multiplier is None:
+        if self.multiplier is None:
+            try:
                 self.multiplier = Multiplier.get_multiplier(self.rate)
                 # ^ will raise ValidationError if it can't be auto-determined
-            else:
-                self.multiplier.check_units(self.rate)
+            except ValidationError as e:
+                if self.is_isotope:
+                    self.multiplier = Multiplier.get_multiplier(self.rate*units('1/g/s'))
+                    # if this fails, let the original ValidationError propagate
+        try:
+            self.multiplier.check_units(self.rate, self.is_isotope)
         except ValidationError as e:
             # the rate is what's wrong, so forms can show it there
             raise ValidationError(e.message, field_name='rate') from e
 
-        if (self.multiplier is Multiplier.mass and
-                self.rate.check('ppb') and
-                get_isotope(self.name) is None):
-
-            raise ValidationError("to specify rate as concentration, `name`"
-                                  " must be an isotope", field_name='name')
     def __str__(self):
         return f"EmissionSource({self.name}, {self.rate})"
 
@@ -253,15 +282,15 @@ class EmissionSpec(VersionedDocument):
 
     def clean(self):
         """ Automatically populate derived spectra from settings """
-        super().clean()
-        validate_unique_ids(self.sources, 'sources')
-        # sources store their multiplier once cleaned, so ours wins wherever
-        # the units allow it, rather than only filling in blanks
+        # propagate multiplier to sources if they don't have one already
+        # having a source with blank multiplier that doesn't match ours is an error
         if self.multiplier is not None:
             for source in self.sources:
-                if self.multiplier.accepts(source.rate):
+                source.category = source.category or self.category
+                if source.multiplier is None:
                     source.multiplier = self.multiplier
-        # TODO: error checking on active_version and config validity
+        super().clean()
+        validate_unique_ids(self.sources, 'sources')
         config = settings.get_settings(self.active_version)
         # remove all auto-generated sources that no longer have an original
         for source in list(self.sources):
@@ -274,7 +303,4 @@ class EmissionSpec(VersionedDocument):
         for source in config.addsources:
             self._addsource(source)
 
-        # update category
-        for source in self.sources:
-            source.category = source.category or self.category
         self.sourcemap = {s.name: s for s in self.sources}

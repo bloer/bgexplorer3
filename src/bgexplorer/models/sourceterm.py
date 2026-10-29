@@ -12,12 +12,12 @@ from .verdoc import (VersionedDocument, VersionedReferenceField,
 from .verdoc import ref_id as _ref_id
 from .component import (Component, Placement, Assembly, ComponentSpec,
                         LocationMode)
-from .emissionspec import EmissionSpec, EmissionSource, Multiplier
+from .emissionspec import EmissionSpec, EmissionSource, Multiplier as EmissionSourceMultiplier
 from .fields import (QuantityField, UncertainQuantityField, HistogramField,
                      RawDictField)
 from .asymmetric import AsymmetricUncertainty, LinearExpression
 from .histogram import Histogram
-from .hiteff import HitEfficiency
+from .hiteff import HitEfficiency, NormMultiplier as HitEfficiencyMultiplier
 from .isotope import concentration_to_rate
 from .common import units, addnone, multnone, Quantity, UnitMismatchError
 from .termcalc import TermCalculator
@@ -95,14 +95,10 @@ class SourceTerm(VersionedDocument):
     @property
     def unweighted_rate(self):
         """ The source's rate, in specific activity if it was a concentration,
-        before the weight and rate multiplier are applied. None if it has none
+        before the weight and rate multiplier are applied. None if it has none.
+        This is now a dummy and may be removed.
         """
-        rate = self.source.rate
-        # convert ppb-like units to specific activity
-        if (rate is not None and self.source.multiplier is Multiplier.mass
-                and rate.dimensionless):
-            rate = concentration_to_rate(self.source.name, rate)
-        return rate
+        return self.source.standardized_rate
 
     @cached_property
     def emissionrate(self):
@@ -224,7 +220,10 @@ class SourceTerm(VersionedDocument):
         self.set_location()
         self.weight = reduce(operator.mul,
                              (p.weight for p in self.assemblyPath), 1)
-        self.rate_multiplier = self.source.multiplier.getvalue(self.component)
+        if self.source.multiplier is not None:
+            self.rate_multiplier = self.source.multiplier.getvalue(self.component)
+        else:
+            self.rate_multiplier = 1
         self.componentName = self.component.name
         self.assemblyPathStr = '/'.join([self.assemblyRoot.name] +
                                         [p.name for p in self.assemblyPath])
@@ -245,10 +244,19 @@ class SourceTerm(VersionedDocument):
 
     @property
     def hiteffs_query(self) -> VersionedQuerySet:
+        # only match against HEs with valid norm multipliers
+        norm = HitEfficiencyMultiplier.rate
+        if self.source_multiplier is EmissionSourceMultiplier.flux:
+            norm = HitEfficiencyMultiplier.flux
+        elif self.source_multiplier is EmissionSourceMultiplier.flux_per_sr:
+            norm = HitEfficiencyMultiplier.flux_per_sr
+        elif self.source.multiplier is None:
+            norm = None
         hits = HitEfficiency.select_version(self.active_version)(
             source=self.source.name,
             location=self.location,
             material__in=(None, self.material),
+            norm=norm,
             )
         return hits
 
