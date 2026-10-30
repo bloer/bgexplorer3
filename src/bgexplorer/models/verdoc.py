@@ -455,10 +455,11 @@ class VersionedDocument(Document):
 
     def clean(self) -> None:
         """ called during validation.
-        Make sure original_id and active_version are both set
+        Make sure original_id, version_tags and active_version are all set
         """
         if not self.original_id:
             self.original_id = self.id
+        check_version_tags(self)
         if self.active_version is None:
             raise ValidationError("active_version must be set before saving")
 
@@ -552,6 +553,15 @@ def current_user_name() -> Optional[str]:
     return _user_provider() if _user_provider is not None else None
 
 
+def check_version_tags(document: VersionedDocument) -> None:
+    """ Raise ValidationError if `document` belongs to no version, since no
+    version could see it once saved
+    """
+    if not document.version_tags:
+        raise ValidationError("version_tags can't be empty",
+                              field_name='version_tags')
+
+
 def pre_save_post_validation(sender, document=None, created=False, **kwargs):
     """ Called by signals immediately prior to saving this object in the
     database. If multiple versions refer to this document, we split
@@ -560,6 +570,8 @@ def pre_save_post_validation(sender, document=None, created=False, **kwargs):
     """
     if document is None or not isinstance(document, VersionedDocument):
         return
+    # also checked by clean, but this runs for save(validate=False) too
+    check_version_tags(document)
     check_writable(document.active_version)
     # if this version already exists in the db with multiple tags,
     # we need to remove this tag from the previous, create a new one,
