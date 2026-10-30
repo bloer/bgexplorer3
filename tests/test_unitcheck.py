@@ -3,15 +3,21 @@ efficiencies are saved, and SourceTerms only match hit efficiencies whose
 norm fits their source's multiplier. Data written without validating is found
 by the audit after an import or merge.
 """
+import numpy as np
 from mongoengine import ValidationError
-from bgexplorer.models.common import units
+from bgexplorer.models.asymmetric import AsymmetricUncertainty
+from bgexplorer.models.budget import dashboard
+from bgexplorer.models.common import units, UnitMismatchError
+from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.component import Component
 from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
                                             Multiplier)
 from bgexplorer.models.hiteff import HitEfficiency, NormMultiplier
 from bgexplorer.models.isotope import concentration_to_rate
-from bgexplorer.models.settings import get_settings
-from bgexplorer.models.sourceterm import SourceTerm, load_hiteffs
+from bgexplorer.models.settings import (get_settings, HitEffDbConfig,
+                                        SpectrumROI)
+from bgexplorer.models.sourceterm import (SourceTerm, check_version_units,
+                                          load_hiteffs)
 from bgexplorer.models.termcalc import TermCalculator
 from bgexplorer.models import versioncontrol as vc
 from tests.test_app_components import AppTestCase
@@ -282,3 +288,104 @@ class TestHitEfficiencyMatching(UnitTestCase):
         spec.sources[0].rate = None
         spec.save()
         self.assertMatches(term, [])
+
+
+class TestAudit(UnitTestCase):
+    """ Data written without validating, e.g. by an import or merge, is found
+    by `check_version_units`, and calculating it is an error rather than a
+    wrong result
+    """
+    def setUp(self):
+        super().setUp()
+        spec = EmissionSpec(name='e', sources=[
+            self.source('10 mBq/kg')]).save()
+        self.comp = Component(name='c', mass='2 kg', location='c1',
+                              specs=[spec]).save()
+        self.good = HitEfficiency(source='U238', location='c1',
+                                  scalars=RATE).save()
+
+    def bad_hiteff(self):
+        """ A hit efficiency whose v1 doesn't fit the display unit """
+        bad = HitEfficiency(source='U238', location='c1', scalars=RATE).save()
+        # validation rejects this, so go around it
+        bad.scalars['v1'] = units('1 kg')
+        bad.save(validate=False)
+        return bad
+
+    def test_clean(self):
+        self.assertEqual(check_version_units('main'), [])
+
+    def test_hiteff(self):
+        bad = self.bad_hiteff()
+        term = SourceTerm.objects.get(source__name='U238')
+        self.assertEqual(len(term.hiteffs), 2)
+        problems = check_version_units('main')
+        self.assertEqual(len(problems), 1)
+        self.assertIn(str(bad.id), problems[0])
+        self.assertNotIn(str(self.good.id), problems[0])
+        with self.assertRaisesRegex(UnitMismatchError,
+                                    'not the display unit'):
+            dashboard(Component.objects.get(), 'v1')
+
+    def test_source(self):
+        spec = EmissionSpec(name='flux', version_tags=['main'], sources=[
+            self.source('1 ppb', name='Gammaflux')])
+        spec.save(validate=False)
+        problems = check_version_units('main')
+        self.assertEqual(len(problems), 1)
+        self.assertIn('Gammaflux', problems[0])
+        self.assertIn('radioactive isotope', problems[0])
+
+    def test_adds_display_units(self):
+        """ Everything saved gets a display unit, even if the settings were
+        replaced
+        """
+        settings = get_settings('main')
+        unit = settings.hiteffdbconfig.scalar_unit('v1')
+        self.assertIsNotNone(unit)
+        settings.update(set__hiteffdbconfig=HitEffDbConfig())
+        self.assertIsNone(get_settings('main').hiteffdbconfig.scalar_unit('v1'))
+        self.assertEqual(check_version_units('main'), [])
+        self.assertEqual(get_settings('main').hiteffdbconfig.scalar_unit('v1'),
+                         unit)
+
+    def test_page_reports_mismatch(self):
+        """ Saved data that is still mismatched is reported, not an
+        unexplained error
+        """
+        self.bad_hiteff()
+        response = self.client.get(self.url('component.results',
+                                            object=self.comp))
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Units in the saved data don't match",
+                      self.html(response))
+        response = self.client.get(self.url('component.dashboard_json',
+                                            object=self.comp))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('not the display unit',
+                      response.get_json()['error']['message'])
+
+    def test_roi_in_terms(self):
+        """ ROIs are results of the terms like scalars, and a scalar with the
+        same key replaces the ROI
+        """
+        settings = get_settings('main')
+        settings.hiteffdbconfig.rois = [
+            SpectrumROI(spectrum='s1', display_name='roi1', mode='average',
+                        start=0*units.keV, stop=5*units.keV),
+            SpectrumROI(spectrum='s1', display_name='roi2', mode='average',
+                        start=0*units.keV, stop=5*units.keV)]
+        settings.save()
+        hist = Histogram(AsymmetricUncertainty.fromcounts(np.arange(10))
+                         * units('dru/mBq'), np.arange(11) * units.keV)
+        HitEfficiency(source='U238', location='c2', spectra=dict(s1=hist),
+                      scalars=dict(roi2='1000 +- 1 dru/mBq')).save()
+        self.comp.location = 'c2'
+        self.comp.save()
+        term = SourceTerm.objects.get(source__name='U238')
+        config = get_settings('main').hiteffdbconfig
+        values = TermCalculator(config, load_hiteffs([term])).scalars(term)
+        self.assertEqual(set(values), {'roi1', 'roi2'})
+        rate = 20  # mBq
+        self.assertAlmostEqual(values['roi2'].mode / rate, 1000)
+        self.assertAlmostEqual(values['roi1'].mode / rate, 2, places=1)

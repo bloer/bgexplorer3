@@ -753,7 +753,7 @@ def check_version_units(version: str) -> List[str]:
         except ValidationError as e:
             problems.append(f"HitEfficiency {hiteff.id} ({hiteff}): "
                             f"{e.message}")
-    for spec in EmissionSpec.select_version(version).only('name', 'sources'):
+    for spec in EmissionSpec.select_version(version):
         for source in spec.sources:
             try:
                 source.clean()
