@@ -416,26 +416,37 @@ class HitEffIndex:
     """
     def __init__(self, version: str):
         self.version = version
-        self._by_key = defaultdict(list)
+        self._by_key = defaultdict(set)
         self._by_id = {}
-        self._sources = set()
 
-    def load(self, sources: Iterable[str], ids: Iterable[ObjectId] = ()
+    def get_key(self, doc: SourceTerm | HitEfficiency) -> tuple[str]:
+        """ For SourceTerm or HitEfficiency, produce the key used to index and query """
+        try:
+            key = (doc.source.name, doc.location)
+        except AttributeError:
+            # this is a hiteff
+            key = (doc.source, doc.location)
+        return key
+
+    def load(self, keys: Iterable[tuple[str]], ids: Iterable[ObjectId] = ()
              ) -> None:
         """ Load every HitEfficiency of the named `sources` for `match`, and
         those with the given original ids for `get`, if not already loaded
         """
-        query = HitEfficiency.select_version(self.version)
-        new = set(sources) - self._sources
-        if new:
-            self._sources |= new
-            for hiteff in query(source__in=sorted(new)).exclude('spectra'):
+        # TODO: this query will load all hiteffs with the same source, which
+        #       could be hundreds of times more than we need.
+        #       key the query on location, material, and norm too
+        query = HitEfficiency.select_version(self.version).exclude('spectra')
+        newkeys = set(keys) - set(self._by_key.keys())
+        newkeyparts = list(zip(*newkeys))
+        if newkeys:
+            for hiteff in query(source__in=sorted(newkeyparts[0]),
+                                location__in=sorted(newkeyparts[1])):
                 self._by_id[hiteff.original_id] = hiteff
-                self._by_key[hiteff.source, hiteff.location].append(hiteff)
+                self._by_key[self.get_key(hiteff)].add(hiteff)
         missing = set(ids) - self._by_id.keys()
         if missing:
-            for hiteff in query(original_id__in=list(missing)
-                                ).exclude('spectra'):
+            for hiteff in query(original_id__in=list(missing)):
                 self._by_id[hiteff.original_id] = hiteff
 
     def match(self, sourceterm: SourceTerm) -> List[HitEfficiency]:
@@ -443,9 +454,10 @@ class HitEffIndex:
         and location, with no material or its material), whose location and
         material must already be set
         """
-        return [hiteff for hiteff in self._by_key.get(
-                    (sourceterm.source.name, sourceterm.location), ())
-                if hiteff.material in (None, sourceterm.material)]
+        key = self.get_key(sourceterm)
+        return [hiteff for hiteff in self._by_key.get(key, ())
+                if (hiteff.material in (None, sourceterm.material)
+                    and sourceterm.source.multiplier.norm == hiteff.norm)]
 
     def get(self, ids: Iterable[ObjectId]) -> List[HitEfficiency]:
         """ The loaded HitEfficiencies with these original ids """
@@ -583,11 +595,11 @@ def sync_sourceterms(version: str, candidates: Iterable[SourceTerm],
             stored[key] = entry
 
     index = HitEffIndex(version)
-    index.load({st.source.name for st in wanted.values()},
+    index.load({index.get_key(st) for st in wanted.values()},
                [i for entry in stored.values() for i in entry.manual or ()] +
                [i for st in wanted.values()
                 for i in getattr(st, '_manual_hiteffs', ())])
-    
+
     now = datetime.datetime.now()
     user = current_user_name()
     inserts = []
