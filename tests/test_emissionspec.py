@@ -41,7 +41,7 @@ class TestEmission(unittest.TestCase):
 
         s = EmissionSource(name='U238', rate='10 +/- 1 1/s')
         s.validate()
-        self.assertEqual(s.multiplier, Multiplier.none)
+        self.assertEqual(s.multiplier, Multiplier.per_piece)
 
         s = EmissionSource(name='U238', rate='10 1/kg')
         with self.assertRaises(ValidationError):
@@ -69,8 +69,10 @@ class TestEmission(unittest.TestCase):
         s = EmissionSource(name='', rate='10 Bq/m**2')
         for mult in Multiplier:
             s.multiplier = mult
+            # fluxes have the dimensions of surface rates
             if mult in (Multiplier.surface, Multiplier.inner_surface,
-                        Multiplier.outer_surface, Multiplier.none):
+                        Multiplier.outer_surface, Multiplier.flux,
+                        Multiplier.flux_per_sr):
                 s.validate()
             else:
                 with self.assertRaises(ValidationError):
@@ -79,7 +81,7 @@ class TestEmission(unittest.TestCase):
         s = EmissionSource(name='', rate='10 Bq')
         for mult in Multiplier:
             s.multiplier = mult
-            if mult is Multiplier.none:
+            if mult is Multiplier.per_piece:
                 s.validate()
             else:
                 with self.assertRaises(ValidationError):
@@ -98,7 +100,8 @@ class TestEmission(unittest.TestCase):
                     Multiplier.length: '6 m'}
         for mult in Multiplier:
             with self.subTest(mult=mult):
-                if mult is Multiplier.none:
+                if mult in (Multiplier.flux, Multiplier.flux_per_sr,
+                            Multiplier.per_piece):
                     self.assertEqual(mult.getvalue(c), 1)
                 else:
                     self.assertEqual(mult.getvalue(c), units(expected[mult]))
@@ -198,25 +201,32 @@ class TestEmission(unittest.TestCase):
         self.assertIsNotNone(spec.sourcemap['Ra226'].generated_from)
 
     def test2_spec_multiplier(self):
-        """ the spec's multiplier is used by every source it suits """
+        """ the spec's multiplier is used by every source without its own
+        """
         spec = EmissionSpec(name='mixed', multiplier=Multiplier.outer_surface,
                             sources=[EmissionSource(name='Pb210',
                                                     rate='1 mBq/m**2'),
                                      EmissionSource(name='K40',
-                                                    rate='1 mBq/kg')]).save()
+                                                    rate='1 mBq/kg',
+                                                    multiplier='mass')]
+                            ).save()
         self.assertEqual([s.multiplier for s in spec.sources],
                          [Multiplier.outer_surface, Multiplier.mass])
-        # sources store their multiplier, but changing ours still applies
+        # sources store their multiplier, so keep it if ours changes
         spec.multiplier = Multiplier.inner_surface
         spec.save()
         self.assertEqual(spec.reload().sources[0].multiplier,
-                         Multiplier.inner_surface)
-        # without one, sources keep their own
+                         Multiplier.outer_surface)
         spec.multiplier = None
         spec.sources[0].multiplier = Multiplier.surface
         spec.save()
         self.assertEqual(spec.reload().sources[0].multiplier,
                          Multiplier.surface)
+        # a source without one must fit ours
+        spec.multiplier = Multiplier.inner_surface
+        spec.sources.append(EmissionSource(name='U238', rate='1 mBq/kg'))
+        with self.assertRaises(ValidationError):
+            spec.save()
 
     def test4_rateid(self):
         """ a rate is a variable whose id is kept when it's stored """

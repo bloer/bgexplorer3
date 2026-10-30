@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Optional, Union
 from .common import units, validate_unique_ids
 from .isotope import (concentration_to_rate, rate_to_concentration,
-                      get_isotope, compare_source_names)
+                      compare_source_names, is_radioactive)
 from .fields import UncertainQuantityField, AttachmentsField
 from .verdoc import VersionedDocument, VersionedReferenceField
 from . import settings
@@ -15,6 +15,7 @@ from collections.abc import Mapping
 
 
 class Multiplier(Enum):
+    """ The property of a component that a source's rate is multiplied by """
     mass = 'mass'
     volume = 'volume'
     surface = 'surface_area'
@@ -26,57 +27,44 @@ class Multiplier(Enum):
     per_piece = 'per_piece'
 
     @classmethod
-    def get_multiplier(cls, rate: Optional[units.Quantity]) -> 'Multiplier':
+    def get_multiplier(cls, rate: Optional[units.Quantity],
+                       allow_mass_to_rate: bool = False
+                       ) -> Optional['Multiplier']:
         """ For rate specified in given units, find the appropriate
-        multiplier. Raise ValidationError if multiplier can't be determined
+        multiplier, also for a mass of an isotope if `allow_mass_to_rate`
+        (see `check_units`). Raise ValidationError if multiplier can't be
+        determined. Fluxes have the dimensions of surface rates, so are
+        never chosen
         """
         if rate is None:
             return None
-        # TODO: this will return mass for any dimensionless rate
-        # should instead explicitly check for ppm, ppb, ppt
-        if units('Bq/kg').check(rate):
-            return cls.mass
-        elif units('Bq/m**3').check(rate):
-            return cls.volume
-        elif units('Bq/m**2').check(rate):
-            return cls.surface
-        elif units('Bq').check(rate):
-            return cls.per_piece
-        elif units('1/cm**2/s/sr').check(rate):
-            return cls.flux_per_sr
-        elif units('Bq/m').check(rate):
-            return cls.length
+        for allow in dict.fromkeys((False, allow_mass_to_rate)):
+            for mult in (cls.mass, cls.volume, cls.surface, cls.length,
+                         cls.per_piece):
+                if mult.accepts(rate, allow):
+                    return mult
         raise ValidationError(f"Unhandled rate units {rate.u}")
 
     @property
-    def valid_units(self):
-        """ Get a list of valid units for this multiplier """
-        return {
-                Multiplier.mass: 'Bq/kg',
-                Multiplier.volume: 'Bq/m**3',
-                Multiplier.surface: 'Bq/m**2',
-                Multiplier.inner_surface: 'Bq/m**2',
-                Multiplier.outer_surface: 'Bq/m**2',
-                Multiplier.length: 'Bq/m',
-                Multiplier.flux: 'Bq/cm**2',
-                Multiplier.flux_per_sr: 'Bq/cm**2/sr',
-                Multiplier.per_piece: 'Bq',
-                }[self]
+    def valid_units(self) -> units.Unit:
+        """ The units of rates for this multiplier """
+        return _VALID_UNITS[self]
 
-    def check_units(self, rate: units.Quantity,
+    def check_units(self, rate: Optional[units.Quantity],
                     allow_mass_to_rate: bool = True) -> None:
         """ Verify that `rate` has appropriate units for us, raise
         ValidationError otherwise. If `allow_mass_to_rate`, allow being off
-        by a factor of 1/g/s, because isotope mass can be converted to a decay
-        rate implicitly.
+        by a factor of 1/g/s, because a mass of an isotope can be converted
+        to a decay rate.
         """
         if rate is None:
-            return True
-        if self.valid_units.check(rate):
-            return True
-        elif allow_mass_to_rate and self.valid_units.check(rate*units('1/g/s')):
-            return True
-        # if we get here, none match
+            return
+        dims = self.valid_units.dimensionality
+        if rate.u.dimensionality == dims:
+            return
+        if (allow_mass_to_rate and
+                (rate.u * _MASS_TO_RATE).dimensionality == dims):
+            return
         raise ValidationError(f"Rate units {rate.u} invalid"
                               f" for multiplier {self.name}")
 
@@ -91,11 +79,28 @@ class Multiplier(Enum):
 
     def getvalue(self, component) -> Union[float, units.Quantity]:
         """ Extract the numerical value of the multipler from component """
-        mult = 1
-        if self not in (Multiplier.flux, Multiplier.flux_per_sr, Multiplier.per_piece):
-            # values name the Component attributes, e.g. surface_area
-            mult = getattr(component, self.value)
-        return mult
+        if self in _UNIT_MULTIPLIERS:
+            return 1
+        # values name the Component attributes, e.g. surface_area
+        return getattr(component, self.value)
+
+
+_VALID_UNITS = {
+    Multiplier.mass: units.Unit('Bq/kg'),
+    Multiplier.volume: units.Unit('Bq/m**3'),
+    Multiplier.surface: units.Unit('Bq/m**2'),
+    Multiplier.inner_surface: units.Unit('Bq/m**2'),
+    Multiplier.outer_surface: units.Unit('Bq/m**2'),
+    Multiplier.length: units.Unit('Bq/m'),
+    Multiplier.flux: units.Unit('1/cm**2/s'),
+    Multiplier.flux_per_sr: units.Unit('1/cm**2/s/sr'),
+    Multiplier.per_piece: units.Unit('Bq'),
+}
+# multipliers that don't scale with the component
+_UNIT_MULTIPLIERS = (Multiplier.flux, Multiplier.flux_per_sr,
+                     Multiplier.per_piece)
+# a mass of an isotope times this has the dimensions of its decay rate
+_MASS_TO_RATE = units.Unit('1/g/s')
 
 
 class SourceCategory(Enum):
@@ -121,41 +126,47 @@ class EmissionSource(EmbeddedDocument):
     spectrum = StringField()
     generated_from = ObjectIdField()
 
-    def get_isotope(self):
-        return get_isotope(self.name)
-
     @property
-    def is_isotope(self):
-        return self.get_isotope() is not None
+    def converts_mass(self) -> bool:
+        """ Can our rate be given as a mass, e.g. a concentration? Only if we
+        are a radioactive isotope
+        """
+        return is_radioactive(self.name)
 
     @property
     def standardized_rate(self) -> Optional[units.Quantity]:
-        """ Return the rate converted to standardized units for this multiplier """
+        """ The rate in the units of our multiplier, converting a mass of an
+        isotope to its decay rate. None if we have no rate
+        """
         if self.rate is None:
             return None
-        elif self.multiplier is None:
+        if self.multiplier is None:
             raise ValueError("Multiplier is not set")
-        elif self.multiplier.accepts(self.rate, allow_mass_to_rate=False):
-            rate = self.rate
-        elif self.is_isotope:
-            rate = concentration_to_rate(self.rate, self.get_isotope())
-        else:
-            raise ValueError("Cannot standardize rate: incompatible units")
-        return rate
+        if self.multiplier.accepts(self.rate, allow_mass_to_rate=False):
+            return self.rate
+        return concentration_to_rate(self.name, self.rate)
 
     def clean(self):
-        """ make sure multiplier has a sensible value """
-        if self.multiplier is None:
-            try:
-                self.multiplier = Multiplier.get_multiplier(self.rate)
-                # ^ will raise ValidationError if it can't be auto-determined
-            except ValidationError as e:
-                if self.is_isotope:
-                    self.multiplier = Multiplier.get_multiplier(self.rate*units('1/g/s'))
-                    # if this fails, let the original ValidationError propagate
+        """ Choose the multiplier from the rate's units if it isn't set, and
+        make sure the rate fits it. A radioactive isotope's rate may be given
+        as a mass of it, e.g. a concentration
+        """
+        if self.rate is None:
+            return
+        converts = self.converts_mass
         try:
-            self.multiplier.check_units(self.rate, self.is_isotope)
+            if self.multiplier is None:
+                self.multiplier = Multiplier.get_multiplier(self.rate,
+                                                            converts)
+            self.multiplier.check_units(self.rate, converts)
         except ValidationError as e:
+            candidates = [self.multiplier] if self.multiplier else Multiplier
+            if not converts and any(m.accepts(self.rate)
+                                    for m in candidates):
+                raise ValidationError(
+                    "to give the rate as a mass, e.g. a concentration, the "
+                    "name must be a radioactive isotope",
+                    field_name='name') from e
             # the rate is what's wrong, so forms can show it there
             raise ValidationError(e.message, field_name='rate') from e
 
@@ -169,9 +180,8 @@ class EmissionSpec(VersionedDocument):
     category = EnumField(SourceCategory)
     multiplier = EnumField(
         Multiplier,
-        help_text="Used for every source whose rate has suitable units, "
-                  "e.g. to choose inner or outer surface; others keep their "
-                  "own")
+        help_text="Used for every source without its own, e.g. to choose "
+                  "inner or outer surface")
     sources = EmbeddedDocumentListField(EmissionSource)
     attachments = AttachmentsField()
     # specs belonging to one component, e.g. its own exposure history, are
@@ -209,7 +219,7 @@ class EmissionSpec(VersionedDocument):
             if compare_source_names(newsource.source, source.name):
                 matchin = source
 
-        if matchin is None:
+        if matchin is None or matchin.rate is None:
             return
 
         generated = [s for s in self.sources if s.generated_from == matchin.id
@@ -282,13 +292,12 @@ class EmissionSpec(VersionedDocument):
 
     def clean(self):
         """ Automatically populate derived spectra from settings """
-        # propagate multiplier to sources if they don't have one already
-        # having a source with blank multiplier that doesn't match ours is an error
-        if self.multiplier is not None:
-            for source in self.sources:
-                source.category = source.category or self.category
-                if source.multiplier is None:
-                    source.multiplier = self.multiplier
+        # sources without their own category or multiplier use ours, which
+        # must then fit their rate
+        for source in self.sources:
+            source.category = source.category or self.category
+            if source.multiplier is None and source.rate is not None:
+                source.multiplier = self.multiplier
         super().clean()
         validate_unique_ids(self.sources, 'sources')
         config = settings.get_settings(self.active_version)

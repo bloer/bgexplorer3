@@ -9,6 +9,8 @@ from .common import units
 _ln2 = math.log(2)
 
 IsotopeType = Union[str, Isotope]
+# names for natural potassium, whose activity is from K-40
+NATURAL_K = ('K', 'natK', 'K-nat', 'Knat')
 
 _isotopestr = re.compile(r'(\d{1,3})?([A-Z][a-z]?[a-z]?)-?(\d{1,3})?')
 
@@ -57,6 +59,12 @@ def get_tau(source: IsotopeType) -> Optional[units.Quantity]:
     if halflife is not None:
         return halflife / _ln2
 
+def is_radioactive(source: IsotopeType) -> bool:
+    """ Can a quantity of `source` be converted to a decay rate? """
+    if source in NATURAL_K:
+        source = 'K40'
+    return get_halflife(source) is not None
+
 def decayed_fraction(t: units.Quantity, tau: units.Quantity) -> float:
     """ Fraction of atoms with mean lifetime `tau` that decay within `t` """
     return 1 - math.exp(-(t / tau).to('').m)
@@ -72,7 +80,7 @@ def concentration_to_rate(source: IsotopeType,
     if None (default), apply only to K40, which is commonly written rather
     than the more correct Knat
     """
-    if source in ('K', 'natK', 'K-nat', 'Knat'):
+    if source in NATURAL_K:
         source = 'K40'
         applyabundance = True
     isotope = get_isotope(source)
@@ -95,7 +103,7 @@ def rate_to_concentration(source: IsotopeType, rate: units.Quantity,
     `concentration_to_rate`, see there for `applyabundance`
     """
     # TODO: handle surface rates
-    if source in ('K', 'natK', 'K-nat', 'Knat'):
+    if source in NATURAL_K:
         source = 'K40'
         applyabundance = True
     isotope = get_isotope(source)
