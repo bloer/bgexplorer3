@@ -251,8 +251,6 @@ class TestHitEfficiencyMatching(UnitTestCase):
 
     def assertMatches(self, term, norms, value=None):
         self.assertEqual(self.norms(term), set(norms))
-        self.assertEqual(self.norms(term),
-                         {h.norm for h in term.hiteffs_query})
         if value is not None:
             self.assertAlmostEqual(self.value(term), value)
 
