@@ -10,6 +10,7 @@ from bgexplorer.models.assay import Assay
 from bgexplorer.models.sourceterm import (SourceTerm, CalculatedResults,
                                           ResultsCache, clear_results_cache)
 from bgexplorer.models.settings import VersionSettings, get_settings
+from bgexplorer.models import signals
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
@@ -533,6 +534,60 @@ class TestSourceTerm(unittest.TestCase):
         self.assertEqual(stamps(), weighted)
         h.delete()
         self.assertNotEqual(stamps()['c'], weighted['c'])
+
+    def test7_sync(self):
+        """ Updates only write the SourceTerms that changed, keep the ids of
+        those that stay, and only go up the tree while something changes
+        """
+        e1 = spec_of(EmissionSource(name="Co60", rate="10 +- 1 mBq/kg"),
+                     EmissionSource(name="K40", rate="5 +- 1 mBq/kg"))
+        c = Component(name="c", mass="2 kg", specs=[e1]).save()
+        c2 = Component(name="c2", mass="2 kg", specs=[e1]).save()
+        a1 = Assembly(name="a1", components=[c, c2]).save()
+        a2 = Assembly(name="a2", components=[a1]).save()
+
+        def state():
+            return {(st.assemblyPathStr, st.source.name):
+                    (st.id, st.revision, st.stamp)
+                    for st in SourceTerm.objects}
+        before = state()
+        self.assertEqual(len(before), 2 + 2 + 4 + 4)
+
+        # nothing changed: nothing is written, and only the direct parent
+        # is looked at
+        with mock.patch.object(signals, '_sync_placements',
+                               wraps=signals._sync_placements) as sync:
+            c.save()
+        self.assertEqual(state(), before)
+        self.assertEqual(sync.call_count, 1)
+        a1.save()
+        a2.save()
+        self.assertEqual(state(), before)
+
+        # a change goes up the whole tree, and only to the terms it affects
+        c.reload()
+        c.confidence_rating = 3
+        with mock.patch.object(signals, '_sync_placements',
+                               wraps=signals._sync_placements) as sync:
+            c.save()
+        self.assertEqual(sync.call_count, 2)
+        after = state()
+        self.assertEqual(set(after), set(before))
+        for key, (_id, revision, stamp) in after.items():
+            self.assertEqual(_id, before[key][0])
+            if key[0].endswith('/c') or key[0] == 'c':
+                self.assertEqual(revision, before[key][1] + 1, key)
+                self.assertNotEqual(stamp, before[key][2], key)
+            else:
+                self.assertEqual((revision, stamp), before[key][1:], key)
+
+        # SourceTerms that are no longer wanted are removed
+        a1.reload()
+        a1.children = [p for p in a1.children if p.component.name == 'c2']
+        a1.save()
+        self.assertEqual({path for path, _ in state()},
+                         {'c', 'c2', 'a1/c2', 'a2/a1/c2'})
+        self.assertEqual(SourceTerm.objects.count(), 8)
 
 
 class TestLocationOverride(unittest.TestCase):

@@ -1,6 +1,10 @@
 from functools import cached_property, reduce
 import operator
 import hashlib
+import datetime
+from functools import cache
+from bson import json_util
+from pymongo import InsertOne, UpdateOne
 from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
                          StringField, BooleanField, MapField, Document,
                          SortedListField, CASCADE, PULL, ReferenceField,
@@ -10,6 +14,7 @@ from .verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedQuerySet, VersionedListField,
                      VersionedEmbeddedDocumentListField)
 from .verdoc import ref_id as _ref_id
+from .verdoc import (IDENTITY_FIELDS, check_writable, current_user_name)
 from .component import (Component, Placement, Assembly, ComponentSpec,
                         LocationMode)
 from .emissionspec import EmissionSpec, EmissionSource, Multiplier
@@ -23,7 +28,8 @@ from .common import units, addnone, multnone, Quantity, UnitMismatchError
 from .termcalc import TermCalculator
 from .asymmetric import sum_values
 from . import settings
-from typing import List, Optional, Union, Dict, Tuple, Iterable
+from typing import (List, Optional, Union, Dict, Tuple, Iterable,
+                    NamedTuple, Sequence, Set)
 from collections import defaultdict, OrderedDict
 from bson import ObjectId
 from contextlib import contextmanager
@@ -198,27 +204,32 @@ class SourceTerm(VersionedDocument):
                    [str(pid) for pid in self.placement_ids], hiteffs)
         return hashlib.sha1(repr(content).encode()).hexdigest()[:20]
 
-    def check_units(self, hiteffs: Optional[Iterable[HitEfficiency]] = None
-                    ) -> None:
+    def check_units(self, hiteffs: Optional[Iterable[HitEfficiency]] = None,
+                    calculator: Optional[TermCalculator] = None) -> None:
         """ Raise ValidationError if our results can't be calculated in the
         display units of the settings, e.g. because our emission rate doesn't
         fit the normalization of one of our hit efficiencies. Check with
         `hiteffs` rather than our own if given. Results with no display unit
-        yet are not checked.
+        yet are not checked. A `calculator` (not strict) can be shared by
+        many SourceTerms to reuse what it has worked out for each hit
+        efficiency.
         """
         if _unit_checks_deferred.get():
             return
         if hiteffs is None:
             hiteffs = list(self.hiteffs)
-        config = settings.get_settings(self.active_version).hiteffdbconfig
+        if calculator is None:
+            config = settings.get_settings(self.active_version).hiteffdbconfig
+            calculator = TermCalculator(config, strict=False)
         try:
-            TermCalculator(config, strict=False).check(self, hiteffs)
+            calculator.check(self, hiteffs)
         except UnitMismatchError as e:
             raise ValidationError(f"{self.assemblyPathStr}: {e}") from e
 
-    def clean(self):
-        super().clean()
-        self.clear_results()
+    def derive(self) -> None:
+        """ Set the fields that follow from the placement path and its
+        components. Doesn't touch the database or the hit efficiencies.
+        """
         self.placement_ids = [placement.id for placement in self.assemblyPath]
         # TODO: should these be cached properties rather than set by clean?
         self.set_location()
@@ -233,116 +244,33 @@ class SourceTerm(VersionedDocument):
         self.confidence_rating = (
             entry.confidence_rating if entry and entry.confidence_rating
             else self.component.confidence_rating)
-        # clear cached properties1
+        # clear cached properties
         try:
             del self.emissionrate
         except AttributeError:
             pass
+
+    def clean(self):
+        super().clean()
+        self.clear_results()
+        self.derive()
         self.livetimes = [hit.get_livetime(self.emissionrate)
                           for hit in self.hiteffs]
         self.check_units()
         self.stamp = self.content_stamp()
 
     @property
-    def hiteffs_query(self) -> VersionedQuerySet:
-        hits = HitEfficiency.select_version(self.active_version)(
-            source=self.source.name,
-            location=self.location,
-            material__in=(None, self.material),
-            )
-        return hits
-
-    def find_hiteffs(self, replace: bool = True) -> List[HitEfficiency]:
-        hiteffs = list(self.hiteffs_query.exclude('spectra'))
-
-        if hiteffs and replace:
-            self.hiteffs = hiteffs
-            self.hiteffs_auto = True
-            self.save()
-        return hiteffs
+    def natural_key(self) -> tuple:
+        """ What identifies this SourceTerm within its assembly root and
+        version. Needs `derive` to have set the placement ids
+        """
+        return (self.source.id, _ref_id(self.spec), tuple(self.placement_ids))
 
     def clear_results(self):
         """ Remove all CalculatedResults in the database referencing
         this object
         """
         CalculatedResults.objects(sources=self).delete()
-
-    def upsert(self, update_hiteffs: bool = True) -> 'SourceTerm':
-        """ `save` only works after we have been inserted into the database
-        This method will find and upate an existing match or create a new
-        entry
-
-        Returns the upserted entry without modifying self
-        """
-        self.validate()
-        if update_hiteffs and self.hiteffs_auto:
-            # before anything is written
-            self.check_units(list(self.hiteffs_query.exclude('spectra')))
-        query = SourceTerm.objects(version_tags=self.active_version,
-                                   assemblyRoot=self.assemblyRoot,
-                                   source__id=self.source.id,
-                                   spec=self.spec,
-                                   __raw__={'placement_ids':
-                                            {'$eq': self.placement_ids}},
-                                   )
-        update_dict = dict(set_on_insert__id=self.id,
-                           set_on_insert__original_id=self.original_id,
-                           set_on_insert__version_tags=[self.active_version],
-                           set_on_insert__assemblyRoot=self.assemblyRoot,
-                           set_on_insert__spec=self.spec,
-                           set_on_insert__placement_ids=self.placement_ids,
-                           # placement ids are in the query, but copied
-                           # labels, weights, etc may have changed
-                           set__assemblyPath=self.assemblyPath,
-                           set__source=self.source,
-                           set__location=self.location,
-                           set__location_origin=self.location_origin,
-                           set__weight=self.weight,
-                           set__rate_multiplier=self.rate_multiplier,
-                           set__componentName=self.component.name,
-                           set__assemblyPathStr=self.assemblyPathStr,
-                           set__material=self.material,
-                           set__confidence_rating=self.confidence_rating,
-                           )
-        if not self.hiteffs_auto:
-            update_dict['set__hiteffs_auto'] = self.hiteffs_auto
-            update_dict['set__hiteffs'] = self.hiteffs
-        else:
-            update_dict['set_on_insert__hiteffs_auto'] = True
-        st = query.upsert_one(**update_dict)
-        st.clear_results()
-        if update_hiteffs and st.hiteffs_auto:
-            st.find_hiteffs()
-        # find_hiteffs stamps it when it changes anything
-        if st.stamp != (stamp := st.content_stamp()):
-            st.update(set__stamp=stamp)
-            st.stamp = stamp
-        return st
-
-    @classmethod
-    def from_component_source(cls, component, source, spec=None):
-        """ Create a SourceTerm from a source associated to a component """
-        st = SourceTerm(version_tag=component.active_version,
-                        assemblyRoot=component,
-                        source=source,
-                        spec=spec,
-                        ).upsert()
-        return st
-
-    @classmethod
-    def from_placement(cls, chsource, parent, placement):
-        """ Create a SourceTerm by appending parent info and placement details
-        to one created by the child
-        """
-        st = SourceTerm(version_tag=chsource.active_version,
-                        assemblyRoot=parent,
-                        assemblyPath=[placement] + chsource.assemblyPath,
-                        source=chsource.source,
-                        spec=chsource.spec,
-                        hiteffs_auto=chsource.hiteffs_auto,
-                        hiteffs=chsource.hiteffs,
-                        ).upsert()
-        return st
 
 
 def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource, HitEfficiency],
@@ -822,3 +750,245 @@ def check_version_units(version: str, batch_size: int = 500) -> List[str]:
     for problem in problems:
         log.warning("Unit mismatch in version '%s': %s", version, problem)
     return problems
+
+
+class HitEffIndex:
+    """ The HitEfficiencies a batch of SourceTerms may match, loaded once
+    without their spectra and shared between the SourceTerms, rather than
+    querying for each one.
+    """
+    def __init__(self, version: str):
+        self.version = version
+        self._by_key = defaultdict(list)
+        self._by_id = {}
+        self._sources = set()
+
+    def load(self, sources: Iterable[str], ids: Iterable[ObjectId] = ()
+             ) -> None:
+        """ Load every HitEfficiency of the named `sources` for `match`, and
+        those with the given original ids for `get`, if not already loaded
+        """
+        query = HitEfficiency.select_version(self.version)
+        new = set(sources) - self._sources
+        if new:
+            self._sources |= new
+            for hiteff in query(source__in=sorted(new)).exclude('spectra'):
+                self._by_id[hiteff.original_id] = hiteff
+                self._by_key[hiteff.source, hiteff.location].append(hiteff)
+        missing = set(ids) - self._by_id.keys()
+        if missing:
+            for hiteff in query(original_id__in=list(missing)
+                                ).exclude('spectra'):
+                self._by_id[hiteff.original_id] = hiteff
+
+    def match(self, sourceterm: SourceTerm) -> List[HitEfficiency]:
+        """ The HitEfficiencies that apply to `sourceterm` (those of its source
+        and location, with no material or its material), whose location and
+        material must already be set
+        """
+        return [hiteff for hiteff in self._by_key.get(
+                    (sourceterm.source.name, sourceterm.location), ())
+                if hiteff.material in (None, sourceterm.material)]
+
+    def get(self, ids: Iterable[ObjectId]) -> List[HitEfficiency]:
+        """ The loaded HitEfficiencies with these original ids """
+        return [self._by_id[i] for i in ids if i in self._by_id]
+
+
+def placed_sourceterms(assembly: Assembly, placements: Sequence[Placement],
+                       scope: Sequence[Set[ObjectId]] = ()
+                       ) -> List[SourceTerm]:
+    """ Unsaved SourceTerms of `assembly` for each of the given `placements`
+    of its children, made from the SourceTerms of the placed components. Only
+    those whose path starts below `scope` (a list of sets of placement ids,
+    one for each level of the path) are used. Their hit efficiencies are left
+    for `sync_sourceterms` to find, except for manually set ones, which
+    are carried up in `_manual_hiteffs`.
+    """
+    version = assembly.active_version
+    roots = {p.component.original_id for p in placements}
+    query = SourceTerm.objects(version_tags=version,
+                               assemblyRoot__in=list(roots))
+    if scope:
+        query = query(__raw__={f'placement_ids.{i}': {'$in': list(ids)}
+                               for i, ids in enumerate(scope)})
+    raws = list(query.only('assemblyRoot', 'assemblyPath', 'source', 'spec',
+                           'hiteffs_auto', 'hiteffs').as_pymongo())
+    by_root = defaultdict(list)
+    comp_ids = set(roots)
+    spec_ids = set()
+    for raw in raws:
+        by_root[raw['assemblyRoot']].append(raw)
+        comp_ids.update(p['component'] for p in raw.get('assemblyPath', ()))
+        spec_ids.add(raw['spec'])
+    comps = {c.original_id: c for c in Component.select_version(version)(
+        original_id__in=list(comp_ids))}
+    specs = {s.original_id: s for s in EmissionSpec.select_version(version)(
+        original_id__in=list(spec_ids))}
+
+    result = []
+    for placement in placements:
+        for raw in by_root[placement.component.original_id]:
+            spec = specs.get(raw['spec'])
+            below = [comps.get(p['component']) for p in
+                     raw.get('assemblyPath', ())]
+            if spec is None or None in below:
+                log.warning("Skipping SourceTerm %s with a missing spec or "
+                            "component", raw['_id'])
+                continue
+            path = [placement] + [
+                Placement(id=p['id'], component=comp, weight=p.get('weight', 1),
+                          label=p.get('label'), location=p.get('location'))
+                for p, comp in zip(raw.get('assemblyPath', ()), below)]
+            auto = raw.get('hiteffs_auto', True)
+            sourceterm = SourceTerm(
+                version_tag=version, assemblyRoot=assembly, assemblyPath=path,
+                source=EmissionSource._from_son(raw['source']), spec=spec,
+                hiteffs_auto=auto)
+            if not auto:
+                sourceterm._manual_hiteffs = list(raw.get('hiteffs', ()))
+            result.append(sourceterm)
+    return result
+
+
+@cache
+def _content_keys() -> frozenset:
+    """ The database names of the fields `sync_sourceterms` compares and
+    writes, which is all but the ones that identify and track the document
+    """
+    fields = {f.db_field for f in SourceTerm._fields.values()}
+    return frozenset(fields - set(IDENTITY_FIELDS) - {'enteredby'})
+
+
+def _digest(doc: dict, keys: frozenset) -> str:
+    content = {k: doc[k] for k in keys if k in doc}
+    return hashlib.sha1(json_util.dumps(content, sort_keys=True).encode()
+                        ).hexdigest()
+
+
+class _Stored(NamedTuple):
+    """ What `sync_sourceterms` keeps of a SourceTerm already in the database
+    """
+    id: ObjectId
+    original_id: ObjectId
+    shared: bool
+    digest: str
+    # the original ids of the hiteffs if they were set manually
+    manual: Optional[list]
+
+
+class SyncResult(NamedTuple):
+    inserted: int = 0
+    updated: int = 0
+    removed: int = 0
+
+    @property
+    def changed(self) -> bool:
+        return any(self)
+
+
+def sync_sourceterms(version: str, candidates: Iterable[SourceTerm],
+                     existing: VersionedQuerySet) -> SyncResult:
+    """ Make the SourceTerms in `existing` (a query for a subset of `version`)
+    the same as the unsaved `candidates`, by writing only what changed.
+
+    The candidates are matched to stored SourceTerms by their natural key
+    (source, spec and placement path), so the id of a SourceTerm that is still
+    wanted is kept, along with the results cached for it. Candidates have their
+    derived fields and hit efficiencies filled in here: those that match
+    stored SourceTerms with manually set hit efficiencies keep them. Those
+    with nothing stored, or a different digest, are checked and written with
+    one bulk write, and the stored ones that no candidate matches are removed.
+    ValidationError is raised, before anything is written, if the results
+    of a new or changed SourceTerm can't be calculated in the display units.
+    """
+    check_writable(version)
+    keys = _content_keys()
+
+    wanted = {}
+    for sourceterm in candidates:
+        sourceterm.derive()
+        wanted[sourceterm.natural_key] = sourceterm
+
+    stored = {}
+    duplicates = []
+    for raw in existing.as_pymongo():
+        key = (raw['source']['id'], raw['spec'],
+               tuple(raw.get('placement_ids', ())))
+        entry = _Stored(
+            raw['_id'], raw['original_id'], len(raw['version_tags']) > 1,
+            _digest(raw, keys),
+            None if raw.get('hiteffs_auto', True) else
+            list(raw.get('hiteffs', ())))
+        if key in stored:
+            duplicates.append(entry.id)
+        else:
+            stored[key] = entry
+
+    index = HitEffIndex(version)
+    index.load({st.source.name for st in wanted.values()},
+               [i for entry in stored.values() for i in entry.manual or ()] +
+               [i for st in wanted.values()
+                for i in getattr(st, '_manual_hiteffs', ())])
+    calculator = TermCalculator(
+        settings.get_settings(version).hiteffdbconfig, strict=False)
+
+    now = datetime.datetime.now()
+    user = current_user_name()
+    inserts = []
+    updates = []
+    shared = []
+    unshared = []
+    for key, sourceterm in wanted.items():
+        prior = stored.get(key)
+        if not sourceterm.hiteffs_auto:
+            hiteffs = index.get(sourceterm._manual_hiteffs)
+        elif prior is not None and prior.manual is not None:
+            sourceterm.hiteffs_auto = False
+            hiteffs = index.get(prior.manual)
+        else:
+            hiteffs = index.match(sourceterm)
+        sourceterm.hiteffs = hiteffs
+        sourceterm.livetimes = [hit.get_livetime(sourceterm.emissionrate)
+                                for hit in hiteffs]
+        sourceterm.stamp = sourceterm.content_stamp()
+        doc = sourceterm.to_mongo()
+        if prior is not None and _digest(doc, keys) == prior.digest:
+            continue
+        sourceterm.original_id = (sourceterm.id if prior is None
+                                  else prior.original_id)
+        sourceterm.validate(clean=False)
+        sourceterm.check_units(hiteffs, calculator)
+        if prior is None:
+            sourceterm.revision = 1
+            sourceterm.modified = now
+            if user:
+                sourceterm.enteredby = user
+            inserts.append(InsertOne(sourceterm.to_mongo()))
+            continue
+        changes = {k: v for k, v in doc.items() if k in keys}
+        changes['modified'] = now
+        if user:
+            changes['enteredby'] = user
+        update = {'$set': changes, '$inc': {'revision': 1}}
+        gone = {k: '' for k in keys if k not in doc}
+        if gone:
+            update['$unset'] = gone
+        updates.append(UpdateOne(
+            {'original_id': prior.original_id, 'version_tags': version},
+            update))
+        (shared if prior.shared else unshared).append(prior.id)
+
+    orphans = duplicates + [entry.id for key, entry in stored.items()
+                            if key not in wanted]
+    if shared:
+        # give this version its own copies of the documents it shares
+        SourceTerm.select_version(version)(id__in=shared).prepare_edit()
+    if unshared:
+        CalculatedResults.objects(sources__in=unshared).delete()
+    if inserts or updates:
+        SourceTerm._get_collection().bulk_write(inserts + updates,
+                                                ordered=False)
+    if orphans:
+        SourceTerm.select_version(version)(id__in=orphans).delete()
+    return SyncResult(len(inserts), len(updates), len(orphans))

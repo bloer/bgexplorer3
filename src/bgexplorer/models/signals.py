@@ -4,7 +4,8 @@ from .component import Component, Assembly
 from .emissionspec import EmissionSpec
 from .cosmogenic import ActivatedMaterial, CosmogenicActivation
 from .hiteff import HitEfficiency
-from .sourceterm import SourceTerm, CalculatedResults, find_sourceterms
+from .sourceterm import (SourceTerm, CalculatedResults, find_sourceterms,
+                         sync_sourceterms, placed_sourceterms)
 from .verdoc import ref_id
 from . import settings
 import logging
@@ -63,82 +64,74 @@ def update_component(sender, document, **kwargs):
     if any(isinstance(spec, DBRef) for spec in component.specs):
         log.warning("Component %s specs contain DBRefs: %s", component.name, component.specs)
     # why are specs sometimes being converted to DBRefs between save and update??
-    sourceterms = [SourceTerm.from_component_source(component, source, spec)
-                   for spec in component.specs
-                   for source in getattr(spec, 'sources', [])]
-    # remove any that didn't match
-    SourceTerm.objects(
-        version_tags=component.active_version,
-        assemblyRoot=component,
-        id__nin=[st.id for st in sourceterms],
-        ).delete()
-    # do we calculate the result now, or do it on demand?
-    # update all assemblies containing us
+    version = component.active_version
+    candidates = [SourceTerm(version_tag=version, assemblyRoot=component,
+                             source=source, spec=spec)
+                  for spec in component.specs
+                  for source in getattr(spec, 'sources', [])]
+    sync_sourceterms(version, candidates, SourceTerm.objects(
+        version_tags=version, assemblyRoot=component))
+    # update all assemblies containing us. These are always checked, even if
+    # our SourceTerms didn't change, in case they missed a previous update
     for parent in component.find_parents():
-        #update_assembly(sender=None, document=parent, component=component)
-        update_parent(parent, component, sourceterms)
+        update_parent(parent, component)
     # the generic post_save signal may have run before the sourceterms
     # were updated
-    settings.touch(component.active_version, terms_only=True)
-    return sourceterms
+    settings.touch(version, terms_only=True)
 
-def update_parent(assembly, component, child_sourceterms, scope=()):
-    """ Find or create SourceTerms in `assembly` for each placement of
-    `component`, then recurse up the assembly tree.
 
-    `child_sourceterms` must be the complete set of SourceTerms rooted at
-    `component` below the placement path `scope` (a list of sets of
-    placement ids). Any other SourceTerms in `assembly` along that path
-    are deleted.
+def _sync_placements(assembly, placements, child_scope=(), restrict=True):
+    """ Make the SourceTerms of `assembly` for each of the `placements` of its
+    children match the current SourceTerms of the placed components below the
+    path `child_scope` (a list of sets of placement ids). If not `restrict`,
+    all other SourceTerms in `assembly` are removed too, otherwise only those
+    along the same path. Returns the SyncResult and the scope of the
+    SourceTerms of `assembly` that were synced.
+    """
+    version = assembly.active_version
+    existing = SourceTerm.objects(version_tags=version, assemblyRoot=assembly)
+    scope = [{p.id for p in placements}] + list(child_scope)
+    if restrict:
+        existing = existing(__raw__={f'placement_ids.{i}': {'$in': list(ids)}
+                                     for i, ids in enumerate(scope)})
+    result = sync_sourceterms(
+        version, placed_sourceterms(assembly, placements, child_scope),
+        existing)
+    return result, scope
+
+
+def update_parent(assembly, component, scope=()):
+    """ Update the SourceTerms in `assembly` for each placement of
+    `component`, then recurse up the assembly tree as long as something
+    changed.
+
+    `scope` is a list of sets of placement ids that limits which
+    SourceTerms rooted at `component` were affected. Any other SourceTerms in
+    `assembly` along that path are deleted.
     """
     placements = [p for p in assembly.children
                   if p.component.original_id == component.original_id]
-    sourceterms = [SourceTerm.from_placement(st, assembly, placement)
-                   for placement in placements
-                   for st in child_sourceterms]
-    scope = [{p.id for p in placements}] + list(scope)
-    # remove any that didn't match
-    SourceTerm.objects(
-        version_tags=assembly.active_version,
-        assemblyRoot=assembly,
-        id__nin=[st.id for st in sourceterms],
-        __raw__={f'placement_ids.{i}': {'$in': list(ids)}
-                 for i, ids in enumerate(scope)},
-        ).delete()
-    for parent in assembly.find_parents():
-        update_parent(parent, assembly, sourceterms, scope)
-    return sourceterms
+    result, scope = _sync_placements(assembly, placements, scope)
+    if result.changed:
+        # SourceTerms further up depend only on these, so stop if none did
+        for parent in assembly.find_parents():
+            update_parent(parent, assembly, scope)
 
 
 def update_assembly(sender, document, component=None, placement=None,
                     **kwargs):
     assembly = document
-    sourceterms = []
-    updated = set()
-    for child in assembly.children:
-        if ((component and child.component.id != component.id) or
-                (placement and child.id != placement.id)):
-            continue
-        updated.add(child.id)
-        childterms = SourceTerm.select_version(assembly.active_version)(
-            assemblyRoot=child.component,
-            )
-        for st in childterms:
-            sourceterms.append(SourceTerm.from_placement(st, assembly, child))
-    # remove any that didn't match
-    query = SourceTerm.objects(version_tags=assembly.active_version,
-                               assemblyRoot=assembly)
-    if component:
-        query = query(assemblyPath__0__component=component)
-    query = query(id__nin=[st.id for st in sourceterms])
-    query.delete()
-
-    # if only some children were updated, limit deletions further up the
-    # tree to paths through those children
-    scope = [updated] if (component or placement) else []
+    placements = [child for child in assembly.children
+                  if not ((component and child.component.id != component.id)
+                          or (placement and child.id != placement.id))]
+    # if only some children were updated, limit deletions to paths through
+    # those children
+    restrict = bool(component or placement)
+    result, scope = _sync_placements(assembly, placements, (), restrict)
+    # parents always get updated, in case they missed a previous update
+    scope = scope if restrict else []
     for parent in assembly.find_parents():
-        update_parent(parent, assembly, sourceterms, scope)
-        #update_assembly(sender=None, document=parent, component=assembly)
+        update_parent(parent, assembly, scope)
     settings.touch(assembly.active_version, terms_only=True)
 
 
