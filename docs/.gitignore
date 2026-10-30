@@ -1,3 +1,11 @@
+# Python environment files
+*~
+*.egg-info
+*.pyc
+.venv/
+.coverage
+
+# Jekyll / Ruby website files
 _site/
 .jekyll-cache/
 .bundle/
