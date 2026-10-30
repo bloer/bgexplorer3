@@ -1,7 +1,7 @@
 import mongoengine
 from bson.dbref import DBRef
 from .component import Component, Assembly
-from .emissionspec import EmissionSpec
+from .emissionspec import EmissionSpec, Multiplier
 from .cosmogenic import ActivatedMaterial, CosmogenicActivation
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, CalculatedResults, find_sourceterms
@@ -204,6 +204,7 @@ def update_hiteff(sender, document, **kwargs):
     matches = SourceTerm.select_version(hiteff.active_version)(
         hiteffs_auto=True,
         source__name=hiteff.source,
+        source__multiplier__in=Multiplier.for_norm(hiteff.norm),
         location=hiteff.location,
         )
     if hiteff.material:

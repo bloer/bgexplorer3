@@ -4,7 +4,7 @@ from mongoengine.fields import (StringField, MapField, UUIDField, ListField,
 from mongoengine.errors import ValidationError
 from .verdoc import DynamicVersionedDocument
 from .fields import QuantityField, UncertainQuantityField, HistogramField
-from .common import units as unitreg, UnitMismatchError
+from .common import units as unitreg
 from .histogram import Histogram
 from . import settings
 from enum import Enum
@@ -16,25 +16,21 @@ dbalias = "hiteffdb"
 
 
 class NormMultiplier(Enum):
+    """ What a HitEfficiency is multiplied by: a source's rate times its
+    multiplier, see `emissionspec.Multiplier.norm`
+    """
     rate = 'rate'
     flux = 'flux'
     flux_per_sr = 'flux_per_sr'
-    none = 'none'
 
     @property
     def units(self):
-        unitstr = None
-        if self is NormMultiplier.rate:
-            unitstr = '1/s'
-        elif self is NormMultiplier.flux:
-            unitstr = '1/s/cm**2'
-        elif self is NormMultiplier.flux_per_sr:
-            unitstr = '1/s/cm**2/sr'
-        return unitreg(unitstr).u
+        return _NORM_UNITS[self]
 
-    def check(self, emissionrate):
-        """ check if emissionrate has the right units """
-        return self.units.is_compatible_with(emissionrate)
+
+_NORM_UNITS = {NormMultiplier.rate: unitreg.Unit('1/s'),
+               NormMultiplier.flux: unitreg.Unit('1/s/cm**2'),
+               NormMultiplier.flux_per_sr: unitreg.Unit('1/s/cm**2/sr')}
 
 
 class HitEfficiency(DynamicVersionedDocument):
@@ -50,9 +46,9 @@ class HitEfficiency(DynamicVersionedDocument):
        norm (NormMultiplier): To convert HitEfficiency to rates in detector,
                               multiply by emission rate in some units,
                               usually 'rate' (decays/s), but can be
-                              'flux' (primaries/s/cm**2)
-                              'flux_per_sr' (primaries/s/cm**2/sr) or
-                              'none' (HitEff is absolutely normalized)
+                              'flux' (primaries/s/cm**2) or
+                              'flux_per_sr' (primaries/s/cm**2/sr). Only
+                              matches sources whose multiplier has this norm
        scalars (dict): Single-value hit efficiencies (as asym. uncertainties
                       with units), such as integral counts over some ROI
        spectra (dict): histograms of hit efficiencies
@@ -154,30 +150,10 @@ class HitEfficiency(DynamicVersionedDocument):
         for roi in dbconfig.rois:
             roi.evaluate(self, store=True)
 
-    def check_sourceterms(self, dbconfig):
-        """ Make sure our scalars and ROIs can be calculated, in the display
-        units of `dbconfig`, for the emission rates of the SourceTerms we
-        apply to. Raise ValidationError if not. Without any SourceTerms this
-        has nothing to check, but `check_dbconfig` has already compared our
-        units to the display units.
-        """
-        # these imports are circular
-        from .sourceterm import hiteff_rate_units, _unit_checks_deferred
-        from .termcalc import TermCalculator
-        if _unit_checks_deferred.get() or not self.is_loaded('scalars'):
-            return
-        calculator = TermCalculator(dbconfig, strict=False)
-        try:
-            for rate_unit in hiteff_rate_units(self):
-                calculator.check_hiteff(self, rate_unit)
-        except UnitMismatchError as e:
-            raise ValidationError(str(e)) from e
-
     def clean(self):
         super().clean()
         dbconfig = settings.get_settings(self.active_version).hiteffdbconfig
         self.check_dbconfig(dbconfig)
-        self.check_sourceterms(dbconfig)
         if self.is_loaded('scalars'):
             self.scalars_keys = list(self.scalars)
         if self.is_loaded('spectra'):

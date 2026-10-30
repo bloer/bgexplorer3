@@ -46,19 +46,15 @@ class TermCalculator:
     HitEfficiencies `hiteffs` they refer to (see `load_hiteffs`). One
     calculator is meant for a batch of SourceTerms, and is not thread safe.
 
-    Raises UnitMismatchError if a SourceTerm's rate doesn't fit its hit
-    efficiencies' norm, or a result can't be shown in its display unit, or
-    has none. If not `strict`, results with no display unit are left out
-    rather than raising, for checks made before a new hit efficiency's units
-    are added to the settings.
+    SourceTerms only match hit efficiencies whose norm fits their rate, and
+    the units of both are checked when they are saved, so the results always
+    fit the display units. Raises UnitMismatchError if they don't, or have
+    none, which means data was written without being validated.
     """
-    def __init__(self, config, hiteffs: Optional[Dict] = None,
-                 strict: bool = True):
+    def __init__(self, config, hiteffs: Optional[Dict] = None):
         self.config = config
         self.hiteffs = hiteffs or {}
-        self.strict = strict
         self._scaled = {}
-        self._norms = {}
 
     def _hiteffs(self, sourceterm):
         """ The HitEfficiencies of `sourceterm` """
@@ -75,7 +71,7 @@ class TermCalculator:
     @staticmethod
     def _rate(sourceterm) -> Optional[Tuple]:
         """ The emission rate's magnitude and unit, or None """
-        rate = sourceterm.unweighted_rate
+        rate = sourceterm.source.standardized_rate
         if rate is None:
             return None
         m, unit = rate.m, rate.u
@@ -88,30 +84,10 @@ class TermCalculator:
             scale = scale * multiplier
         return m * scale, unit
 
-    @classmethod
-    def rate_unit(cls, sourceterm):
-        """ The unit of the sourceterm's emission rate, or None if it has none
-        """
-        rate = cls._rate(sourceterm)
-        return None if rate is None else rate[1]
-
     @staticmethod
     def _describe(hiteff) -> str:
         return (f"HitEfficiency {hiteff.id} ({hiteff.source} at "
                 f"{hiteff.location})")
-
-    def _check_norm(self, hiteff, rate_unit) -> None:
-        key = hiteff.norm, rate_unit
-        try:
-            ok = self._norms[key]
-        except KeyError:
-            ok = self._norms[key] = bool(
-                hiteff.norm.check(unitreg.Quantity(1., rate_unit)))
-        if not ok:
-            raise UnitMismatchError(
-                f"{self._describe(hiteff)} is normalized per "
-                f"{hiteff.norm.units}, but the emission rate is in "
-                f"{rate_unit}")
 
     def _factor(self, hiteff, key: str, unit, display) -> float:
         """ The factor to convert `key` of `hiteff`, which has `unit` once
@@ -138,15 +114,12 @@ class TermCalculator:
             return self._scaled[cache_key][1]
         except KeyError:
             pass
-        self._check_norm(hiteff, rate_unit)
         scaled = []
         for key, val in hiteff.all_scalars.items():
             if val is None:
                 continue
             m, unit = _split(val)
             display = self.config.scalar_unit(key)
-            if display is None and not self.strict:
-                continue
             factor = self._factor(hiteff, key, unit * rate_unit, display)
             scaled.append((key, m if factor == 1. else m * factor))
         # the id is only unique while hiteff is alive
@@ -162,7 +135,6 @@ class TermCalculator:
             return self._scaled[cache_key][1]
         except KeyError:
             pass
-        self._check_norm(hiteff, rate_unit)
         scaled = []
         for key, val in hiteff.spectra.items():
             if not isinstance(val, Histogram):
@@ -175,26 +147,6 @@ class TermCalculator:
                 val.bin_edges)))
         self._scaled[cache_key] = (hiteff, scaled)
         return scaled
-
-    def check(self, sourceterm, hiteffs=None) -> None:
-        """ Raise UnitMismatchError if any of the sourceterm's scalars or ROIs
-        can't be calculated, with the given `hiteffs` instead of its own. The
-        spectra's units are checked against the display units when they are
-        saved, so only their norm is checked
-        """
-        rate_unit = self.rate_unit(sourceterm)
-        if rate_unit is None:
-            return
-        if hiteffs is None:
-            hiteffs = self._hiteffs(sourceterm)
-        for hiteff in hiteffs:
-            self.check_hiteff(hiteff, rate_unit)
-
-    def check_hiteff(self, hiteff, rate_unit) -> None:
-        """ Raise UnitMismatchError if the scalars and ROIs of `hiteff` can't
-        be calculated for emission rates in `rate_unit`
-        """
-        self._scaled_scalars(hiteff, rate_unit)
 
     def scalars(self, sourceterm) -> dict:
         """ The sourceterm's scalars and ROIs, summed over its hit

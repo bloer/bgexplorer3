@@ -10,6 +10,9 @@ from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
                                             Multiplier)
 from bgexplorer.models.hiteff import HitEfficiency, NormMultiplier
 from bgexplorer.models.isotope import concentration_to_rate
+from bgexplorer.models.settings import get_settings
+from bgexplorer.models.sourceterm import SourceTerm, load_hiteffs
+from bgexplorer.models.termcalc import TermCalculator
 from bgexplorer.models import versioncontrol as vc
 from tests.test_app_components import AppTestCase
 
@@ -168,3 +171,114 @@ class TestAcceptedAtClean(UnitTestCase):
         spec.save()
         self.assertEqual([s.multiplier for s in spec.reload().sources],
                          [Multiplier.flux, Multiplier.mass])
+
+
+class TestHitEfficiencyMatching(UnitTestCase):
+    """ SourceTerms only match hit efficiencies whose norm fits their
+    source's multiplier
+    """
+    def setUp(self):
+        super().setUp()
+        for norm, scalars in ((NormMultiplier.rate, RATE),
+                              (NormMultiplier.flux, FLUX),
+                              (NormMultiplier.flux_per_sr, FLUX_SR)):
+            HitEfficiency(source='U238', location='c1', norm=norm,
+                          scalars=scalars).save()
+
+    def term(self, rate, multiplier=None, location='c1', **kwargs):
+        spec = EmissionSpec(name='e', sources=[
+            self.source(rate, multiplier=multiplier)]).save()
+        self.component = Component(name='c', location=location, specs=[spec],
+                                   **kwargs).save()
+        # not the U235 and Ra226 generated from it
+        return SourceTerm.objects.get(source__name='U238')
+
+    def norms(self, term):
+        return {h.norm for h in term.reload().hiteffs}
+
+    def value(self, term):
+        """ The term's v1 in dru """
+        config = get_settings('main').hiteffdbconfig
+        values = TermCalculator(config, load_hiteffs([term])).scalars(term)
+        unit = config.scalar_unit('v1')
+        return (values['v1'] * unit).to('dru').m.mode
+
+    def assertMatches(self, term, norms, value=None):
+        self.assertEqual(self.norms(term), set(norms))
+        self.assertEqual(self.norms(term),
+                         {h.norm for h in term.hiteffs_query})
+        if value is not None:
+            self.assertAlmostEqual(self.value(term), value)
+
+    def test_mass(self):
+        term = self.term('10 mBq/kg', mass='2 kg')
+        self.assertMatches(term, [NormMultiplier.rate], 0.1 * 10 * 2)
+
+    def test_concentration(self):
+        term = self.term('10 ppb', mass='2 kg')
+        rate = concentration_to_rate('U238', 10e-9).to('mBq/kg').m
+        self.assertMatches(term, [NormMultiplier.rate], 0.1 * rate * 2)
+
+    def test_isotope_mass_per_piece(self):
+        term = self.term('1 ug')
+        rate = concentration_to_rate('U238', units('1 ug')).to('mBq').m
+        self.assertMatches(term, [NormMultiplier.rate], 0.1 * rate)
+
+    def test_inner_surface(self):
+        term = self.term('10 mBq/m**2', Multiplier.inner_surface,
+                         inner_surface_area='3 m**2',
+                         outer_surface_area='5 m**2')
+        self.assertMatches(term, [NormMultiplier.rate], 0.1 * 10 * 3)
+
+    def test_flux(self):
+        term = self.term('2 1/cm**2/s', Multiplier.flux, mass='2 kg')
+        self.assertMatches(term, [NormMultiplier.flux], 0.1 * 2)
+
+    def test_flux_per_sr(self):
+        term = self.term('2 1/cm**2/s/sr', Multiplier.flux_per_sr)
+        self.assertMatches(term, [NormMultiplier.flux_per_sr], 0.1 * 2)
+
+    def test_flux_without_multiplier(self):
+        """ is taken as a surface rate """
+        term = self.term('2 1/cm**2/s', outer_surface_area='1 cm**2')
+        self.assertEqual(term.source.multiplier, Multiplier.surface)
+        self.assertMatches(term, [NormMultiplier.rate], 0.1 * 2e3)
+
+    def test_no_rate(self):
+        term = self.term(None)
+        self.assertMatches(term, [])
+        self.assertEqual(term.hiteffs_query.count(), 0)
+
+    def test_new_hiteff(self):
+        """ A hit efficiency saved after the term is only added to it if its
+        norm fits
+        """
+        term = self.term('10 mBq/kg', location='c2', mass='2 kg')
+        self.assertMatches(term, [])
+        HitEfficiency(source='U238', location='c2', norm=NormMultiplier.flux,
+                      scalars=FLUX).save()
+        self.assertMatches(term, [])
+        rate = HitEfficiency(source='U238', location='c2',
+                             scalars=RATE).save()
+        self.assertMatches(term, [NormMultiplier.rate], 2)
+        # changing the norm removes it
+        rate.norm = NormMultiplier.flux
+        rate.scalars = {k: HitEfficiency.scalars.field.to_python(v)
+                        for k, v in FLUX.items()}
+        rate.save()
+        self.assertMatches(term, [])
+
+    def test_change_multiplier(self):
+        """ Changing a source's multiplier replaces its hit efficiencies,
+        even with none
+        """
+        term = self.term('10 mBq/m**2', outer_surface_area='1 m**2')
+        self.assertMatches(term, [NormMultiplier.rate], 1)
+        spec = EmissionSpec.objects.get()
+        spec.sources[0].multiplier = Multiplier.flux
+        spec.sources[0].rate = '2 1/cm**2/s'
+        spec.save()
+        self.assertMatches(term, [NormMultiplier.flux], 0.2)
+        spec.sources[0].rate = None
+        spec.save()
+        self.assertMatches(term, [])

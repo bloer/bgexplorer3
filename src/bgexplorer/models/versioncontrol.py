@@ -3,8 +3,7 @@ from .component import Component, Assembly
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .cosmogenic import ActivatedMaterial
-from .sourceterm import (SourceTerm, CalculatedResults, check_version_units,
-                         unit_checks_deferred)
+from .sourceterm import SourceTerm, CalculatedResults, check_version_units
 from .settings import VersionSettings, get_settings, touch, hold_locks
 from .verdoc import (VersionedDocument, ReadOnlyVersionError, check_unlocked,
                      check_writable, strip_identity, current_user_name)
@@ -521,8 +520,7 @@ def merge_version(source: str, target: str,
                 # some hit efficiencies' ROIs were evaluated with the other
                 # version's settings
                 _update_rois(target)
-            with unit_checks_deferred():
-                _update_sourceterms(target, plan)
+            _update_sourceterms(target, plan)
             # the merged documents were not validated together
             plan.unit_problems = check_version_units(target)
         except Exception as e:

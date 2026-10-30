@@ -9,6 +9,7 @@ from .common import units, validate_unique_ids
 from .isotope import (concentration_to_rate, rate_to_concentration,
                       compare_source_names, is_radioactive)
 from .fields import UncertainQuantityField, AttachmentsField
+from .hiteff import NormMultiplier
 from .verdoc import VersionedDocument, VersionedReferenceField
 from . import settings
 from collections.abc import Mapping
@@ -76,6 +77,21 @@ class Multiplier(Enum):
         except ValidationError:
             return False
         return True
+
+    @property
+    def norm(self) -> NormMultiplier:
+        """ The norm of the HitEfficiencies that our rates, times our value,
+        are multiplied by
+        """
+        return {Multiplier.flux: NormMultiplier.flux,
+                Multiplier.flux_per_sr: NormMultiplier.flux_per_sr,
+                }.get(self, NormMultiplier.rate)
+
+    @classmethod
+    def for_norm(cls, norm: NormMultiplier) -> list:
+        """ The multipliers of the sources HitEfficiencies with `norm` fit
+        """
+        return [m for m in cls if m.norm is norm]
 
     def getvalue(self, component) -> Union[float, units.Quantity]:
         """ Extract the numerical value of the multipler from component """
