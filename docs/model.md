@@ -57,7 +57,7 @@ The `1.2(3)` notation and negative values aren't supported yet.
 | Field | Meaning |
 |-------|---------|
 | Name | required; can't contain `/` |
-| Description, notes | free text |
+| Description, comment | free text |
 | Material | free text, e.g. `copper`. Used to match hit efficiencies that give a material (for e.g. (alpha,n) neutron yields), and to group results |
 | Mass, volume, inner and outer surface area, length, width, height | geometry, defaulting to 0. The surface area used for rates is inner + outer by default |
 | Hit Efficiency Location | the `location` to match in the hit efficiency database; blank uses the component's name if not given in a parent Placement. Autocompletes from existing locations |
