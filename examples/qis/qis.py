@@ -158,7 +158,7 @@ def populate_example(version_tag='examples-qis', clean: bool = False,
     Component.select_version(version_tag).get(name='Environment')\
         .add_owned_spec(EmissionSpec(
             name='Environmental gammas', category='environment',
-            multiplier='none', sources=dict(Gammaflux='7.02095 1/cm**2/s')))
+            multiplier='flux', sources=dict(Gammaflux='7.02095 1/cm**2/s')))
 
     def placements(children):
         return [Placement(component=Component.select_version(version_tag).get(name=child),

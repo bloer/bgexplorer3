@@ -44,7 +44,8 @@ like this:
 
 Any compatible unit works (`200 g` for a mass in kg, `5 cm**2` for an area).
 Write powers as `**`, e.g. `Bq/m**2`. `ppm`, `ppb`, `ppt` and `ppq` are
-available and automatically converted to `Bq/kg` based on the isotope.
+available and automatically converted to `Bq/kg` based on the isotope (see
+[Rate units and multipliers](#rate-units-and-multipliers)).
 The original string is retained for all display purposes rather than the
 internal floating point representation.
 
@@ -126,28 +127,39 @@ optionally its own category, multiplier, particle, spectrum and comment.
 ### Rate units and multipliers
 
 A source's rate is multiplied by a property of the component, chosen from the
-rate's units unless a multiplier is set:
+rate's units unless a multiplier is set on the source or its spec:
 
-| Multiplier | Rate units |
-|------------|------------|
-| mass | `Bq/kg`; concentrations like `ppb` |
-| volume | `Bq/m**3` |
-| surface (inner + outer), inner surface, outer surface | `Bq/m**2` (`surface` unless chosen) |
-| length | `Bq/m` |
-| none | `Bq`, or fluxes `1/cm**2/s`, `1/cm**2/s/sr` |
+| Multiplier | Rate units | Times | Hit efficiency norm |
+|------------|------------|-------|---------------------|
+| mass | `Bq/kg`; concentrations like `ppb` | mass | rate |
+| volume | `Bq/m**3` | volume | rate |
+| surface (inner + outer), inner surface, outer surface | `Bq/m**2` (`surface` unless chosen) | that area | rate |
+| length | `Bq/m` | length | rate |
+| per piece | `Bq` | 1 | rate |
+| flux | `1/cm**2/s` | 1 | flux |
+| flux per sr | `1/cm**2/s/sr` | 1 | flux_per_sr |
 
-Use the spec's multiplier to choose e.g. the inner surface for all its
-surface sources at once. Fluxes are primarily used to represent the ambient
-laboratory backgrounds, and must match the units of the corresponding hit efficiency.
-E.g., if the result unit is `counts/kg/keV/day` and the ambient gamma flux
-measured in `1/cm**2/s/sr`, the hit efficiency must be normalized to
+The spec's multiplier is used for every source without its own, e.g. to choose
+the inner surface for all its surface sources at once. A rate that doesn't fit
+its multiplier is rejected when the spec is saved.
+
+**Fluxes** are primarily used to represent the ambient laboratory backgrounds.
+They have the same dimensions as surface rates (and steradians are
+dimensionless), so a flux source must set the `flux` or `flux per sr`
+multiplier; otherwise it is taken as a surface rate. A source only matches hit
+efficiencies with the norm of its multiplier, which must be normalized so that
+the value times the norm has the result unit. E.g., if the result unit is
+`counts/kg/keV/day` and the ambient gamma flux is measured in `1/cm**2/s/sr`,
+the hit efficiency must be normalized per `flux_per_sr`, in
 `(cm**2 sr)/(kg keV)`.
 
-**Concentrations** (`ppb` etc., or a bare number as a fraction, so `1e-9` is
-1 ppb) need the source's name to be an isotope. They are converted to
-activities with the isotope's half-life and molar mass. For potassium, the
-natural abundance of K-40 is applied: `K`, `natK`, `K-nat` and `Knat` all mean
-natural potassium.
+**Masses of an isotope** can be given instead of its activity: concentrations
+(`ppb` etc., or a bare number as a fraction, so `1e-9` is 1 ppb) for the mass
+multiplier, and likewise `g/m**3`, `g/m**2`, `g/m` or `g` for the others. The
+source's name must be a radioactive isotope. They are converted to activities
+with the isotope's half-life and molar mass. For potassium, the natural
+abundance of K-40 is applied: `K`, `natK`, `K-nat` and `Knat` all mean natural
+potassium.
 
 ### Generated sources
 
@@ -251,7 +263,7 @@ edit that.
 | Source | the simulated source, e.g. `U238`; matched exactly to source names |
 | Location | the simulated volume, matched to SourceTerm locations |
 | Material | optional; if set, only components of this material match |
-| Normalization | `rate` (per decay per second, the default), `flux` (per 1/s/cm²), `flux_per_sr`, or `none` (absolutely normalized) |
+| Normalization | `rate` (per decay per second, the default), `flux` (per 1/s/cm²) or `flux_per_sr` (per 1/s/cm²/sr); only sources with the matching multiplier use it |
 | Scalars | named values with units, e.g. counts per decay in an energy window |
 | Spectra | histograms as numpy binary, imported on the edit page |
 | Simulation details | number of primaries, primary particle, spectrum and yield, bias weight, livetime, version, files, date… |
