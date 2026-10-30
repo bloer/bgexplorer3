@@ -13,8 +13,9 @@ from bgexplorer.models.common import (DimensionalityError, UnitMismatchError,
                                       units as unitreg)
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import get_settings, HitEffConfig
-from bgexplorer.models.sourceterm import CalculatedResults, find_sourceterms
+from bgexplorer.models.sourceterm import find_sourceterms
 from bgexplorer.models import versioncontrol as vc
+from tests import results
 from tests.test_app_components import AppTestCase
 
 
@@ -114,8 +115,7 @@ class TestDashboard(AppTestCase):
         self.p_c1, self.p_c2 = (str(p.id) for p in self.a1.children)
 
     def total(self, obj, relativeto=None):
-        return CalculatedResults.for_object(obj, relativeto, save=False,
-                                            cache=False).scalars['v1']
+        return results.for_object(obj, relativeto).scalars['v1']
 
     def assertSame(self, value, expected):
         value = value.to(expected.u)
@@ -211,8 +211,7 @@ class TestDashboard(AppTestCase):
         result = dashboard(self.a2, 'v1', f)
         sts = [st for st in find_sourceterms(self.a2)
                if st.source.name == 'Th232' and st.component.name != 'c3']
-        expected = CalculatedResults.from_sourceterms(
-            sts, allowcache=False, save=False).scalars['v1']
+        expected = results.from_sourceterms(sts).scalars['v1']
         self.assertSame(result['total'], expected)
         # which is more uncertain than adding them independently
         rows = {row['label']: row['value']

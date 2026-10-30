@@ -9,8 +9,8 @@ from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
 from bgexplorer.models.exposure import RadonExposure
 from bgexplorer.models.fields import get_fromstr
 from bgexplorer.models.hiteff import HitEfficiency
-from bgexplorer.models.sourceterm import CalculatedResults
 from bgexplorer.models import versioncontrol as vc
+from tests import results
 from tests.test_app_components import AppTestCase
 
 
@@ -86,9 +86,7 @@ class TestEmissionSpecPages(AppTestCase):
 
     def total(self, version='b'):
         c1 = Component.select_version(version).get(name='c1')
-        results = CalculatedResults.for_object(c1, save=False, spectra=False,
-                                               cache=False)
-        return str(results.scalars['v1'])
+        return str(results.for_object(c1, spectra=False).scalars['v1'])
 
     def test_new(self):
         url = self.url('emissionspec.edit', 'b')

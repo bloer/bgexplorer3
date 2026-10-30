@@ -7,8 +7,10 @@ from bgexplorer.models.component import (Component, Placement, Assembly,
                                          ComponentSpec, LocationMode)
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.assay import Assay
-from bgexplorer.models.sourceterm import (SourceTerm, CalculatedResults,
-                                          ResultsCache, clear_results_cache)
+from bgexplorer.models.budget import dashboard
+from bgexplorer.models.termcalc import TermCalculator
+from bgexplorer.models.sourceterm import (SourceTerm, ResultsCache,
+                                          clear_results_cache)
 from bgexplorer.models.settings import VersionSettings, get_settings
 from bgexplorer.models import signals
 from bgexplorer.models.hiteff import HitEfficiency
@@ -16,6 +18,7 @@ from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.isotope import concentration_to_rate
 import numpy as np
+from tests import results
 from tests.dbutil import connect_test_db
 
 
@@ -38,7 +41,6 @@ class TestSourceTerm(unittest.TestCase):
         Assembly.drop_collection()
         EmissionSpec.drop_collection()
         SourceTerm.drop_collection()
-        CalculatedResults.drop_collection()
         HitEfficiency.drop_collection()
 
     def tearDown(self):
@@ -320,7 +322,7 @@ class TestSourceTerm(unittest.TestCase):
 
         # check the results of individual calculations
         for st in SourceTerm.objects(hiteffs__size=1):
-            cr = CalculatedResults.from_sourceterm(st).save()
+            cr = results.from_sourceterms([st])
             val = cr.scalars['v1'].to('dru')
             if st.assemblyPathStr == 'c1' and st.source.name == 'Th232':
                 self.assertAlmostEqual(val.mode, 2)
@@ -362,40 +364,16 @@ class TestSourceTerm(unittest.TestCase):
         # Co60
         20 +- 0.2 mBq/kg * (2 * 2kg * 0.3 +-0.02 dru/Bq)
         """
-        cr = CalculatedResults.for_component(a1).save()
+        cr = results.for_object(a1)
         val = cr.scalars['v1'].to('dru')
         self.assertAlmostEqual(val.mode, 101)
         self.assertAlmostEqual(val.s0, 10.903300234332724)
         self.assertAlmostEqual(val.s1, 13.212474184422296)
 
-        # for_tree calculates every row at once, same as one at a time
-        tree = CalculatedResults.for_tree(a1)
-        self.assertEqual(set(tree), {a1.original_id, c1.original_id,
-                                     c2.original_id, c3.original_id})
-        for obj in (a1, c1, c2, c3):
-            expected = CalculatedResults.for_object(obj, relativeto=a1,
-                                                    save=False)
-            got = tree[obj.original_id].scalars['v1'].to('dru')
-            expected = expected.scalars['v1'].to('dru')
-            self.assertAlmostEqual(got.mode, expected.mode)
-            self.assertAlmostEqual(got.s0, expected.s0)
-            self.assertAlmostEqual(got.s1, expected.s1)
         # a separately loaded root is still the root
         root = Assembly.objects.get(id=a1.id)
-        cr = CalculatedResults.for_object(root, relativeto=a1, save=False)
+        cr = results.for_object(root, relativeto=a1)
         self.assertAlmostEqual(cr.scalars['v1'].to('dru').mode, 101)
-
-        # scalar-only results are never cached
-        CalculatedResults.drop_collection()
-        CalculatedResults.for_object(a1, save=True, spectra=False)
-        self.assertEqual(CalculatedResults.objects.count(), 0)
-
-        # nothing is stored unless asked
-        CalculatedResults.for_object(a1, cache=False)
-        self.assertEqual(CalculatedResults.objects.count(), 0)
-        CalculatedResults.for_object(a1, save=True, cache=False)
-        self.assertEqual(CalculatedResults.objects.count(), 1)
-        CalculatedResults.drop_collection()
 
         # test that hiteffs are removed appropriately
         h1.location = 'somewhere else'
@@ -414,8 +392,8 @@ class TestSourceTerm(unittest.TestCase):
                        specs=[spec_of(EmissionSource(name='U238', rate='5 mBq/kg'))]).save()
         c2 = Component(name='c2', mass='8 kg', location='c1',
                        specs=[spec_of(EmissionSource(name='U238', rate='5 microBq/kg'))]).save()
-        r1 = CalculatedResults.for_component(c1)
-        r2 = CalculatedResults.for_component(c2)
+        r1 = results.for_object(c1)
+        r2 = results.for_object(c2)
 
         # the settings may add other sources, which have no hiteffs here
         def u238(result):
@@ -443,31 +421,34 @@ class TestSourceTerm(unittest.TestCase):
             EmissionSource(name="Co60", rate="10 +- 1 mBq/kg"))]).save()
         a = Assembly(name="a", components=[c]).save()
 
-        def results(**kwargs):
-            obj = CalculatedResults.for_object(c, **kwargs)
-            tree = CalculatedResults.for_tree(a, **kwargs)[c.original_id]
-            return [r.scalars['v1'].to('dru').mode for r in (obj, tree)]
+        def totals():
+            return [dashboard(c, 'v1', relativeto=rel)['total'].to('dru').m.mode
+                    for rel in (None, a)]
+
+        def calculations():
+            """ the totals, and how many SourceTerms had to be calculated """
+            with mock.patch.object(TermCalculator, 'scalars', autospec=True,
+                                   side_effect=TermCalculator.scalars
+                                   ) as calculate:
+                return totals(), calculate.call_count
 
         assert_allclose = np.testing.assert_allclose
-        assert_allclose(results(), [2, 2])
+        values, count = calculations()
+        assert_allclose(values, [2, 2])
+        self.assertGreater(count, 0)
         # repeated calls don't calculate
-        with mock.patch.object(CalculatedResults, '_calculate',
-                               side_effect=AssertionError("calculated")):
-            assert_allclose(results(), [2, 2])
-            with self.assertRaises(AssertionError):
-                results(cache=False)
+        self.assertEqual(calculations(), (values, 0))
 
         # editing a component changes the result
         c.mass = "4 kg"
         c.save()
-        assert_allclose(results(), [4, 4])
+        assert_allclose(totals(), [4, 4])
         # so does changing hiteff values, which doesn't touch sourceterms
         h.scalars['v1'] = AsymmetricUncertainty(0.2, 0.01)*units('dru/mBq')
         h.save()
-        # for_object would find the old result in the database if it
-        # weren't cleared
-        assert_allclose(results(), [8, 8])
-        assert_allclose(results(cache=False), [8, 8])
+        assert_allclose(totals(), [8, 8])
+        clear_results_cache()
+        assert_allclose(totals(), [8, 8])
 
         # cloned settings get a new token
         settings = get_settings()
@@ -603,7 +584,7 @@ class TestLocationOverride(unittest.TestCase):
 
     def setUp(self):
         for cls in (Component, Assembly, EmissionSpec, SourceTerm,
-                    CalculatedResults, HitEfficiency):
+                    HitEfficiency):
             cls.drop_collection()
         eff = AsymmetricUncertainty(0.01, 0.001) * units('dru/mBq')
         for source in ('U238', 'Pb210'):

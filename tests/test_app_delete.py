@@ -2,8 +2,9 @@
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
-from bgexplorer.models.sourceterm import SourceTerm, CalculatedResults
+from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models import versioncontrol as vc
+from tests import results
 from tests.test_app_components import AppTestCase
 
 
@@ -27,7 +28,6 @@ class TestDelete(AppTestCase):
             Placement(component=self.c2)]).save()
         vc.create_version('b', 'main')
         vc.create_tag('t', 'main')
-        # fill the result caches, which deleting must not leave stale
         self.before = {name: self.total(name, 'b')
                        for name in ('a1', 'c1', 'c2')}
         self.assertEqual(self.before['c1'], '2.0+/-0.3 dru')
@@ -35,10 +35,10 @@ class TestDelete(AppTestCase):
     def total(self, name, version='b'):
         """ The v1 result of component `name`, or None """
         obj = Component.select_version(version).get(name=name)
-        results = CalculatedResults.for_object(obj, spectra=False)
-        if results is None or 'v1' not in results.scalars:
+        found = results.for_object(obj, spectra=False)
+        if found is None or 'v1' not in found.scalars:
             return None
-        return str(results.scalars['v1'])
+        return str(found.scalars['v1'])
 
     def delete(self, obj, version='b'):
         url = self.url(f'{obj._class_name.split(".")[0].lower()}.delete',

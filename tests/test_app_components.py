@@ -11,7 +11,7 @@ from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models import versioncontrol as vc
 from bgexplorer.models.settings import VersionSettings
-from bgexplorer.models.sourceterm import SourceTerm, CalculatedResults
+from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.cosmogenic import ActivatedMaterial
 from tests.dbutil import TEST_MONGODB_URI
@@ -37,7 +37,7 @@ class AppTestCase(unittest.TestCase):
 
     def setUp(self):
         for cls in (VersionSettings, Component, EmissionSpec, SourceTerm,
-                    CalculatedResults, HitEfficiency, ActivatedMaterial):
+                    HitEfficiency, ActivatedMaterial):
             cls.drop_collection()
         self.client = self.app.test_client()
 

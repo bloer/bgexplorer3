@@ -181,11 +181,9 @@ of, by the ids of their leaves, with the leaves' values. A loaded value is
 then correlated with everything else sharing its leaves:
 
 - computed source rates (activations, radon, generated sources) keep theirs
-  inline;
-- stored results (`CalculatedResults`) keep theirs in separate fields, so
-  that stored results can be combined as if they were calculated together.
-  Nothing stores results by default now, since the budget pages sum in
-  memory, so this is legacy machinery kept for possible on-disk caching.
+  inline.
+
+Budget results aren't stored: the budget pages sum in memory.
 
 Expressions are much bigger than the values: a spectrum's expression includes
 each hit efficiency spectrum it was made from. Results that are only shown,
@@ -195,7 +193,7 @@ raises `CorrelationsNotLoaded`, rather than wrongly treating them as
 independent.
 
 Stored leaves are repeated in each expression that uses them, so the largest
-stored results grow with the number of hit efficiency spectra they include,
+stored values grow with the number of hit efficiency spectra they include,
 towards MongoDB's 16 MB document limit for big models. `LeafStore` is the
 interface for keeping leaves in one place instead; so far there is only an
 in-memory implementation.

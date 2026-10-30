@@ -5,7 +5,7 @@ import logging
 from .component import Component, Assembly
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
-from .sourceterm import SourceTerm, CalculatedResults, clear_results_cache
+from .sourceterm import SourceTerm, clear_results_cache
 from .settings import VersionSettings, touch
 from .verdoc import check_writable
 from . import versioncontrol as vc
@@ -32,7 +32,7 @@ def database_stats() -> dict:
                                     counts=vc.version_summary(v.version_tag))
                 for v in vc.list_versions()}
     collections = {cls.__name__: collection_size(cls)
-                   for cls in VERSIONED_CLASSES + (CalculatedResults,)}
+                   for cls in VERSIONED_CLASSES}
     return dict(versions=versions, collections=collections)
 
 
@@ -122,8 +122,10 @@ def delete_orphans(orphans: Orphans = None) -> int:
 
 
 def clear_calculation_cache() -> None:
-    """ Drop all stored and in-memory calculation results """
-    CalculatedResults.drop_collection()
+    """ Empty the in-memory calculation caches, and drop the collection of
+    results that older versions stored in the database
+    """
+    SourceTerm._get_db().drop_collection('calculated_results')
     clear_results_cache()
 
 

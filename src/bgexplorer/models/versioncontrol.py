@@ -3,8 +3,7 @@ from .component import Component, Assembly
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .cosmogenic import ActivatedMaterial
-from .sourceterm import (SourceTerm, CalculatedResults, check_version_units,
-                         unit_checks_deferred)
+from .sourceterm import SourceTerm, check_version_units, unit_checks_deferred
 from .settings import VersionSettings, get_settings, touch, hold_locks
 from .verdoc import (VersionedDocument, ReadOnlyVersionError, check_unlocked,
                      check_writable, strip_identity, current_user_name)
@@ -440,13 +439,6 @@ def _update_rois(version_tag: str) -> None:
             hiteff.update(set__rois=values)
 
 
-def _clear_results(version_tag: str) -> None:
-    """ Delete the stored results calculated from a version's SourceTerms """
-    CalculatedResults.objects(
-        sources__in=list(SourceTerm.select_version(version_tag).scalar('id'))
-    ).delete()
-
-
 def _update_sourceterms(target: str, plan: MergePlan) -> None:
     """ Update the SourceTerms of `target` that depend on the documents a
     merge adopted, as if each had been saved there. New settings can change
@@ -510,7 +502,6 @@ def merge_version(source: str, target: str,
         _create_version(backup, target, False,
                         f"Backup of '{target}' before merging '{source}'")
         try:
-            _clear_results(target)
             for cls_plan in plan.classes:
                 _adopt_copies(cls_plan.cls, target,
                               [i.right_id for i in cls_plan.adopted])

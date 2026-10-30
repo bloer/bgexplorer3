@@ -10,9 +10,9 @@ from bgexplorer.models.common import units
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.histogram import Histogram
-from bgexplorer.models.sourceterm import CalculatedResults
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models import versioncontrol as vc
+from tests import results
 from tests.test_app_components import AppTestCase
 
 
@@ -117,8 +117,8 @@ class TestPlots(AppTestCase):
         result = spectrum_breakdown(self.a2, 's1')
         # c1's Th232 and K40 have it, c2 doesn't
         self.assertEqual((result['count'], result['ntotal']), (2, 2))
-        self.assertSameHist(result['total'], CalculatedResults.for_object(
-            self.a2, save=False, cache=False).spectra['s1'])
+        self.assertSameHist(result['total'], results.for_object(
+            self.a2).spectra['s1'])
         self.assertEqual(result['curves'], [])
         self.assertIsNone(result['other'])
         self.assertIsNone(spectrum_breakdown(self.a2, 'nope')['total'])

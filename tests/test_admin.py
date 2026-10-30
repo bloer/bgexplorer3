@@ -5,9 +5,10 @@ from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import ApplicationSettings, VersionSettings
-from bgexplorer.models.sourceterm import SourceTerm, CalculatedResults
+from bgexplorer.models.sourceterm import SourceTerm, _cached
 from bgexplorer.models import versioncontrol as vc
 from bgexplorer.models import maintenance
+from tests import results
 from tests.test_app_components import AppTestCase
 
 PNG = b'\x89PNG\r\n\x1a\n' + b'\0' * 16
@@ -35,9 +36,8 @@ class TestAdmin(AppTestCase):
 
     def total(self, version='main'):
         a1 = Assembly.select_version(version).get(name='a1')
-        results = CalculatedResults.for_object(a1, save=False, spectra=False,
-                                               cache=False)
-        return {k: str(v) for k, v in results.scalars.items()}
+        return {k: str(v) for k, v in
+                results.for_object(a1, spectra=False).scalars.items()}
 
     def test_pages(self):
         for endpoint in ('admin.index', 'admin.settings',
@@ -101,11 +101,14 @@ class TestAdmin(AppTestCase):
     def test_clear_cache(self):
         before = self.total()
         self.assertIn('v1', before)
-        CalculatedResults.for_object(self.a1, save=True)
-        self.assertGreater(CalculatedResults.objects.count(), 0)
+        # results that older versions stored in the database
+        legacy = SourceTerm._get_db()['calculated_results']
+        legacy.insert_one({'sources': []})
+        self.assertEqual(_cached(('key',), lambda: 'value'), 'value')
         response = self.client.post(self.url('admin.clear_cache'))
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(CalculatedResults.objects.count(), 0)
+        self.assertEqual(legacy.count_documents({}), 0)
+        self.assertEqual(_cached(('key',), lambda: 'new'), 'new')
         self.assertEqual(self.total(), before)
 
     def test_rebuild(self):
@@ -180,7 +183,7 @@ class TestAdmin(AppTestCase):
                          {'total': 3, 'unique': 0})
         self.assertFalse(stats['versions']['t']['editable'])
         self.assertEqual(stats['collections']['Component']['count'], 3)
-        self.assertIn('CalculatedResults', stats['collections'])
+        self.assertIn('SourceTerm', stats['collections'])
 
     def test_version_named_admin(self):
         """ version routes are under /explore, so can't collide """

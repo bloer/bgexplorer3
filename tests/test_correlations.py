@@ -1,24 +1,19 @@
 """ Correlations that survive storing and loading values """
 import unittest
 from mongoengine import disconnect
-from bgexplorer.models.asymmetric import (AsymmetricUncertainty,
-                                          CorrelationsNotLoaded)
-from bgexplorer.models.component import Component, Assembly
+from bgexplorer.models.asymmetric import AsymmetricUncertainty
+from bgexplorer.models.component import Component
 from bgexplorer.models.cosmogenic import (ActivatedMaterial,
                                           CosmogenicActivation,
                                           ActivationPeriod)
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import VersionSettings
-from bgexplorer.models.sourceterm import (SourceTerm, CalculatedResults,
-                                          clear_results_cache)
+from bgexplorer.models.sourceterm import SourceTerm, clear_results_cache
 from bgexplorer.models.common import units
 from bgexplorer.models import versioncontrol as vc
 from tests.dbutil import connect_test_db
-from bgexplorer.models.histogram import Histogram
 from tests.test_cosmogenic import copper
-import numpy as np
-from numpy.testing import assert_allclose
 
 
 def total(quantities):
@@ -39,7 +34,7 @@ class TestStoredCorrelations(unittest.TestCase):
 
     def setUp(self):
         for cls in (VersionSettings, Component, EmissionSpec, SourceTerm,
-                    CalculatedResults, HitEfficiency, ActivatedMaterial):
+                    HitEfficiency, ActivatedMaterial):
             cls.drop_collection()
         clear_results_cache()
         vc.create_version('main')
@@ -96,50 +91,6 @@ class TestStoredCorrelations(unittest.TestCase):
         for spec in CosmogenicActivation.objects:
             spec.save()
         self.assertAlmostEqual(total(co60()).to('Bq').m.s0, expected)
-
-    def test_stored_results(self):
-        """ stored results combine as if calculated together """
-        HitEfficiency(source='K40', location='loc', scalars=dict(
-            v1='0.1 +- 0.01 dru/mBq'), spectra=dict(s1=Histogram(
-                AsymmetricUncertainty(np.arange(5.), np.ones(5)) *
-                units('dru/mBq'), np.arange(6.) * units.keV))).save()
-        assay = EmissionSpec(name='assay', sources=dict(
-            K40='10 +- 1 mBq/kg')).save()
-        c1 = Component(name='c1', mass='1 kg', location='loc',
-                       specs=[assay]).save()
-        c2 = Component(name='c2', mass='3 kg', location='loc',
-                       specs=[assay]).save()
-        a1 = Assembly(name='a1', components=[c1, c2]).save()
-        direct = CalculatedResults.for_object(a1, save=False, cache=False)
-
-        def stored(component):
-            CalculatedResults.for_object(component, save=True, cache=False)
-            sts = list(SourceTerm.objects(assemblyRoot=component))
-            return CalculatedResults.from_db(sts)
-        parts = stored(c1) + stored(c2)
-        for key in ('v1',):
-            want, got = (r.scalars[key].to('dru').m for r in (direct, parts))
-            self.assertAlmostEqual(got.mode, want.mode)
-            self.assertAlmostEqual(got.s0, want.s0)
-            self.assertAlmostEqual(got.s1, want.s1)
-        want, got = (r.spectra['s1'].hist.to('dru').m
-                     for r in (direct, parts))
-        assert_allclose(got.mode, want.mode)
-        assert_allclose(got.s0, want.s0)
-        # the assay and hiteff are shared, so the errors add linearly
-        each = [stored(c).scalars['v1'].to('dru').m for c in (c1, c2)]
-        self.assertGreater(parts.scalars['v1'].to('dru').m.s0,
-                           (each[0].s0**2 + each[1].s0**2) ** 0.5)
-
-        # results only to show are loaded without correlations
-        sts = list(SourceTerm.objects(assemblyRoot=c1))
-        shown = CalculatedResults.from_db(sts, correlations=False)
-        value = shown.scalars['v1']
-        self.assertFalse(value.m.correlations_loaded)
-        self.assertEqual(shown.scalars_expr, {})
-        self.assertEqual(str(value.to('dru')), str(each[0] * units('dru')))
-        with self.assertRaises(CorrelationsNotLoaded):
-            shown + stored(c2)
 
 
 if __name__ == '__main__':

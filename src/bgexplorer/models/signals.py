@@ -4,8 +4,8 @@ from .component import Component, Assembly
 from .emissionspec import EmissionSpec
 from .cosmogenic import ActivatedMaterial, CosmogenicActivation
 from .hiteff import HitEfficiency
-from .sourceterm import (SourceTerm, CalculatedResults, find_sourceterms,
-                         sync_sourceterms, placed_sourceterms)
+from .sourceterm import (SourceTerm, find_sourceterms, sync_sourceterms,
+                         placed_sourceterms)
 from .verdoc import ref_id
 from . import settings
 import logging
@@ -166,13 +166,6 @@ def delete_activatedmaterial(sender, document, **kwargs):
         spec.delete()
 
 
-def clear_results(sourceterm_ids):
-    """ Delete the cached CalculatedResults that include any of the
-    SourceTerms with the given ids
-    """
-    CalculatedResults.objects(sources__in=list(sourceterm_ids)).delete()
-
-
 def before_delete_hiteff(sender, document, **kwargs):
     # the reverse delete rule only pulls us from the SourceTerms
     document._sourceterms = list(find_sourceterms(document)
@@ -187,7 +180,6 @@ def after_delete_hiteff(sender, document, **kwargs):
     for st in sourceterms:
         # save to recalculate livetimes without us
         st.save()
-    clear_results(sourceterms.scalar('id'))
     settings.touch(hiteff.active_version)
 
 
@@ -216,8 +208,6 @@ def update_hiteff(sender, document, **kwargs):
         st.hiteffs = [h for h in st.hiteffs
                       if h.original_id != hiteff.original_id]
         st.save()
-    # the values may have changed without changing which sourceterms match
-    clear_results(find_sourceterms(hiteff).scalar('id'))
 
     # update default units
     vsettings = settings.get_settings(hiteff.active_version)

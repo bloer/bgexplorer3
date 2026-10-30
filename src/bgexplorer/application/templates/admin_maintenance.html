@@ -15,7 +15,7 @@
 <form method="POST" id="clearcache" action="{{ url_for('admin.clear_cache') }}" class="mb-4">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="btn btn-warning">Clear calculation cache</button>
-    <span class="form-text">Stored results are recalculated when next viewed.</span>
+    <span class="form-text">Results are recalculated when next viewed.</span>
 </form>
 
 <h2>Versions</h2>

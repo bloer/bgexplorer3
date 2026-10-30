@@ -8,7 +8,7 @@ from bgexplorer.models.verdoc import ReadOnlyVersionError
 from bgexplorer.models.component import Component, Assembly
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
-from bgexplorer.models.sourceterm import SourceTerm, CalculatedResults
+from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.settings import VersionSettings, get_settings
 from tests.dbutil import connect_test_db
 
@@ -24,7 +24,7 @@ class TestReadOnly(unittest.TestCase):
 
     def setUp(self):
         for cls in (VersionSettings, Component, EmissionSpec, SourceTerm,
-                    CalculatedResults, HitEfficiency):
+                    HitEfficiency):
             cls.drop_collection()
         create_version('b')
         e1 = EmissionSpec(name='e1', version_tag='b',

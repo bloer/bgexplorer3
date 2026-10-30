@@ -6,10 +6,8 @@ from functools import cache
 from bson import json_util
 from pymongo import InsertOne, UpdateOne
 from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
-                         StringField, BooleanField, MapField, Document,
-                         SortedListField, CASCADE, PULL, ReferenceField,
-                         EmbeddedDocumentListField, ObjectIdField,
-                         ValidationError, IntField)
+                         StringField, BooleanField, CASCADE, PULL,
+                         ObjectIdField, ValidationError, IntField)
 from .verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedQuerySet, VersionedListField,
                      VersionedEmbeddedDocumentListField)
@@ -18,15 +16,11 @@ from .verdoc import (IDENTITY_FIELDS, check_writable, current_user_name)
 from .component import (Component, Placement, Assembly, ComponentSpec,
                         LocationMode)
 from .emissionspec import EmissionSpec, EmissionSource, Multiplier
-from .fields import (QuantityField, UncertainQuantityField, HistogramField,
-                     RawDictField)
-from .asymmetric import AsymmetricUncertainty, LinearExpression
-from .histogram import Histogram
+from .fields import QuantityField
 from .hiteff import HitEfficiency
 from .isotope import concentration_to_rate
-from .common import units, addnone, multnone, Quantity, UnitMismatchError
+from .common import Quantity, UnitMismatchError
 from .termcalc import TermCalculator
-from .asymmetric import sum_values
 from . import settings
 from typing import (List, Optional, Union, Dict, Tuple, Iterable,
                     NamedTuple, Sequence, Set)
@@ -252,7 +246,6 @@ class SourceTerm(VersionedDocument):
 
     def clean(self):
         super().clean()
-        self.clear_results()
         self.derive()
         self.livetimes = [hit.get_livetime(self.emissionrate)
                           for hit in self.hiteffs]
@@ -265,12 +258,6 @@ class SourceTerm(VersionedDocument):
         version. Needs `derive` to have set the placement ids
         """
         return (self.source.id, _ref_id(self.spec), tuple(self.placement_ids))
-
-    def clear_results(self):
-        """ Remove all CalculatedResults in the database referencing
-        this object
-        """
-        CalculatedResults.objects(sources=self).delete()
 
 
 def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource, HitEfficiency],
@@ -295,267 +282,6 @@ def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource, HitEffi
     elif isinstance(obj, HitEfficiency):
         query = query(hiteffs=obj)
     return query
-
-
-class CalculatedResults(Document):
-    """ Normalized HitEff results stored in the database.
-
-    Legacy: nothing saves these any more. The budget pages sum the
-    SourceTerms in memory (`budget.term_values`) behind the in-memory
-    `ResultsCache`s, and `for_object` only stores results if called with
-    `save=True`. The machinery is kept because the stored expressions
-    (`scalars_expr`, `spectra_expr`) allow correlations to be reconstructed
-    from stored results, and is still invalidated when SourceTerms or
-    HitEfficiencies change.
-    """
-    # TODO: should this be a versioned document? it's acting as a cache
-    scalars = MapField(UncertainQuantityField(allownone=True,
-                                              expressions='separate'),
-                       required=False, default=dict)
-    spectra = MapField(HistogramField(allownone=True,
-                                      expressions='separate'),
-                       required=False, default=dict)
-    # the expressions of the values, which are big for spectra, so that
-    # the values can be loaded without them
-    scalars_expr = RawDictField()
-    spectra_expr = RawDictField()
-    sources = SortedListField(ReferenceField(SourceTerm,
-                                             reverse_delete_rule=CASCADE))
-    meta = {'indexes': ['sources']}
-    EXPR_FIELDS = ('scalars_expr', 'spectra_expr')
-
-    def clean(self):
-        super().clean()
-        for name, values, get in (('scalars_expr', self.scalars, _magnitude),
-                                  ('spectra_expr', self.spectra,
-                                   _hist_magnitude)):
-            exprs = dict(getattr(self, name) or {})
-            for key, value in values.items():
-                au = get(value)
-                # values loaded without theirs keep what's stored
-                if au is not None and au.correlations_loaded:
-                    expr = au.serialize_expression()
-                    if expr is None:
-                        exprs.pop(key, None)
-                    else:
-                        exprs[key] = expr
-            setattr(self, name, exprs)
-
-    def load_correlations(self) -> 'CalculatedResults':
-        """ Give values loaded without their correlations the expressions
-        stored for them. Returns self
-        """
-        for values, exprs, get in ((self.scalars, self.scalars_expr,
-                                    _magnitude),
-                                   (self.spectra, self.spectra_expr,
-                                    _hist_magnitude)):
-            for key, value in values.items():
-                au = get(value)
-                if au is None or au.correlations_loaded or key not in exprs:
-                    continue
-                correlated = AsymmetricUncertainty(
-                    au.mode, au.s0, au.s1,
-                    expression=LinearExpression.from_terms(exprs[key]))
-                if isinstance(value, Histogram):
-                    value.hist = units.Quantity(correlated, value.hist.u)
-                else:
-                    values[key] = units.Quantity(correlated, value.u)
-        return self
-
-    @classmethod
-    def for_object(cls, obj, relativeto: Optional[Assembly] = None,
-                   save: bool = False, spectra: bool = True,
-                   cache: bool = True, correlations: bool = True):
-        """ Calculate results for all SourceTerms of `obj`, optionally
-        only the part in assembly `relativeto`. If `cache`, results are
-        kept in memory until any data in the version changes. If `save`,
-        they are also stored in the database (see `CalculatedResults`).
-
-        If not `correlations`, saved results are loaded without their
-        correlations, which is faster when they're only shown.
-        """
-        def calculate():
-            sts = find_sourceterms(obj=obj, relativeto=relativeto)
-            return cls.from_sourceterms(sts, save=save, spectra=spectra,
-                                        correlations=correlations)
-        if not cache:
-            return calculate()
-        key = _cache_key(obj, 'object', type(obj).__name__, _ref_id(obj),
-                         relativeto and _ref_id(relativeto), spectra,
-                         correlations)
-        return _cached(key, calculate)
-
-    @classmethod
-    def for_component(cls, component: Component,
-                      relativeto: Optional[Assembly] = None,
-                      save: bool = False, spectra: bool = True):
-        """ Alias for for_object. To be deprecated """
-        return cls.for_object(component, relativeto, save, spectra)
-
-    @classmethod
-    def for_tree(cls, root: Component, spectra: bool = False,
-                 cache: bool = True) -> Dict[ObjectId, 'CalculatedResults']:
-        """ Calculate results for `root` and, relative to `root`, every
-        component placed anywhere below it. This is equivalent to calling
-        `for_object(component, relativeto=root)` for each of them, but
-        loads everything once.
-
-        Returns a dict keyed by component original_id. Results aren't
-        cached in the database, but if `cache` they are kept in memory
-        until any data in the version changes.
-        """
-        if cache:
-            key = _cache_key(root, 'tree', root.original_id, spectra)
-            return _cached(key, lambda: cls.for_tree(root, spectra, False))
-        sourceterms = list(find_sourceterms(root))
-        hiteffs = load_hiteffs(sourceterms, spectra)
-        parts = {st.id: cls._calculate(st, hiteffs, spectra)
-                 for st in sourceterms}
-        groups = defaultdict(list)
-        groups[root.original_id] = sourceterms
-        for st in sourceterms:
-            # a component may be placed more than once in the same path
-            for cid in {_ref_id(p._data.get('component'))
-                        for p in st._data.get('assemblyPath') or []}:
-                groups[cid].append(st)
-        return {cid: cls._sum(sts, (parts[st.id] for st in sts))
-                for cid, sts in groups.items()}
-
-    def ito_reduced_units(self):
-        for v in self.scalars.values():
-            try:
-                v.ito_reduced_units()
-            except AttributeError:
-                pass
-        for v in self.spectra.values():
-            try:
-                v.hist.ito_reduced_units()
-            except AttributeError:
-                pass
-        return self
-
-    def __add__(self, other):
-        if other is None:
-            return self
-        elif not isinstance(other, CalculatedResults):
-            raise TypeError('CalculatedResults can only add with others')
-        # TODO: some checks to makes sure we're not duplicating sources
-        # TODO: check active_version
-        result = CalculatedResults(sources=self.sources + other.sources)
-        for key in set(self.scalars).union(other.scalars):
-            result.scalars[key] = addnone(self.scalars.get(key),
-                                          other.scalars.get(key))
-        for key in set(self.spectra).union(other.spectra):
-            result.spectra[key] = addnone(self.spectra.get(key),
-                                          other.spectra.get(key))
-        return result.ito_reduced_units()
-
-    @staticmethod
-    def _calculate(sourceterm: SourceTerm,
-                   hiteffs: Dict[ObjectId, HitEfficiency],
-                   spectra: bool = True) -> Optional[Tuple[dict, dict]]:
-        """ Multiply the sourceterm's emission rate by each of its
-        hiteffs, which are looked up in `hiteffs` (see `load_hiteffs`).
-        Returns (scalars, spectra) dicts, or None if there are no hiteffs.
-        Units aren't reduced.
-        """
-        scalars, hists = {}, {}
-        found = False
-        for ref in sourceterm._data.get('hiteffs') or []:
-            hiteff = hiteffs.get(_ref_id(ref))
-            if hiteff is None:
-                if not isinstance(ref, HitEfficiency):
-                    log.warning(f"HitEfficiency {_ref_id(ref)} for "
-                                f"SourceTerm {sourceterm.id} not found")
-                    continue
-                hiteff = ref
-            found = True
-            erate = sourceterm.emissionrate
-            if not hiteff.norm.check(erate):
-                raise units.DimensionalityError(
-                    "incompatible emissionrate units")
-            for key, val in hiteff.all_scalars.items():
-                if val is not None:
-                    scalars[key] = addnone(scalars.get(key),
-                                           multnone(val, erate))
-            if spectra:
-                for key, val in hiteff.spectra.items():
-                    if val is not None:
-                        hists[key] = addnone(hists.get(key),
-                                             multnone(val, erate))
-        return (scalars, hists) if found else None
-
-    @classmethod
-    def _sum(cls, sourceterms: List[SourceTerm],
-             parts: Iterable[Optional[Tuple[dict, dict]]]
-             ) -> Optional['CalculatedResults']:
-        """ Add up the output of `_calculate` for each of `sourceterms`.
-        Returns None if none of them have hiteffs
-        """
-        scalar_parts, hist_parts = defaultdict(list), defaultdict(list)
-        found = False
-        for part in parts:
-            if part is None:
-                continue
-            found = True
-            for key, val in part[0].items():
-                scalar_parts[key].append(val)
-            for key, val in part[1].items():
-                hist_parts[key].append(val)
-        if not found:
-            return None
-        scalars = {key: sum_values(vals) for key, vals in scalar_parts.items()}
-        hists = {key: sum_values(vals) for key, vals in hist_parts.items()}
-        return cls(scalars=scalars, spectra=hists,
-                   sources=list(sourceterms)).ito_reduced_units()
-
-    @classmethod
-    def from_db(cls, sourceterms: List[SourceTerm],
-                correlations: bool = True
-                ) -> Optional['CalculatedResults']:
-        """ The saved results for exactly `sourceterms`, if any. If not
-        `correlations`, their values are loaded without them, see
-        `AsymmetricUncertainty.without_correlations`
-        """
-        ids = list(sorted(st.id for st in sourceterms))
-        # can we do this with a match query?
-        query = cls.objects(__raw__={'sources': {'$eq': ids}})
-        if not correlations:
-            return query.exclude(*cls.EXPR_FIELDS).first()
-        result = query.first()
-        return result and result.load_correlations()
-
-    @classmethod
-    def from_sourceterm(cls, sourceterm: SourceTerm, allowcache: bool = True,
-                        save: bool = False, spectra: bool = True,
-                        ) -> 'CalculatedResults':
-        """ Calculalte all results for a single SourceTerm """
-        return cls.from_sourceterms([sourceterm], allowcache=allowcache,
-                                    save=save, spectra=spectra)
-
-    @classmethod
-    def from_sourceterms(cls, sourceterms: Iterable[SourceTerm],
-                         allowcache: bool = True, save: bool = False,
-                         spectra: bool = True, correlations: bool = True,
-                         ) -> Optional['CalculatedResults']:
-        """ Calculate the sum of results for all `sourceterms`. Returns None
-        if none of them have hiteffs.
-
-        If `allowcache`, first look for a saved result in the database. If
-        `save`, save the result. If not `spectra`, only calculate scalars;
-        these partial results are never saved. If not `correlations`, saved
-        results are loaded without them.
-        """
-        sourceterms = list(sourceterms)
-        if allowcache and (result := cls.from_db(sourceterms, correlations)
-                           ) is not None:
-            return result
-        hiteffs = load_hiteffs(sourceterms, spectra)
-        result = cls._sum(sourceterms, (cls._calculate(st, hiteffs, spectra)
-                                        for st in sourceterms))
-        if result is not None and save and spectra:
-            result.save()
-        return result
 
 
 class _Flight:
@@ -653,15 +379,6 @@ _MISSING = object()
 _results_cache = ResultsCache(RESULTS_CACHE_SIZE)
 
 
-def _magnitude(value) -> Optional[AsymmetricUncertainty]:
-    m = getattr(value, 'm', None)
-    return m if isinstance(m, AsymmetricUncertainty) else None
-
-
-def _hist_magnitude(value) -> Optional[AsymmetricUncertainty]:
-    return _magnitude(getattr(value, 'hist', None))
-
-
 def _cache_key(obj, *args) -> Optional[tuple]:
     """ Cache key for results of `obj`, or None if they can't be cached """
     version = getattr(obj, 'active_version', None)
@@ -676,8 +393,8 @@ def _cached(key: Optional[tuple], calculate):
 
 def clear_results_cache():
     """ Empty every ResultsCache """
-    for cache in ResultsCache.instances:
-        cache.clear()
+    for results_cache in ResultsCache.instances:
+        results_cache.clear()
 
 
 def load_hiteffs(sourceterms: Iterable[SourceTerm], spectra: bool = True
@@ -938,7 +655,6 @@ def sync_sourceterms(version: str, candidates: Iterable[SourceTerm],
     inserts = []
     updates = []
     shared = []
-    unshared = []
     for key, sourceterm in wanted.items():
         prior = stored.get(key)
         if not sourceterm.hiteffs_auto:
@@ -977,15 +693,14 @@ def sync_sourceterms(version: str, candidates: Iterable[SourceTerm],
         updates.append(UpdateOne(
             {'original_id': prior.original_id, 'version_tags': version},
             update))
-        (shared if prior.shared else unshared).append(prior.id)
+        if prior.shared:
+            shared.append(prior.id)
 
     orphans = duplicates + [entry.id for key, entry in stored.items()
                             if key not in wanted]
     if shared:
         # give this version its own copies of the documents it shares
         SourceTerm.select_version(version)(id__in=shared).prepare_edit()
-    if unshared:
-        CalculatedResults.objects(sources__in=unshared).delete()
     if inserts or updates:
         SourceTerm._get_collection().bulk_write(inserts + updates,
                                                 ordered=False)
