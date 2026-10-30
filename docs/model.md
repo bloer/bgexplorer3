@@ -138,6 +138,7 @@ rate's units unless a multiplier is set on the source or its spec:
 | per piece | `Bq` | 1 | rate |
 | flux | `1/cm**2/s` | 1 | flux |
 | flux per sr | `1/cm**2/s/sr` | 1 | flux_per_sr |
+| absolute | a number, e.g. `1` or `0.5 +- 0.1` | 1 | absolute |
 
 The spec's multiplier is used for every source without its own, e.g. to choose
 the inner surface for all its surface sources at once. A rate that doesn't fit
@@ -152,6 +153,16 @@ the value times the norm has the result unit. E.g., if the result unit is
 `counts/kg/keV/day` and the ambient gamma flux is measured in `1/cm**2/s/sr`,
 the hit efficiency must be normalized per `flux_per_sr`, in
 `(cm**2 sr)/(kg keV)`.
+
+**Absolutely normalized** hit efficiencies, e.g. for cosmic rays, are already
+rates in the detector. Include them with a source of that name with the
+`absolute` multiplier, whose rate is a scale factor: usually `1`, but it can
+carry an uncertainty on the normalization, or a fraction. Like fluxes, it must
+be chosen explicitly, since a bare number for an isotope is a concentration.
+The source can be on a component of its own, or on any component with a spec
+location override to the hit efficiency's location.
+
+Every source needs a rate.
 
 **Masses of an isotope** can be given instead of its activity: concentrations
 (`ppb` etc., or a bare number as a fraction, so `1e-9` is 1 ppb) for the mass
@@ -263,7 +274,7 @@ edit that.
 | Source | the simulated source, e.g. `U238`; matched exactly to source names |
 | Location | the simulated volume, matched to SourceTerm locations |
 | Material | optional; if set, only components of this material match |
-| Normalization | `rate` (per decay per second, the default), `flux` (per 1/s/cm²) or `flux_per_sr` (per 1/s/cm²/sr); only sources with the matching multiplier use it |
+| Normalization | `rate` (per decay per second, the default), `flux` (per 1/s/cm²), `flux_per_sr` (per 1/s/cm²/sr) or `absolute` (already a rate, e.g. cosmics); only sources with the matching multiplier use it |
 | Scalars | named values with units, e.g. counts per decay in an energy window |
 | Spectra | histograms as numpy binary, imported on the edit page |
 | Simulation details | number of primaries, primary particle, spectrum and yield, bias weight, livetime, version, files, date… |

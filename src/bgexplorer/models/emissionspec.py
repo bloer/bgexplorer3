@@ -4,7 +4,7 @@ from mongoengine import (StringField, EnumField, ValidationError,
                          )
 from bson import ObjectId
 from enum import Enum
-from typing import Optional, Union
+from typing import Union
 from .common import units, validate_unique_ids
 from .isotope import (concentration_to_rate, rate_to_concentration,
                       compare_source_names, is_radioactive)
@@ -26,19 +26,17 @@ class Multiplier(Enum):
     flux = 'flux'
     flux_per_sr = 'flux_per_sr'
     per_piece = 'per_piece'
+    absolute = 'absolute'
 
     @classmethod
-    def get_multiplier(cls, rate: Optional[units.Quantity],
-                       allow_mass_to_rate: bool = False
-                       ) -> Optional['Multiplier']:
+    def get_multiplier(cls, rate: units.Quantity,
+                       allow_mass_to_rate: bool = False) -> 'Multiplier':
         """ For rate specified in given units, find the appropriate
         multiplier, also for a mass of an isotope if `allow_mass_to_rate`
         (see `check_units`). Raise ValidationError if multiplier can't be
-        determined. Fluxes have the dimensions of surface rates, so are
-        never chosen
+        determined. Fluxes have the dimensions of surface rates, and
+        absolute rates of concentrations, so are never chosen
         """
-        if rate is None:
-            return None
         for allow in dict.fromkeys((False, allow_mass_to_rate)):
             for mult in (cls.mass, cls.volume, cls.surface, cls.length,
                          cls.per_piece):
@@ -51,25 +49,23 @@ class Multiplier(Enum):
         """ The units of rates for this multiplier """
         return _VALID_UNITS[self]
 
-    def check_units(self, rate: Optional[units.Quantity],
+    def check_units(self, rate: units.Quantity,
                     allow_mass_to_rate: bool = True) -> None:
         """ Verify that `rate` has appropriate units for us, raise
         ValidationError otherwise. If `allow_mass_to_rate`, allow being off
         by a factor of 1/g/s, because a mass of an isotope can be converted
         to a decay rate.
         """
-        if rate is None:
-            return
         dims = self.valid_units.dimensionality
         if rate.u.dimensionality == dims:
             return
-        if (allow_mass_to_rate and
+        if (allow_mass_to_rate and self is not Multiplier.absolute and
                 (rate.u * _MASS_TO_RATE).dimensionality == dims):
             return
         raise ValidationError(f"Rate units {rate.u} invalid"
                               f" for multiplier {self.name}")
 
-    def accepts(self, rate: Optional[units.Quantity],
+    def accepts(self, rate: units.Quantity,
                 allow_mass_to_rate: bool = True) -> bool:
         """ Does `rate` have appropriate units for us? """
         try:
@@ -85,6 +81,7 @@ class Multiplier(Enum):
         """
         return {Multiplier.flux: NormMultiplier.flux,
                 Multiplier.flux_per_sr: NormMultiplier.flux_per_sr,
+                Multiplier.absolute: NormMultiplier.absolute,
                 }.get(self, NormMultiplier.rate)
 
     @classmethod
@@ -111,10 +108,12 @@ _VALID_UNITS = {
     Multiplier.flux: units.Unit('1/cm**2/s'),
     Multiplier.flux_per_sr: units.Unit('1/cm**2/s/sr'),
     Multiplier.per_piece: units.Unit('Bq'),
+    # a scale factor for an absolutely normalized hit efficiency
+    Multiplier.absolute: units.Unit(''),
 }
 # multipliers that don't scale with the component
 _UNIT_MULTIPLIERS = (Multiplier.flux, Multiplier.flux_per_sr,
-                     Multiplier.per_piece)
+                     Multiplier.per_piece, Multiplier.absolute)
 # a mass of an isotope times this has the dimensions of its decay rate
 _MASS_TO_RATE = units.Unit('1/g/s')
 
@@ -136,7 +135,7 @@ class EmissionSource(EmbeddedDocument):
     comment = StringField()
     category = EnumField(SourceCategory)
     # computed rates stay correlated with what they're computed from
-    rate = UncertainQuantityField(allownone=True, expressions='inline')
+    rate = UncertainQuantityField(required=True, expressions='inline')
     multiplier = EnumField(Multiplier)
     particle = StringField()
     spectrum = StringField()
@@ -150,14 +149,10 @@ class EmissionSource(EmbeddedDocument):
         return is_radioactive(self.name)
 
     @property
-    def standardized_rate(self) -> Optional[units.Quantity]:
+    def standardized_rate(self) -> units.Quantity:
         """ The rate in the units of our multiplier, converting a mass of an
-        isotope to its decay rate. None if we have no rate
+        isotope to its decay rate. We must be cleaned
         """
-        if self.rate is None:
-            return None
-        if self.multiplier is None:
-            raise ValueError("Multiplier is not set")
         if self.multiplier.accepts(self.rate, allow_mass_to_rate=False):
             return self.rate
         return concentration_to_rate(self.name, self.rate)
@@ -168,6 +163,7 @@ class EmissionSource(EmbeddedDocument):
         as a mass of it, e.g. a concentration
         """
         if self.rate is None:
+            # reported by field validation
             return
         converts = self.converts_mass
         try:
@@ -181,8 +177,9 @@ class EmissionSource(EmbeddedDocument):
                                     for m in candidates):
                 raise ValidationError(
                     "to give the rate as a mass, e.g. a concentration, the "
-                    "name must be a radioactive isotope",
-                    field_name='name') from e
+                    "name must be a radioactive isotope; a scale factor for "
+                    "an absolutely normalized hit efficiency needs the "
+                    "absolute multiplier", field_name='name') from e
             # the rate is what's wrong, so forms can show it there
             raise ValidationError(e.message, field_name='rate') from e
 
@@ -235,6 +232,7 @@ class EmissionSpec(VersionedDocument):
             if compare_source_names(newsource.source, source.name):
                 matchin = source
 
+        # a missing rate is reported by field validation, after cleaning
         if matchin is None or matchin.rate is None:
             return
 
@@ -312,7 +310,7 @@ class EmissionSpec(VersionedDocument):
         # must then fit their rate
         for source in self.sources:
             source.category = source.category or self.category
-            if source.multiplier is None and source.rate is not None:
+            if source.multiplier is None:
                 source.multiplier = self.multiplier
         super().clean()
         validate_unique_ids(self.sources, 'sources')

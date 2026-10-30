@@ -101,7 +101,7 @@ class TestEmission(unittest.TestCase):
         for mult in Multiplier:
             with self.subTest(mult=mult):
                 if mult in (Multiplier.flux, Multiplier.flux_per_sr,
-                            Multiplier.per_piece):
+                            Multiplier.per_piece, Multiplier.absolute):
                     self.assertEqual(mult.getvalue(c), 1)
                 else:
                     self.assertEqual(mult.getvalue(c), units(expected[mult]))

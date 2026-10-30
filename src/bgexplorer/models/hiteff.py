@@ -17,11 +17,13 @@ dbalias = "hiteffdb"
 
 class NormMultiplier(Enum):
     """ What a HitEfficiency is multiplied by: a source's rate times its
-    multiplier, see `emissionspec.Multiplier.norm`
+    multiplier, see `emissionspec.Multiplier.norm`. An `absolute` one is
+    already a rate in the detector, and is only scaled
     """
     rate = 'rate'
     flux = 'flux'
     flux_per_sr = 'flux_per_sr'
+    absolute = 'absolute'
 
     @property
     def units(self):
@@ -30,7 +32,8 @@ class NormMultiplier(Enum):
 
 _NORM_UNITS = {NormMultiplier.rate: unitreg.Unit('1/s'),
                NormMultiplier.flux: unitreg.Unit('1/s/cm**2'),
-               NormMultiplier.flux_per_sr: unitreg.Unit('1/s/cm**2/sr')}
+               NormMultiplier.flux_per_sr: unitreg.Unit('1/s/cm**2/sr'),
+               NormMultiplier.absolute: unitreg.Unit('')}
 
 
 class HitEfficiency(DynamicVersionedDocument):
@@ -46,9 +49,12 @@ class HitEfficiency(DynamicVersionedDocument):
        norm (NormMultiplier): To convert HitEfficiency to rates in detector,
                               multiply by emission rate in some units,
                               usually 'rate' (decays/s), but can be
-                              'flux' (primaries/s/cm**2) or
-                              'flux_per_sr' (primaries/s/cm**2/sr). Only
-                              matches sources whose multiplier has this norm
+                              'flux' (primaries/s/cm**2),
+                              'flux_per_sr' (primaries/s/cm**2/sr) or
+                              'absolute' (already a rate, e.g. cosmics, only
+                              scaled by the source's dimensionless rate).
+                              Only matches sources whose multiplier has
+                              this norm
        scalars (dict): Single-value hit efficiencies (as asym. uncertainties
                       with units), such as integral counts over some ROI
        spectra (dict): histograms of hit efficiencies
@@ -81,7 +87,7 @@ class HitEfficiency(DynamicVersionedDocument):
     # required metadata and results
     source = StringField(required=True)
     location = StringField(required=True)
-    norm = EnumField(NormMultiplier, required=False,
+    norm = EnumField(NormMultiplier, required=True,
                      default=NormMultiplier.rate)
     scalars = MapField(UncertainQuantityField(allownone=True),
                       required=False, default=dict)
@@ -236,6 +242,9 @@ class HitEfficiency(DynamicVersionedDocument):
     def get_livetime(self, emissionrate=None):
         if self.livetime is not None:
             return self.livetime
+        if self.norm is NormMultiplier.absolute:
+            # primaries can't be converted to a time without a rate
+            return None
         # discard uncertainties
         try:
             if emissionrate.isupperlimit():

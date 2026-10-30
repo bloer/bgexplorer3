@@ -76,10 +76,8 @@ class SourceTerm(VersionedDocument):
 
     @cached_property
     def emissionrate(self):
-        rate = self.source.standardized_rate
-        if rate is None:
-            return None
-        return rate * self.weight * self.rate_multiplier
+        return (self.source.standardized_rate * self.weight
+                * self.rate_multiplier)
 
 
     def group_keys(self) -> dict:
@@ -176,10 +174,7 @@ class SourceTerm(VersionedDocument):
         self.set_location()
         self.weight = reduce(operator.mul,
                              (p.weight for p in self.assemblyPath), 1)
-        if self.source.multiplier is not None:
-            self.rate_multiplier = self.source.multiplier.getvalue(self.component)
-        else:
-            self.rate_multiplier = 1
+        self.rate_multiplier = self.source.multiplier.getvalue(self.component)
         self.componentName = self.component.name
         self.assemblyPathStr = '/'.join([self.assemblyRoot.name] +
                                         [p.name for p in self.assemblyPath])
@@ -200,16 +195,14 @@ class SourceTerm(VersionedDocument):
     @property
     def hiteffs_query(self) -> VersionedQuerySet:
         """ The HitEfficiencies for our source, location and material, whose
-        norm fits our rate. None without a rate
+        norm fits our rate
         """
-        hits = HitEfficiency.select_version(self.active_version)
-        if self.source.rate is None or self.source.multiplier is None:
-            return hits.none()
-        return hits(source=self.source.name,
-                    location=self.location,
-                    material__in=(None, self.material),
-                    norm=self.source.multiplier.norm,
-                    )
+        return HitEfficiency.select_version(self.active_version)(
+            source=self.source.name,
+            location=self.location,
+            material__in=(None, self.material),
+            norm=self.source.multiplier.norm,
+            )
 
     def find_hiteffs(self, replace: bool = True) -> List[HitEfficiency]:
         hiteffs = list(self.hiteffs_query.exclude('spectra'))

@@ -26,6 +26,7 @@ from tests.test_app_components import AppTestCase
 RATE = dict(v1='0.1 +- 0.01 dru/mBq')
 FLUX = dict(v1='0.1 +- 0.01 dru*s*cm**2')
 FLUX_SR = dict(v1='0.1 +- 0.01 dru*s*cm**2*sr')
+ABSOLUTE = dict(v1='0.1 +- 0.01 dru')
 
 
 class UnitTestCase(AppTestCase):
@@ -74,6 +75,25 @@ class TestRejectedAtClean(UnitTestCase):
                     self.assertRejected(self.source(rate, name=name),
                                         'radioactive isotope')
 
+    def test_rate_required(self):
+        for name in ('U238', 'cosmics'):
+            with self.subTest(name=name):
+                self.assertRejected(self.source(None, name=name), 'rate')
+
+    def test_absolute(self):
+        """ An absolute rate is a dimensionless scale factor, which must be
+        chosen explicitly, and isn't a mass of an isotope
+        """
+        for rate in ('1 Bq', '1 1/cm**2/s', '1 ppb/kg'):
+            with self.subTest(rate=rate):
+                self.assertRejected(self.source(rate, name='cosmics',
+                                                multiplier=Multiplier.absolute),
+                                    'invalid for multiplier')
+        self.assertRejected(self.source('1 ug', multiplier=Multiplier.absolute),
+                            'invalid for multiplier')
+        self.assertRejected(self.source('1', name='cosmics'),
+                            'absolute multiplier')
+
     def test_spec_multiplier_doesnt_fit(self):
         """ The spec's multiplier is used for sources without one, so must
         fit them
@@ -101,13 +121,24 @@ class TestRejectedAtClean(UnitTestCase):
         HitEfficiency(source='U238', location='c1', scalars=RATE).save()
         for norm, scalars in ((NormMultiplier.rate, dict(v1='1 kg')),
                               (NormMultiplier.flux, RATE),
-                              (NormMultiplier.rate, FLUX)):
+                              (NormMultiplier.rate, FLUX),
+                              (NormMultiplier.absolute, RATE),
+                              (NormMultiplier.rate, ABSOLUTE)):
             with self.subTest(norm=norm, scalars=scalars):
                 with self.assertRaisesRegex(ValidationError,
                                             'has incorrect units'):
                     HitEfficiency(source='U238', location='c2', norm=norm,
                                   scalars=scalars).save()
         self.assertEqual(HitEfficiency.objects.count(), 1)
+
+    def test_hiteff_norm_required(self):
+        """ There is always a norm, by default the rate """
+        hiteff = HitEfficiency(source='U238', location='c1', norm=None,
+                               scalars=RATE).save()
+        self.assertIs(hiteff.reload().norm, NormMultiplier.rate)
+        with self.assertRaisesRegex(ValidationError, 'norm'):
+            HitEfficiency(source='U238', location='c1', norm='none',
+                          scalars=RATE).save()
 
 
 class TestAcceptedAtClean(UnitTestCase):
@@ -154,10 +185,18 @@ class TestAcceptedAtClean(UnitTestCase):
                     standardized.to(mult.valid_units).m.mode,
                     expected.to(mult.valid_units).m.mode)
 
-    def test_no_rate(self):
-        source = self.saved(self.source(None))
-        self.assertIsNone(source.multiplier)
-        self.assertIsNone(source.standardized_rate)
+    def test_absolute(self):
+        """ A scale factor for an absolutely normalized hit efficiency, even
+        for an isotope's name
+        """
+        for name, rate in (('cosmics', '1'), ('cosmics', '0.5 +- 0.1'),
+                           ('U238', '1'), ('cosmics', '50 percent')):
+            with self.subTest(name=name, rate=rate):
+                EmissionSpec.drop_collection()
+                source = self.saved(self.source(
+                    rate, name=name, multiplier=Multiplier.absolute))
+                self.assertEqual(source.multiplier, Multiplier.absolute)
+                self.assertEqual(source.standardized_rate, source.rate)
 
     def test_explicit_flux(self):
         for rate, mult in (('7 1/cm**2/s', Multiplier.flux),
@@ -187,7 +226,8 @@ class TestHitEfficiencyMatching(UnitTestCase):
         super().setUp()
         for norm, scalars in ((NormMultiplier.rate, RATE),
                               (NormMultiplier.flux, FLUX),
-                              (NormMultiplier.flux_per_sr, FLUX_SR)):
+                              (NormMultiplier.flux_per_sr, FLUX_SR),
+                              (NormMultiplier.absolute, ABSOLUTE)):
             HitEfficiency(source='U238', location='c1', norm=norm,
                           scalars=scalars).save()
 
@@ -250,10 +290,29 @@ class TestHitEfficiencyMatching(UnitTestCase):
         self.assertEqual(term.source.multiplier, Multiplier.surface)
         self.assertMatches(term, [NormMultiplier.rate], 0.1 * 2e3)
 
-    def test_no_rate(self):
-        term = self.term(None)
-        self.assertMatches(term, [])
-        self.assertEqual(term.hiteffs_query.count(), 0)
+    def test_absolute(self):
+        """ An absolutely normalized hit efficiency is only scaled by the
+        rate and the placement weights, not the component's mass
+        """
+        term = self.term('0.5 +- 0.1', Multiplier.absolute, mass='2 kg')
+        self.assertMatches(term, [NormMultiplier.absolute], 0.1 * 0.5)
+        self.assertIsNone(term.livetimes[0])
+
+    def test_absolute_cosmics(self):
+        """ e.g. cosmic rays on a component of their own, whose source isn't
+        an isotope
+        """
+        HitEfficiency(source='cosmics', location='detector',
+                      norm=NormMultiplier.absolute, scalars=ABSOLUTE,
+                      nprimaries=1000).save()
+        spec = EmissionSpec(name='cosmics', sources=[
+            self.source('1', name='cosmics',
+                        multiplier=Multiplier.absolute)]).save()
+        Component(name='cosmics', location='detector', specs=[spec]).save()
+        term = SourceTerm.objects.get()
+        self.assertMatches(term, [NormMultiplier.absolute], 0.1)
+        # no rate to convert primaries to a livetime
+        self.assertEqual(term.livetimes, [None])
 
     def test_new_hiteff(self):
         """ A hit efficiency saved after the term is only added to it if its
@@ -285,7 +344,16 @@ class TestHitEfficiencyMatching(UnitTestCase):
         spec.sources[0].rate = '2 1/cm**2/s'
         spec.save()
         self.assertMatches(term, [NormMultiplier.flux], 0.2)
-        spec.sources[0].rate = None
+        spec.sources[0].multiplier = Multiplier.absolute
+        spec.sources[0].rate = '2'
+        spec.save()
+        self.assertMatches(term, [NormMultiplier.absolute], 0.2)
+        spec.sources[0].multiplier = Multiplier.mass
+        spec.sources[0].rate = '1 mBq/kg'
+        spec.save()
+        # the component has no mass, so nothing in the results
+        self.assertMatches(term, [NormMultiplier.rate], 0)
+        HitEfficiency.objects(norm=NormMultiplier.rate).delete()
         spec.save()
         self.assertMatches(term, [])
 

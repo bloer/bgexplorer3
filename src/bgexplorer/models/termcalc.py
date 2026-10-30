@@ -69,18 +69,16 @@ class TermCalculator:
             yield hiteff
 
     @staticmethod
-    def _rate(sourceterm) -> Optional[Tuple]:
-        """ The emission rate's magnitude and unit, or None """
+    def _rate(sourceterm) -> Tuple:
+        """ The emission rate's magnitude and unit """
         rate = sourceterm.source.standardized_rate
-        if rate is None:
-            return None
         m, unit = rate.m, rate.u
         scale = sourceterm.weight
         multiplier = sourceterm.rate_multiplier
         if isinstance(multiplier, Quantity):
             m = m * multiplier.m
             unit = unit * multiplier.u
-        elif multiplier is not None:
+        else:
             scale = scale * multiplier
         return m * scale, unit
 
@@ -152,10 +150,7 @@ class TermCalculator:
         """ The sourceterm's scalars and ROIs, summed over its hit
         efficiencies, as AsymmetricUncertainties in display units
         """
-        rate = self._rate(sourceterm)
-        if rate is None:
-            return {}
-        rate_m, rate_unit = rate
+        rate_m, rate_unit = self._rate(sourceterm)
         parts = {}
         for hiteff in self._hiteffs(sourceterm):
             for key, m in self._scaled_scalars(hiteff, rate_unit):
@@ -166,10 +161,7 @@ class TermCalculator:
         """ The sourceterm's spectra, summed over its hit efficiencies, as
         Histograms in display units
         """
-        rate = self._rate(sourceterm)
-        if rate is None:
-            return {}
-        rate_m, rate_unit = rate
+        rate_m, rate_unit = self._rate(sourceterm)
         parts = {}
         for hiteff in self._hiteffs(sourceterm):
             for key, hist in self._scaled_spectra(hiteff, rate_unit):
