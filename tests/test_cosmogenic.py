@@ -32,11 +32,12 @@ class TestActivatedMaterial(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        ActivatedMaterial.drop_collection()
-        VersionSettings.drop_collection()
+        # other tests create the same versions, whose documents would be
+        # copied into them
+        for cls in [VersionSettings] + vc._versioned_classes:
+            cls.drop_collection()
 
     def tearDown(self):
-        # other tests create the same versions
         self.setUp()
 
     def test_validate(self):

@@ -217,7 +217,7 @@ def import_version(fileobj: IO[bytes], version_tag: str,
     file can't be imported; the database is unchanged in all cases
     """
     from .maintenance import rebuild_sourceterms
-    from .sourceterm import check_version_units, unit_checks_deferred
+    from .sourceterm import check_version_units
     vc.validate_version_name(version_tag)
     vc.verify_version(version_tag, want_exists=False)
     manifest, settings, docs = read_version_file(fileobj)
@@ -251,8 +251,7 @@ def import_version(fileobj: IO[bytes], version_tag: str,
                         son['_id'] = ObjectId()
                         son['version_tags'] = [version_tag]
                     coll.insert_many(batch)
-            with unit_checks_deferred():
-                rebuild_sourceterms(version_tag)
+            rebuild_sourceterms(version_tag)
             # the documents were written without being validated
             unit_problems = check_version_units(version_tag)
             if not editable:

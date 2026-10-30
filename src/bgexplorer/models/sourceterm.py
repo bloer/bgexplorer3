@@ -6,8 +6,10 @@ from functools import cache
 from bson import json_util
 from pymongo import InsertOne, UpdateOne
 from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
-                         StringField, BooleanField, CASCADE, PULL,
-                         ObjectIdField, ValidationError, IntField)
+                         StringField, BooleanField, MapField, Document,
+                         SortedListField, CASCADE, PULL, ReferenceField,
+                         EmbeddedDocumentListField, ObjectIdField,
+                         ValidationError, IntField)
 from .verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedQuerySet, VersionedListField,
                      VersionedEmbeddedDocumentListField)
@@ -16,37 +18,23 @@ from .verdoc import (IDENTITY_FIELDS, check_writable, current_user_name)
 from .component import (Component, Placement, Assembly, ComponentSpec,
                         LocationMode)
 from .emissionspec import EmissionSpec, EmissionSource, Multiplier
-from .fields import QuantityField
+from .fields import (QuantityField, UncertainQuantityField, HistogramField,
+                     RawDictField)
+from .asymmetric import AsymmetricUncertainty, LinearExpression
+from .histogram import Histogram
 from .hiteff import HitEfficiency
-from .isotope import concentration_to_rate
-from .common import Quantity, UnitMismatchError
-from .termcalc import TermCalculator
+from .common import units, addnone, multnone, Quantity
+from .asymmetric import sum_values
 from . import settings
 from typing import (List, Optional, Union, Dict, Tuple, Iterable,
                     NamedTuple, Sequence, Set)
 from collections import defaultdict, OrderedDict
 from bson import ObjectId
-from contextlib import contextmanager
-from contextvars import ContextVar
 import logging
 import threading
 log = logging.getLogger(__name__)
-_unit_checks_deferred = ContextVar('unit_checks_deferred', default=False)
 NO_MATERIAL = '(no material)'
 NO_CATEGORY = '(uncategorized)'
-
-
-@contextmanager
-def unit_checks_deferred():
-    """ Don't raise from `SourceTerm.check_units` inside this context, for
-    bulk operations such as an import or merge that audit the whole version
-    afterwards, see `check_version_units`
-    """
-    token = _unit_checks_deferred.set(True)
-    try:
-        yield
-    finally:
-        _unit_checks_deferred.reset(token)
 
 
 class SourceTerm(VersionedDocument):
@@ -92,24 +80,10 @@ class SourceTerm(VersionedDocument):
         except IndexError:
             return self.assemblyRoot
 
-    @property
-    def unweighted_rate(self):
-        """ The source's rate, in specific activity if it was a concentration,
-        before the weight and rate multiplier are applied. None if it has none
-        """
-        rate = self.source.rate
-        # convert ppb-like units to specific activity
-        if (rate is not None and self.source.multiplier is Multiplier.mass
-                and rate.dimensionless):
-            rate = concentration_to_rate(self.source.name, rate)
-        return rate
-
     @cached_property
     def emissionrate(self):
-        rate = self.unweighted_rate
-        if rate is None:
-            return None
-        return rate * self.weight * self.rate_multiplier
+        return (self.source.standardized_rate * self.weight
+                * self.rate_multiplier)
 
 
     def group_keys(self) -> dict:
@@ -198,28 +172,6 @@ class SourceTerm(VersionedDocument):
                    [str(pid) for pid in self.placement_ids], hiteffs)
         return hashlib.sha1(repr(content).encode()).hexdigest()[:20]
 
-    def check_units(self, hiteffs: Optional[Iterable[HitEfficiency]] = None,
-                    calculator: Optional[TermCalculator] = None) -> None:
-        """ Raise ValidationError if our results can't be calculated in the
-        display units of the settings, e.g. because our emission rate doesn't
-        fit the normalization of one of our hit efficiencies. Check with
-        `hiteffs` rather than our own if given. Results with no display unit
-        yet are not checked. A `calculator` (not strict) can be shared by
-        many SourceTerms to reuse what it has worked out for each hit
-        efficiency.
-        """
-        if _unit_checks_deferred.get():
-            return
-        if hiteffs is None:
-            hiteffs = list(self.hiteffs)
-        if calculator is None:
-            config = settings.get_settings(self.active_version).hiteffdbconfig
-            calculator = TermCalculator(config, strict=False)
-        try:
-            calculator.check(self, hiteffs)
-        except UnitMismatchError as e:
-            raise ValidationError(f"{self.assemblyPathStr}: {e}") from e
-
     def derive(self) -> None:
         """ Set the fields that follow from the placement path and its
         components. Doesn't touch the database or the hit efficiencies.
@@ -249,7 +201,6 @@ class SourceTerm(VersionedDocument):
         self.derive()
         self.livetimes = [hit.get_livetime(self.emissionrate)
                           for hit in self.hiteffs]
-        self.check_units()
         self.stamp = self.content_stamp()
 
     @property
@@ -393,8 +344,8 @@ def _cached(key: Optional[tuple], calculate):
 
 def clear_results_cache():
     """ Empty every ResultsCache """
-    for results_cache in ResultsCache.instances:
-        results_cache.clear()
+    for cache in ResultsCache.instances:
+        cache.clear()
 
 
 def load_hiteffs(sourceterms: Iterable[SourceTerm], spectra: bool = True
@@ -419,31 +370,19 @@ def load_hiteffs(sourceterms: Iterable[SourceTerm], spectra: bool = True
     return result
 
 
-def hiteff_rate_units(hiteff: HitEfficiency) -> set:
-    """ The units of the emission rates of the SourceTerms in the version that
-    `hiteff` applies to, matched by source, location and material
-    """
-    query = SourceTerm.select_version(hiteff.active_version)(
-        source__name=hiteff.source, location=hiteff.location)
-    if hiteff.material:
-        query = query(material=hiteff.material)
-    found = (TermCalculator.rate_unit(st)
-             for st in query.only('version_tags', 'source', 'weight',
-                                 'rate_multiplier'))
-    return {unit for unit in found if unit is not None}
-
-
-def check_version_units(version: str, batch_size: int = 500) -> List[str]:
+def check_version_units(version: str) -> List[str]:
     """ Audit the units of everything in `version`, for data that was written
-    without being validated, such as an import or a merge. Scalars, spectra
-    and ROIs of the HitEfficiencies without a display unit in the settings
-    are given one, then every SourceTerm is checked. Returns a description
-    of each problem found, which is empty if the units all agree.
+    without being validated, such as an import or a merge. HitEfficiencies'
+    scalars, spectra and ROIs without a display unit in the settings are
+    given one, and every HitEfficiency and EmissionSource is checked as
+    saving it would be. Returns a description of each problem found, which
+    is empty if the units all agree.
     """
     vsettings = settings.get_settings(version, create=False)
     config = vsettings.hiteffdbconfig
     before = config.to_mongo()
-    for hiteff in HitEfficiency.select_version(version):
+    hiteffs = list(HitEfficiency.select_version(version))
+    for hiteff in hiteffs:
         config.update_from(hiteff)
     if config.to_mongo() != before:
         # update rather than save: the version may be locked or read-only
@@ -451,19 +390,20 @@ def check_version_units(version: str, batch_size: int = 500) -> List[str]:
         settings.touch(version)
 
     problems = []
-    seen = set()
-    query = SourceTerm.select_version(version).order_by('id')
-    start = 0
-    while batch := list(query.skip(start).limit(batch_size)):
-        start += batch_size
-        calculator = TermCalculator(config, load_hiteffs(batch, spectra=False))
-        for sourceterm in batch:
+    for hiteff in hiteffs:
+        try:
+            hiteff.check_dbconfig(config)
+        except ValidationError as e:
+            problems.append(f"HitEfficiency {hiteff.id} ({hiteff}): "
+                            f"{e.message}")
+    for spec in EmissionSpec.select_version(version):
+        for source in spec.sources:
             try:
-                calculator.check(sourceterm)
-            except UnitMismatchError as e:
-                if str(e) not in seen:
-                    seen.add(str(e))
-                    problems.append(f"{sourceterm.assemblyPathStr}: {e}")
+                source.clean()
+            except ValidationError as e:
+                problems.append(f"EmissionSpec {spec.name}, source "
+                                f"{source.name}: {e.message}")
+    problems = list(dict.fromkeys(problems))
     for problem in problems:
         log.warning("Unit mismatch in version '%s': %s", version, problem)
     return problems
@@ -647,9 +587,7 @@ def sync_sourceterms(version: str, candidates: Iterable[SourceTerm],
                [i for entry in stored.values() for i in entry.manual or ()] +
                [i for st in wanted.values()
                 for i in getattr(st, '_manual_hiteffs', ())])
-    calculator = TermCalculator(
-        settings.get_settings(version).hiteffdbconfig, strict=False)
-
+    
     now = datetime.datetime.now()
     user = current_user_name()
     inserts = []
@@ -674,7 +612,6 @@ def sync_sourceterms(version: str, candidates: Iterable[SourceTerm],
         sourceterm.original_id = (sourceterm.id if prior is None
                                   else prior.original_id)
         sourceterm.validate(clean=False)
-        sourceterm.check_units(hiteffs, calculator)
         if prior is None:
             sourceterm.revision = 1
             sourceterm.modified = now

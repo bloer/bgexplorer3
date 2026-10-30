@@ -39,7 +39,7 @@ class TestRadiopurityPages(RadiopurityMixin, AppTestCase):
 
     def test_overview_link(self):
         html = self.html(self.client.get(self.url('emissionspec.overview')))
-        self.assertIn('id="importradiopurity"', html)
+        self.assertIn('id="newradiopurity"', html)
 
     def test_form(self):
         response = self.client.get(self.url('radiopurity.search'))

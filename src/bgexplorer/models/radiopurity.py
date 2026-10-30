@@ -334,7 +334,8 @@ def _convert(result: dict, extra: dict) -> RadiopurityValue:
         try:
             # e.g. 'mBq/unit' parses as milli-Bq per micro-nit, so also
             # insist on units that emission sources handle
-            Multiplier.get_multiplier(_rate_field.to_python(value.rate))
+            Multiplier.get_multiplier(_rate_field.to_python(value.rate),
+                                      allow_mass_to_rate=True)
         except Exception:
             warnings = [f"can't import units '{result['unit']}'"]
             value.rate = None

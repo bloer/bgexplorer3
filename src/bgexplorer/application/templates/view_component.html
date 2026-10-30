@@ -90,7 +90,7 @@
     <h4>Info</h4>
     <div class="col-lg-4 col-md-6">
     <dl class="row">
-        {% for attr in ['description', 'material', 'notes', 'location'] %}
+        {% for attr in ['description', 'material', 'comment', 'location'] %}
         <dt class="col-4">{{ attr | title }}</dt><dd class="col-8">{{ g.object[attr] }} </dd>
         {% endfor %}
         {% if 'children' not in g.object._fields %}

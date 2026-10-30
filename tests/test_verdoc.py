@@ -73,6 +73,21 @@ class TestVersionedDocument(unittest.TestCase):
         self.assertEqual(a1.id, a2.id)
         self.assertEqual(a2.original_id, a2.id)
 
+    def test1_empty_version_tags(self):
+        # a document in no version is invisible to every version, so it
+        # can't be saved, even without validation
+        for kwargs in ({}, {'validate': False}):
+            with self.subTest(**kwargs):
+                with self.assertRaisesRegex(ValidationError, 'version_tags'):
+                    A(name="a1", version_tags=[]).save(**kwargs)
+        self.assertEqual(A.objects.count(), 0)
+        # nor can an existing document lose all its tags
+        a1 = A(name="a1").save()
+        a1.version_tags = []
+        with self.assertRaisesRegex(ValidationError, 'version_tags'):
+            a1.save(validate=False)
+        self.assertEqual(A.objects.get().version_tags, [self.default_tag])
+
     def test2_reference(self):
         a1 = A(name="a1").save()
         b1 = B(name="b1")

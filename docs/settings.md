@@ -56,10 +56,12 @@ rejected. Similarly, adding a new hit efficiency with incompatible units is
 rejected. If these aren't filled, the first inserted hit efficiency sets the units.
 
 The display unit is the unit of the hit efficiency value times its norm, e.g.
-`dru/mBq` with a rate norm is shown in `dru`. A hit efficiency whose norm doesn't fit the
-emission rate of the SourceTerms it applies to is rejected, and so is a
-SourceTerm whose rate doesn't fit its hit efficiencies. After importing or
-merging a version, any remaining mismatches are listed in the history event.
+`dru/mBq` with a rate norm is shown in `dru`. Hit efficiencies only apply to
+sources whose multiplier has their norm (see the [model](model.md)), so with the
+rates checked when specs are saved, every result can be shown in its display
+unit. Imported and merged documents aren't validated as they are written, so
+afterwards they are checked the same way, and any mismatches are listed in the
+history event.
 
 **Extra columns** lists extra hit efficiency fields, e.g. `material`, to show
 as columns on the Hit Efficiencies overview.
