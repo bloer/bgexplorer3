@@ -39,9 +39,10 @@ batch {{ component.purchaseinfo.batch or component.purchaseinfo.material_batch }
 {% block pagecontent %}
 {% set headers = ['Name', 'Hierarchy', 'Description', 'Material',
                   'Mass (kg)', 'Confidence', 'Part', 'Modified'] %}
-{% call datatable.render(headers) %}
+{% call datatable.render(headers, bulk=true) %}
     {% for component in data %}
     <tr class="component{% if component.hierarchy_level is gt 1 %} assembly{% endif %}" data-id="{{ component.id }}" data-original_id="{{ component.original_id }}">
+        <td><input type="checkbox" class="row-select" value="{{ component.original_id }}"></td>
         <td><a href="{{ url_for('.view', object=component) }}">{{ component.name }}</a> </td>
         <td>{{ component.hierarchy_level }}</td>
         <td>{{ component.description or '' }}</td>

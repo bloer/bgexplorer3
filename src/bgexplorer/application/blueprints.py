@@ -423,6 +423,33 @@ class CollectionViews(flask.Blueprint):
             flask.flash(f"Created {copy} as a copy of {original}", 'success')
             return flask.redirect(flask.url_for('.edit', object=copy))
 
+        @self.post('/bulk/delete')
+        def bulk_delete():
+            check_writable(flask.g.active_version)
+            ids = flask.request.json.get('ids', [])
+            for objid in ids:
+                try:
+                    self.queryset.get_or_404(objid).delete()
+                except Exception:
+                    pass
+            return flask.jsonify(deleted=len(ids))
+
+        @self.post('/bulk/clone')
+        @self.loads(*self.deferred_fields)
+        def bulk_clone():
+            check_writable(flask.g.active_version)
+            ids = flask.request.json.get('ids', [])
+            for objid in ids:
+                try:
+                    obj = self.queryset.get_or_404(objid)
+                    copy = obj.clone()
+                    if hasattr(copy, 'name'):
+                        copy.name = f"{obj.name} (copy)"
+                    copy.save()
+                except Exception:
+                    pass
+            return flask.jsonify(cloned=len(ids))
+
         @self.route('/import', methods=['GET', 'POST'])
         def import_():
             check_writable(flask.g.active_version)

@@ -23,9 +23,10 @@
 {%- endif -%}
 
 {% block pagecontent %}
-{% call datatable.render(['Name', 'Material', 'Isotopes', 'Reference', 'Modified']) %}
+{% call datatable.render(['Name', 'Material', 'Isotopes', 'Reference', 'Modified'], bulk=true) %}
     {% for material in data %}
     <tr class="activatedmaterial" data-id="{{ material.id }}" data-original_id="{{ material.original_id }}">
+        <td><input type="checkbox" class="row-select" value="{{ material.original_id }}"></td>
         <td><a href="{{ url_for('.view', object=material) }}">{{ material.name }}</a> {{ material.description or '' }}</td>
         <td>{{ material.material or '' }}</td>
         <td>{{ material.isotopes | map(attribute='isotope') | join(', ') }}</td>
