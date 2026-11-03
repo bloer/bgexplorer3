@@ -79,6 +79,7 @@ def create_admin_blueprint() -> flask.Blueprint:
         return flask.render_template('admin_maintenance.html',
                                      stats=maintenance.database_stats(),
                                      orphans=maintenance.find_orphans(),
+                                     locks=maintenance.find_locks(),
                                      versions=vc.list_versions())
 
     @bp.post('/maintenance/clear-cache')
@@ -94,6 +95,15 @@ def create_admin_blueprint() -> flask.Blueprint:
             flask.abort(404, f"No version '{version}'")
         count = maintenance.rebuild_sourceterms(version)
         flask.flash(f"Rebuilt {count} source terms in '{version}'", 'success')
+        return flask.redirect(flask.url_for('.maintenance_page'))
+
+    @bp.post('/maintenance/clear-locks')
+    def clear_locks():
+        expired_only = flask.request.form.get('expired_only') == 'true'
+        version = flask.request.form.get('version')
+        cleared = maintenance.clear_locks([version] if version else None,
+                                          expired_only=expired_only)
+        flask.flash(f"Cleared {len(cleared)} lock(s)", 'success')
         return flask.redirect(flask.url_for('.maintenance_page'))
 
     @bp.post('/maintenance/delete-orphans')

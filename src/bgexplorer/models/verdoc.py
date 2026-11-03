@@ -21,6 +21,11 @@ class VersionLockedError(ReadOnlyVersionError):
     such as a merge """
 
 
+class LockLostError(VersionLockedError):
+    """ Raised when the operation that locked a version tries to write to it
+    after its lock was cleared or taken over, e.g. because it expired """
+
+
 # Checks that a version may be written. Installed by `settings`, which owns
 # the data that decides it, so this module doesn't depend on it
 _write_guard: Callable[[str], None] = lambda version_tag: None
@@ -387,7 +392,7 @@ class VersionedDocument(Document):
         in the collection with `fromtag`, add `newtag` to its tags list.
         """
         cls.objects(version_tags=fromtag).update(bypass_version_control=True,
-                                                 push__version_tags=newtag)
+                                                 add_to_set__version_tags=newtag)
 
     @classmethod
     def delete_tag(cls, tag: str) -> None:

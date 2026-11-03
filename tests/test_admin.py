@@ -1,10 +1,12 @@
 """ The site admin pages and the maintenance functions behind them """
+import datetime
 import io
 from bson import ObjectId
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
-from bgexplorer.models.settings import ApplicationSettings, VersionSettings
+from bgexplorer.models.settings import (ApplicationSettings, VersionSettings,
+                                        acquire_lock, _now)
 from bgexplorer.models.sourceterm import SourceTerm, _cached
 from bgexplorer.models import versioncontrol as vc
 from bgexplorer.models import maintenance
@@ -131,6 +133,28 @@ class TestAdmin(AppTestCase):
         response = self.client.post(self.url('admin.rebuild'),
                                     data=dict(version='nope'))
         self.assertEqual(response.status_code, 404)
+
+    def test_locks(self):
+        page = self.html(self.client.get(self.url('admin.maintenance_page')))
+        self.assertIn('No versions are locked', page)
+        acquire_lock('main', 'running')
+        acquire_lock('t', 'crashed')
+        VersionSettings.objects(version_tag='t').update(
+            set__lock__expires=_now() - datetime.timedelta(seconds=1))
+        page = self.html(self.client.get(self.url('admin.maintenance_page')))
+        self.assertIn('id="clearlocks"', page)
+        self.assertIn('running', page)
+        self.assertIn('expired', page)
+
+        response = self.client.post(self.url('admin.clear_locks'),
+                                    data=dict(expired_only='true'))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual([i.version for i in maintenance.find_locks()],
+                         ['main'])
+        response = self.client.post(self.url('admin.clear_locks'),
+                                    data=dict(version='main'))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(maintenance.find_locks(), [])
 
     def test_orphans(self):
         self.assertFalse(maintenance.find_orphans())

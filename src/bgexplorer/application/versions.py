@@ -4,8 +4,8 @@ from mongoengine.errors import ValidationError
 from werkzeug.datastructures import MultiDict
 from ..models import versioncontrol as vc
 from ..models.verdoc import VersionedDocument, check_writable
-from ..models.settings import get_settings, release_lock
-from ..models.history import EventAction, log_event
+from ..models import maintenance
+from ..models.settings import get_settings
 from ..models.versiondiff import diff_versions
 from ..models.hiteff import HitEfficiency
 from .api import (APIError, validate_new_version, validation_fields,
@@ -129,8 +129,7 @@ def create_versions_blueprint() -> flask.Blueprint:
         if (response := require(Role.admin)) is not None:
             return response
         tag = flask.g.active_version
-        if release_lock(tag):
-            log_event(EventAction.clear_lock, tag)
+        if maintenance.clear_locks([tag]):
             flask.flash(f"Cleared the lock on '{tag}'", 'success')
         return flask.redirect(flask.url_for('overview'))
 

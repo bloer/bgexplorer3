@@ -5,7 +5,8 @@ from .hiteff import HitEfficiency
 from .cosmogenic import ActivatedMaterial
 from .sourceterm import SourceTerm, check_version_units
 from .settings import (VersionSettings, get_settings, touch, hold_locks,
-                       check_unlocked)
+                       holding, check_unlocked, new_lock, abandon_lock,
+                       held_locks)
 from .verdoc import (VersionedDocument, ReadOnlyVersionError,
                      check_writable, strip_identity, current_user_name)
 from .versiondiff import (find_refs, raw_content, diff_versions,
@@ -14,6 +15,7 @@ from .versiondiff import (find_refs, raw_content, diff_versions,
 from .history import EventAction, log_event
 from . import signals
 from bson import ObjectId
+from mongoengine import NotUniqueError
 from typing import Optional, Dict, List, Set
 from dataclasses import dataclass, field
 from enum import Enum
@@ -106,21 +108,37 @@ def _create_version(version_tag: str, fromtag: Optional[str],
     if not fromtag:
         # this is the easy case, all we have to do is create a settings object
         log.info(f"Creating new empty version {version_tag}")
-        return VersionSettings(version_tag=version_tag, editable=editable,
-                               description=description).save()
+        try:
+            return VersionSettings(version_tag=version_tag, editable=editable,
+                                   description=description).save()
+        except NotUniqueError as e:
+            raise KeyError(f"Version/tag {version_tag} already exists in the "
+                           "DB") from e
 
     # if we get here, we are constructing from previous version
-    # clone into a new version
+    # clone into a new version. The source can't change while it is copied,
+    # and the new version is locked from the start, until it is complete
     log.info(f"Creating new version {version_tag} from {fromtag}")
-    newsettings = get_settings(fromtag, create=False).clone(version_tag)
-    # use update rather than save: settings cloned from a tag are read-only
-    changes = dict(set__editable=editable,
-                   set__modified=datetime.datetime.now())
-    if description is not None:
-        changes['set__description'] = description
-    newsettings.update(**changes)
-    for cls in _versioned_classes:
-        cls.create_tag(version_tag, fromtag)
+    user = current_user_name()
+    with hold_locks([fromtag], f"creating '{version_tag}' from it", user):
+        lock = new_lock("being created", user)
+        newsettings = get_settings(fromtag, create=False).clone(
+            version_tag, lock=lock, overwrite=False)
+        with holding({version_tag: lock.token}):
+            try:
+                # use update rather than save: settings cloned from a tag are
+                # read-only
+                changes = dict(set__editable=editable,
+                               set__modified=datetime.datetime.now())
+                if description is not None:
+                    changes['set__description'] = description
+                newsettings.update(**changes)
+                for cls in _versioned_classes:
+                    cls.create_tag(version_tag, fromtag)
+            except BaseException:
+                log.exception(f"Creating '{version_tag}' failed, removing it")
+                _delete_version(version_tag)
+                raise
     newsettings.reload()
     return newsettings
 
@@ -150,8 +168,8 @@ def delete_version(version_tag: str, allow_tags: bool = True) -> None:
         if not VersionSettings.objects.get(version_tag=version_tag).editable:
             raise ProtectedVersionError(f"'{version_tag}' is a tag; tags "
                                         "can't be deleted")
-    check_unlocked(version_tag)
-    _delete_version(version_tag)
+    with hold_locks([version_tag], "being deleted", current_user_name()):
+        _delete_version(version_tag)
     log_event(EventAction.delete, version_tag)
 
 
@@ -235,7 +253,8 @@ def import_document(cls, original_id, from_tag: str, to_tag: str
         raise VersionControlError("Can't import a document into its own "
                                   "version")
     check_writable(to_tag)
-    with hold_locks([to_tag], f"an import from '{from_tag}'"):
+    with hold_locks([to_tag, from_tag], f"an import from '{from_tag}' into "
+                    f"'{to_tag}'", current_user_name()):
         source = cls.select_version(from_tag)(original_id=original_id)\
             .first()
         if source is None:
@@ -495,9 +514,8 @@ def merge_version(source: str, target: str,
     plan = plan_merge(source, target, rule)
     if plan.problems:
         raise MergeError("Can't merge", plan.problems)
-    locked = [target] + ([source] if get_settings(source).editable else [])
-    with hold_locks(locked, f"a merge from '{source}' into '{target}'",
-                    current_user_name()):
+    reason = f"a merge from '{source}' into '{target}'"
+    with hold_locks([target, source], reason, current_user_name()):
         # plan again: either version may have changed before we locked them
         plan = plan_merge(source, target, rule)
         if plan.problems:
@@ -534,6 +552,9 @@ def merge_version(source: str, target: str,
                 log_event(EventAction.merge_rollback, target, source,
                           message=f"restoring failed, see backup {backup}",
                           backup=backup, error=str(e))
+                abandon_lock(target, held_locks.get()[target],
+                             f"a merge from '{source}' that failed and "
+                             f"couldn't be undone, see the tag '{backup}'")
                 raise MergeError(f"The merge failed, and so did restoring "
                                  f"'{target}'. Its previous state is in "
                                  f"the tag '{backup}'", [str(e)]) from e

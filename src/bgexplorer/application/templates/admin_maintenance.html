@@ -46,6 +46,35 @@
     <div class="col-auto form-text">Regenerates the version's source terms from its components. Tags can't be rebuilt.</div>
 </form>
 
+<h2>Locks</h2>
+<div id="locks">
+{% if locks %}
+<table class="table w-auto">
+    <thead><tr><th>Version</th><th>Reason</th><th>User</th><th>Since</th><th>Expires</th><th></th></tr></thead>
+    <tbody>
+        {% for lock in locks %}
+        <tr><td>{{ lock.version }}</td><td>{{ lock.reason }}</td><td>{{ lock.user or '' }}</td>
+            <td>{{ lock.since }}</td>
+            <td>{% if lock.expires is none %}never{% elif lock.expired %}expired{% else %}{{ lock.expires }}{% endif %}</td>
+            <td><form method="POST" action="{{ url_for('admin.clear_locks') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="version" value="{{ lock.version }}">
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Clear this lock? Only do so if the operation holding it is no longer running.');">Clear</button>
+            </form></td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+<form method="POST" id="clearlocks" action="{{ url_for('admin.clear_locks') }}" class="mb-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="expired_only" value="true">
+    <button type="submit" class="btn btn-warning">Clear expired locks</button>
+    <span class="form-text">Locks of running operations are renewed automatically; those that aren't expire after a few minutes. Locks with no expiry were left by an operation that failed and need a look before they are cleared.</span>
+</form>
+{% else %}
+<p>No versions are locked.</p>
+{% endif %}
+</div>
+
 <h2>Orphaned documents</h2>
 <div id="orphans">
 {% if orphans %}

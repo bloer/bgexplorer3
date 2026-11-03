@@ -84,10 +84,17 @@ unless either version changed after the preview was made, in which case you
 are asked to review it again.
 
 While a merge runs, both versions are locked so nobody else can change them.
+Creating, deleting and importing into a version lock the versions involved
+too. Only the operation that took a lock can write to the version. Locks
+expire a few minutes after they were last renewed, and running operations
+renew them automatically, so a crash doesn't leave versions locked for long.
+
 The target branch is backed up as a tag first and restored from it if anything
 goes wrong; the backup is deleted afterwards. If even restoring fails, the
-backup tag is kept and named in the error message. If an interrupted merge
-leaves a lock behind, an admin can clear it from the version's overview.
+backup tag is kept and named in the error message, and the target stays locked
+without an expiry. An admin can clear a lock from the version's overview, and
+site admins can see and clear all locks, or only the expired ones, on the
+**Maintenance** page. Only clear a lock if its operation is no longer running.
 
 The JSON API can plan and run merges too, see [API](api.html#versions).
 

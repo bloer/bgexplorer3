@@ -279,7 +279,11 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         self.assertIn(backups[0], str(cm.exception))
         self.assertFalse(get_settings(backups[0]).editable)
-        self.assertIsNone(get_settings('main').lock)
+        # a target that couldn't be restored stays locked until an
+        # administrator has looked at it
+        lock = get_settings('main').lock
+        self.assertIsNotNone(lock)
+        self.assertIsNone(lock.expires)
 
 
 class TestMergePages(AppTestCase):

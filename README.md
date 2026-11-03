@@ -103,10 +103,14 @@ document until one of them changes it. All copies of an item have the same
 
 MongoDB transactions need a replica set, so merges don't use them. Instead,
 both versions are locked while merging, and nobody else can change them.
-The target is backed up as a tag first, and restored from it if the merge
-fails; the backup is deleted afterwards. If even restoring fails, the backup
-tag is kept and named in the error. An admin can clear a lock that an
-interrupted merge left behind, from the version's overview.
+Creating, deleting and importing into versions lock them the same way. A lock
+belongs to the operation that took it, and expires a few minutes after the
+last time it was renewed; running operations renew their locks automatically,
+so a crashed one frees its versions on its own. The target is backed up as a
+tag first, and restored from it if the merge fails; the backup is deleted
+afterwards. If even restoring fails, the backup tag is kept and named in the
+error, and the target stays locked, without an expiry, until an admin clears
+the lock from the version's overview or the site's maintenance page.
 
 A whole version can be exported to a file, e.g. to move it to another
 server or keep a backup, and imported under a new name: "Export" on its

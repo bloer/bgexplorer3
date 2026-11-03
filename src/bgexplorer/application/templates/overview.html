@@ -29,11 +29,11 @@
 </div>
 {% endblock %}
 {% block pagecontent %}
-{% if settings.lock %}
+{% if settings.active_lock %}
 <div id="lockwarning" class="alert alert-warning d-flex align-items-center">
-    <div class="me-auto">This version is locked by {{ settings.lock.reason }}
-        {%- if settings.lock.user %} ({{ settings.lock.user }}){% endif %}
-        since {{ pretty_date(settings.lock.since) }}, so it can't be changed until that finishes.</div>
+    <div class="me-auto">This version is locked by {{ settings.active_lock.reason }}
+        {%- if settings.active_lock.user %} ({{ settings.active_lock.user }}){% endif %}
+        since {{ pretty_date(settings.active_lock.since) }}, so it can't be changed until that finishes.</div>
     {% if has_role('admin') %}
     <form method="post" action="{{ url_for('versions.unlock') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

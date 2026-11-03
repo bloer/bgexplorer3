@@ -53,6 +53,12 @@ site admin can't be demoted or deactivated.
 - **Rebuild source terms**: deletes and regenerates all SourceTerms of a
   branch. SourceTerms are normally kept up to date automatically; use this if
   they look wrong.
+- **Locks**: lists the locked versions and who locked them and why. Locks
+  expire a few minutes after their operation last renewed them, so only
+  locks left by failed operations stay (those without an expiry always do).
+  **Clear expired locks** removes the ones that have run out; **Clear**
+  removes any single lock, which is only safe if its operation is no longer
+  running.
 - **Delete orphans**: removes documents that no version uses, and SourceTerms
   that refer to missing documents.
 

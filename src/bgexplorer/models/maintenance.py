@@ -1,14 +1,16 @@
 """ Database maintenance: statistics, consistency checks and cache control """
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional, Iterable
+import datetime
 import logging
 from .component import Component, Assembly
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, clear_results_cache
-from .settings import VersionSettings, touch
+from .settings import VersionSettings, touch, release_lock
 from .verdoc import check_writable
 from . import versioncontrol as vc
+from .history import EventAction, log_event
 from . import signals
 log = logging.getLogger(__name__)
 
@@ -141,3 +143,48 @@ def rebuild_sourceterms(version: str) -> int:
             signals.update_component(sender=None, document=component)
     touch(version)
     return SourceTerm.select_version(version).count()
+
+
+@dataclass
+class LockInfo:
+    """ A lock on a version, see `find_locks` """
+    version: str
+    reason: Optional[str]
+    user: Optional[str]
+    since: Optional[datetime.datetime]
+    expires: Optional[datetime.datetime]
+    token: object
+    # it has run out and no longer blocks anything
+    expired: bool
+
+
+def find_locks(versions: Optional[Iterable[str]] = None) -> List[LockInfo]:
+    """ The locks on versions, including expired ones that are still in the
+    database, ordered by version
+    """
+    query = VersionSettings.objects(lock__ne=None).order_by('version_tag')
+    if versions is not None:
+        query = query(version_tag__in=list(versions))
+    return [LockInfo(version=v.version_tag, reason=v.lock.reason,
+                     user=v.lock.user, since=v.lock.since,
+                     expires=v.lock.expires, token=v.lock.token,
+                     expired=v.lock.expired)
+            for v in query]
+
+
+def clear_locks(versions: Optional[Iterable[str]] = None,
+                expired_only: bool = False) -> List[str]:
+    """ Remove the locks from `versions`, or from all versions, or only the
+    expired ones if `expired_only`. Use it for locks that were left behind by
+    an operation that didn't finish, never for one that is still running.
+    Returns the versions that were unlocked
+    """
+    cleared = []
+    for info in find_locks(versions):
+        if expired_only and not info.expired:
+            continue
+        # by token, so a lock taken since it was listed isn't removed
+        if release_lock(info.version, info.token):
+            log_event(EventAction.clear_lock, info.version)
+            cleared.append(info.version)
+    return cleared

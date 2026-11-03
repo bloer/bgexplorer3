@@ -25,7 +25,7 @@ from mongoengine.errors import ValidationError, InvalidDocumentError
 
 from . import versioncontrol as vc
 from .history import EventAction, log_event
-from .settings import VersionSettings, VersionLock, holding
+from .settings import VersionSettings, new_lock, holding
 from .verdoc import current_user_name
 from .versiondiff import find_refs, SETTINGS_IDENTITY_FIELDS
 log = logging.getLogger(__name__)
@@ -237,8 +237,7 @@ def import_version(fileobj: IO[bytes], version_tag: str,
         raise VersionFileError("The file can't be imported",
                                [f"settings.json: {e}"]) from e
     # the new version is locked from the start, until it is complete
-    lock = VersionLock(token=ObjectId(), reason="an import",
-                       user=current_user_name())
+    lock = new_lock("an import", current_user_name())
     settings['lock'] = lock.to_mongo().to_dict()
     VersionSettings._get_collection().insert_one(settings)
     try:

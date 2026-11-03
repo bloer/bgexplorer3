@@ -201,7 +201,7 @@ def create_app(config_file=None, config=None):
             return dict()
         # whether to show buttons and forms that change this version
         return dict(settings=settings,
-                    can_edit=(settings.editable and settings.lock is None
+                    can_edit=(settings.editable and settings.active_lock is None
                               and auth.has_role('editor')))
 
     app.add_template_global(pretty_date, 'pretty_date')

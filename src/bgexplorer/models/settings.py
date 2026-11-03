@@ -1,4 +1,4 @@
-from mongoengine import (Document, DateTimeField, StringField, BooleanField,
+from mongoengine import (Q, Document, DateTimeField, StringField, BooleanField,
                          EmbeddedDocument, EmbeddedDocumentListField, signals,
                          FloatField, EnumField, MapField, URLField,
                          EmbeddedDocumentField, ListField, BinaryField,
@@ -13,10 +13,11 @@ from . import hiteff
 from . import verdoc
 from .common import units
 from enum import Enum
-from typing import Optional, Iterable, Iterator, FrozenSet
+from typing import Optional, Iterable, Iterator, Mapping
 import contextlib
 import contextvars
 import secrets
+import threading
 import datetime
 import logging
 log = logging.getLogger(__name__)
@@ -89,13 +90,39 @@ def get_calc_token(version_tag: str) -> Optional[ObjectId]:
     return _get_token(version_tag, 'calc_token')
 
 
-# versions whose lock is held by the current thread or task, which may
-# still write to them, see `hold_locks`
-held_locks: contextvars.ContextVar[FrozenSet[str]] = \
-    contextvars.ContextVar('held_version_locks', default=frozenset())
+# How long a lock lasts without being refreshed. The holder of a lock
+# refreshes it regularly, so one left behind by a crashed process or worker
+# frees itself after this long.
+LOCK_TTL = datetime.timedelta(minutes=5)
+
+# {version_tag: token} of the locks held by the current thread or task, which
+# may write to those versions, see `hold_locks`. Never modified in place.
+held_locks: contextvars.ContextVar[Mapping[str, ObjectId]] = \
+    contextvars.ContextVar('held_version_locks', default={})
 
 
-def _lock_error(version_tag: str, lock: dict) -> verdoc.VersionLockedError:
+def _now() -> datetime.datetime:
+    """ The current time as MongoDB stores it: UTC without a time zone """
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def _live(lock: Optional[Mapping]) -> bool:
+    """ Whether a stored lock is in force: it exists and hasn't expired. A
+    lock without an expiry time never expires """
+    if not lock:
+        return False
+    expires = lock.get('expires')
+    return expires is None or expires > _now()
+
+
+def new_lock(reason: str, user: Optional[str] = None,
+             ttl: Optional[datetime.timedelta] = LOCK_TTL) -> 'VersionLock':
+    """ A lock that expires `ttl` from now, or never if `ttl` is None """
+    return VersionLock(token=ObjectId(), reason=reason, user=user,
+                       expires=None if ttl is None else _now() + ttl)
+
+
+def _lock_error(version_tag: str, lock: Mapping) -> verdoc.VersionLockedError:
     reason = lock.get('reason') or 'another operation'
     return verdoc.VersionLockedError(f"Version '{version_tag}' is locked by "
                                      f"{reason}, try again later")
@@ -110,7 +137,7 @@ def check_unlocked(version_tag: Optional[str]) -> None:
         return
     doc = VersionSettings.objects(version_tag=version_tag)\
         .only('lock').as_pymongo().first()
-    if doc is not None and doc.get('lock'):
+    if doc is not None and _live(doc.get('lock')):
         raise _lock_error(version_tag, doc['lock'])
 
 
@@ -122,30 +149,54 @@ def _enforce_writable(version_tag: str) -> None:
     if doc.get('editable', True) is False:
         raise verdoc.ReadOnlyVersionError(
             f"Version '{version_tag}' is read-only")
-    if doc.get('lock') and version_tag not in held_locks.get():
-        raise _lock_error(version_tag, doc['lock'])
+    lock = doc.get('lock')
+    if (held := held_locks.get().get(version_tag)) is not None:
+        # the holder writes only while its own lock is still there; one
+        # that expired but wasn't taken over still counts
+        if not lock or lock.get('token') != held:
+            raise verdoc.LockLostError(
+                f"The lock on version '{version_tag}' was lost, the "
+                "operation can't continue")
+    elif _live(lock):
+        raise _lock_error(version_tag, lock)
 
 
 verdoc.set_write_guard(_enforce_writable)
 
 
-def acquire_lock(version_tag: str, reason: str,
-                 user: Optional[str] = None) -> ObjectId:
-    """ Lock `version_tag` and return the lock's token. Raises
-    VersionLockedError if it is already locked and KeyError if it doesn't
-    exist
+def acquire_lock(version_tag: str, reason: str, user: Optional[str] = None,
+                 ttl: Optional[datetime.timedelta] = LOCK_TTL) -> ObjectId:
+    """ Lock `version_tag` and return the lock's token. The lock expires
+    after `ttl` unless refreshed with `refresh_lock`; with None it never
+    does. Raises VersionLockedError if it is already locked and KeyError if
+    it doesn't exist
     """
-    lock = VersionLock(token=ObjectId(), reason=reason, user=user)
-    coll = VersionSettings._get_collection()
-    result = coll.update_one({'version_tag': version_tag,
-                              'lock': {'$in': [None]}},
-                             {'$set': {'lock': lock.to_mongo().to_dict()}})
-    if result.matched_count == 0:
-        doc = coll.find_one({'version_tag': version_tag}, {'lock': 1})
+    free = Q(lock=None) | Q(lock__expires__lte=_now())
+    for _ in range(3):
+        lock = new_lock(reason, user, ttl)
+        if VersionSettings.objects(Q(version_tag=version_tag) & free)\
+                          .update_one(set__lock=lock):
+            return lock.token
+        doc = VersionSettings.objects(version_tag=version_tag)\
+            .only('lock').as_pymongo().first()
         if doc is None:
             raise KeyError(version_tag)
-        raise _lock_error(version_tag, doc.get('lock') or {})
-    return lock.token
+        if _live(doc.get('lock')):
+            raise _lock_error(version_tag, doc['lock'])
+        # it was released or expired between the two queries; try again
+    raise _lock_error(version_tag, {})
+
+
+def refresh_lock(version_tag: str, token: ObjectId,
+                 ttl: datetime.timedelta = LOCK_TTL) -> bool:
+    """ Extend the lock with `token` to expire `ttl` from now. Returns False
+    if `version_tag` no longer has that lock, i.e. it was cleared or taken
+    over. Long operations that don't use `hold_locks` should call this
+    regularly
+    """
+    return bool(VersionSettings.objects(
+        version_tag=version_tag, lock__token=token
+        ).update_one(set__lock__expires=_now() + ttl))
 
 
 def release_lock(version_tag: str, token: Optional[ObjectId] = None
@@ -153,46 +204,93 @@ def release_lock(version_tag: str, token: Optional[ObjectId] = None
     """ Remove the lock from `version_tag`. If `token` is given, only remove
     it if it matches. Returns whether a lock was removed
     """
-    query = {'version_tag': version_tag, 'lock': {'$ne': None}}
+    query = dict(version_tag=version_tag, lock__ne=None)
     if token is not None:
-        query['lock.token'] = token
-    result = VersionSettings._get_collection().update_one(
-        query, {'$set': {'lock': None}})
-    return result.modified_count > 0
+        query['lock__token'] = token
+    return bool(VersionSettings.objects(**query).update_one(set__lock=None))
+
+
+class _Heartbeat(threading.Thread):
+    """ Refreshes locks in the background until stopped """
+    def __init__(self, tokens: Mapping[str, ObjectId],
+                 ttl: datetime.timedelta):
+        super().__init__(name='version-lock-heartbeat', daemon=True)
+        self.tokens = dict(tokens)
+        self.ttl = ttl
+        self._halt = threading.Event()
+
+    def run(self) -> None:
+        while not self._halt.wait(self.ttl.total_seconds() / 3):
+            for tag, token in list(self.tokens.items()):
+                try:
+                    if not refresh_lock(tag, token, self.ttl):
+                        log.error(f"The lock on version '{tag}' was lost")
+                        del self.tokens[tag]
+                except Exception:
+                    log.exception(f"Couldn't refresh the lock on '{tag}'")
+
+    def stop(self) -> None:
+        self._halt.set()
+        self.join()
 
 
 @contextlib.contextmanager
 def hold_locks(version_tags: Iterable[str], reason: str,
-               user: Optional[str] = None) -> Iterator[None]:
+               user: Optional[str] = None,
+               ttl: Optional[datetime.timedelta] = LOCK_TTL
+               ) -> Iterator[None]:
     """ Lock all of `version_tags` for the duration of the context. Writes
     to them are allowed only from within the context. Raises
-    VersionLockedError, without holding any locks, if any is already locked
+    VersionLockedError, without holding any locks, if any is already locked.
+    Versions that the current context already holds are left as they are.
+    The locks are refreshed in the background, so they last as long as the
+    context does but free themselves soon after a crash; `ttl` of None
+    disables that
     """
+    held = held_locks.get()
     tokens = {}
     try:
         # a fixed order, so concurrent callers can't each hold half
-        for tag in sorted(set(version_tags)):
-            tokens[tag] = acquire_lock(tag, reason, user)
+        for tag in sorted(set(version_tags) - set(held)):
+            tokens[tag] = acquire_lock(tag, reason, user, ttl)
     except BaseException:
         for tag, token in tokens.items():
             release_lock(tag, token)
         raise
-    with holding(tokens):
+    with holding(tokens, ttl):
         yield
 
 
 @contextlib.contextmanager
-def holding(tokens: dict) -> Iterator[None]:
+def holding(tokens: Mapping[str, ObjectId],
+            ttl: Optional[datetime.timedelta] = LOCK_TTL) -> Iterator[None]:
     """ Allow writes to the versions locked with {version_tag: token}
-    during the context, then release the locks
+    during the context, keep the locks alive, then release them
     """
-    reset = held_locks.set(held_locks.get() | set(tokens))
+    reset = held_locks.set({**held_locks.get(), **tokens})
+    heartbeat = None
+    if tokens and ttl is not None:
+        heartbeat = _Heartbeat(tokens, ttl)
+        heartbeat.start()
     try:
         yield
     finally:
+        if heartbeat is not None:
+            heartbeat.stop()
         held_locks.reset(reset)
         for tag, token in tokens.items():
             release_lock(tag, token)
+
+
+def abandon_lock(version_tag: str, token: ObjectId, reason: str) -> None:
+    """ Turn a lock held by this context into one that nobody holds and that
+    never expires, so that it stays when the context ends. For operations
+    that fail and leave a version in a state that needs an administrator,
+    who can clear it, see `maintenance.clear_locks`
+    """
+    VersionSettings.objects(version_tag=version_tag, lock__token=token)\
+        .update_one(set__lock__token=ObjectId(), set__lock__expires=None,
+                    set__lock__reason=reason)
 
 
 # the id of a new ApplicationSettings, so processes creating it at the same
@@ -402,6 +500,13 @@ class VersionLock(EmbeddedDocument):
     reason = StringField()
     user = StringField()
     since = DateTimeField(default=datetime.datetime.now)
+    # the lock is free after this time (UTC) unless refreshed, see
+    # `refresh_lock`. None: it doesn't expire
+    expires = DateTimeField(default=None)
+
+    @property
+    def expired(self) -> bool:
+        return self.expires is not None and self.expires <= _now()
 
 
 class VersionSettings(Document):
@@ -426,19 +531,33 @@ class VersionSettings(Document):
         'ordering': ['-modified'],
     }
 
-    def clone(self, newtag: str) -> 'VersionSettings':
-        """ Copy ourselves to a new tag, overwriting any existing settings
-        for that tag """
-        VersionSettings.objects(id=self.id).aggregate([
-            {'$unset': ['_id', 'lock']},
-            {'$set': {'version_tag': newtag,
-                      'modified': datetime.datetime.now(),
-                      'cache_token': ObjectId(),
-                      'calc_token': ObjectId()}},
+    @property
+    def active_lock(self) -> Optional['VersionLock']:
+        """ The lock on this version, unless it has expired """
+        return None if self.lock is None or self.lock.expired else self.lock
+
+    def clone(self, newtag: str, lock: Optional['VersionLock'] = None,
+              overwrite: bool = True) -> 'VersionSettings':
+        """ Copy ourselves to a new tag, with `lock` already on it, if given.
+        Existing settings for that tag are replaced if `overwrite` is true,
+        and otherwise raise KeyError
+        """
+        stages = [{'$unset': ['_id', 'lock']},
+                  {'$set': {'version_tag': newtag,
+                            'modified': datetime.datetime.now(),
+                            'cache_token': ObjectId(),
+                            'calc_token': ObjectId()}}]
+        if lock is not None:
+            stages.append({'$set': {'lock': lock.to_mongo().to_dict()}})
+        stages.append(
             {'$merge': {'into': VersionSettings.objects._collection.name,
                         'on': 'version_tag',
-                        'whenMatched': 'replace'}},
-            ])
+                        'whenMatched': 'replace' if overwrite else 'fail'}})
+        try:
+            VersionSettings.objects(id=self.id).aggregate(stages)
+        except DuplicateKeyError as e:
+            raise KeyError(f"Version/tag {newtag} already exists in the DB"
+                           ) from e
         return VersionSettings.objects.get(version_tag=newtag)
 
     def clean(self):
