@@ -8,7 +8,8 @@ import numpy as np
 from bson import ObjectId, json_util
 from mongoengine import disconnect
 from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models.versioncontrol import _versioned_classes, MergeRule
+from bgexplorer.models.verdoc import versioned_classes, referenced_classes
+from bgexplorer.models.versioncontrol import MergeRule
 from bgexplorer.models.versionfile import (export_version, import_version,
                                            read_version_file,
                                            VersionFileError)
@@ -98,7 +99,7 @@ def sourceterm_signature(tag):
 def snapshot():
     """ Everything in the database that an import could change """
     return ({cls.__name__: cls._get_collection().count_documents({})
-             for cls in _versioned_classes},
+             for cls in versioned_classes()},
             sorted(v.version_tag for v in vc.list_versions()))
 
 
@@ -112,7 +113,7 @@ class TestVersionFile(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in [VersionSettings, VersionEvent] + _versioned_classes:
+        for cls in [VersionSettings, VersionEvent] + versioned_classes():
             cls.drop_collection()
         make_model()
 
@@ -143,7 +144,7 @@ class TestVersionFile(unittest.TestCase):
         self.assertIn("Imported from 'src'", settings.description)
         self.assertIsNone(settings.lock)
         self.assertEqual(settings.hiteffdbconfig.extra_columns, ['material'])
-        for cls in vc._referenced_classes:
+        for cls in referenced_classes():
             with self.subTest(cls=cls.__name__):
                 src = set(cls._get_collection().distinct(
                     'original_id', {'version_tags': 'src'}))
@@ -175,8 +176,10 @@ class TestVersionFile(unittest.TestCase):
                          .mass.m, 1)
         # merging the copy back changes only what was edited
         plan = vc.plan_merge('copy', 'src', MergeRule.source)
-        self.assertEqual([[i.name for i in c.replace] for c in plan.classes],
-                         [['c1'], [], [], []])
+        self.assertEqual({c.cls.__name__: [i.name for i in c.replace]
+                          for c in plan.classes},
+                         {'Component': ['c1'], 'EmissionSpec': [],
+                          'HitEfficiency': [], 'ActivatedMaterial': []})
         event = VersionEvent.objects.first()
         self.assertEqual((event.action, event.version, event.other_version),
                          (EventAction.import_version, 'copy', 'src'))

@@ -3,8 +3,8 @@ import unittest
 from mongoengine import disconnect
 from bson import ObjectId
 from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models.versioncontrol import (_versioned_classes,
-                                              import_document,
+from bgexplorer.models.verdoc import versioned_classes
+from bgexplorer.models.versioncontrol import (import_document,
                                               VersionControlError)
 from bgexplorer.models.verdoc import ReadOnlyVersionError, VersionLockedError
 from bgexplorer.models.component import Component, Assembly, Placement
@@ -37,7 +37,7 @@ class TestImportDocument(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in [VersionSettings, VersionEvent] + _versioned_classes:
+        for cls in [VersionSettings, VersionEvent] + versioned_classes():
             cls.drop_collection()
         self.e1, self.c1 = make_model()
 

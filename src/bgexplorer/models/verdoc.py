@@ -258,6 +258,10 @@ class VersionedQuerySet(QuerySet):
         return QuerySet.modify(qs, *args, **kwargs)
 
 
+# every subclass of VersionedDocument, in definition order
+_defined: list = []
+
+
 class VersionedDocument(Document):
     """ Custom Document class that keeps track of prior versions tagged in
     the database. A verison tag is like a git tag; all collections should be
@@ -271,6 +275,14 @@ class VersionedDocument(Document):
 
     __slots__ = ['_active_version', '_query_fields']
     _DEFAULT_TAG = 'main'
+
+    # Whether version control manages the collection: copies it for new
+    # versions, deletes from it, checks and compares it, and so on. Subclasses
+    # that share their parent's collection are covered by the parent.
+    VERSION_REGISTER = True
+    # Whether other versioned documents refer to this class's documents, so
+    # that merges and imports must bring them along
+    VERSION_REFERENCED = True
 
     id = ObjectIdField(primary_key=True, default=ObjectId)
     original_id = ObjectIdField()
@@ -286,6 +298,12 @@ class VersionedDocument(Document):
             'indexes': ['version_tags', 'modified'],
             'ordering': ['-modified'],
             }
+
+    def __init_subclass__(cls, **kwargs):
+        # The metaclass hasn't set up cls._meta yet, so only note the class
+        # here. versioned_classes() works out the collections when asked
+        super().__init_subclass__(**kwargs)
+        _defined.append(cls)
 
     def __init__(self, *args, version_tag: Optional[str] = None,
                  active_version: Optional[str] = None, **kwargs):
@@ -532,6 +550,25 @@ def set_user_provider(provider: Optional[Callable[[], Optional[str]]]
 def current_user_name() -> Optional[str]:
     """ The name of the user making changes, if known """
     return _user_provider() if _user_provider is not None else None
+
+
+def versioned_classes() -> List[type]:
+    """ The classes whose collections are versioned: one for each collection,
+    the base class if several share one. Documents that others refer to come
+    first, then by name
+    """
+    classes = {}
+    for cls in _defined:
+        if cls._meta.get('abstract') or not cls.VERSION_REGISTER:
+            continue
+        classes.setdefault(cls._get_collection_name(), cls)
+    return sorted(classes.values(),
+                  key=lambda cls: (not cls.VERSION_REFERENCED, cls.__name__))
+
+
+def referenced_classes() -> List[type]:
+    """ The versioned classes that other versioned documents refer to """
+    return [cls for cls in versioned_classes() if cls.VERSION_REFERENCED]
 
 
 def check_version_tags(document: VersionedDocument) -> None:

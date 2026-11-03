@@ -8,13 +8,11 @@ from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, clear_results_cache
 from .settings import VersionSettings, touch, release_lock
-from .verdoc import check_writable
+from .verdoc import check_writable, versioned_classes
 from . import versioncontrol as vc
 from .history import EventAction, log_event
 from . import signals
 log = logging.getLogger(__name__)
-
-VERSIONED_CLASSES = tuple(vc._versioned_classes)
 
 
 def collection_size(doc_cls) -> Dict[str, int]:
@@ -34,7 +32,7 @@ def database_stats() -> dict:
                                     counts=vc.version_summary(v.version_tag))
                 for v in vc.list_versions()}
     collections = {cls.__name__: collection_size(cls)
-                   for cls in VERSIONED_CLASSES}
+                   for cls in versioned_classes()}
     return dict(versions=versions, collections=collections)
 
 
@@ -67,7 +65,7 @@ def find_orphans() -> Orphans:
     documents
     """
     result = Orphans()
-    for cls in VERSIONED_CLASSES:
+    for cls in versioned_classes():
         coll = cls._get_collection()
         ids = coll.distinct('_id', {'version_tags': {'$in': [None, []]}})
         if ids:
@@ -75,7 +73,7 @@ def find_orphans() -> Orphans:
 
     known = set(VersionSettings.objects.distinct('version_tag'))
     used = set()
-    for cls in VERSIONED_CLASSES:
+    for cls in versioned_classes():
         used.update(cls._get_collection().distinct('version_tags'))
     # an empty array counts as null for distinct
     result.unknown_tags = sorted(used - known - {None})
@@ -109,7 +107,7 @@ def delete_orphans(orphans: Orphans = None) -> int:
         changed += coll.update_many({'_id': {'$in': ids}},
                                     {'$pull': {'version_tags': version}}
                                     ).modified_count
-    for cls in VERSIONED_CLASSES:
+    for cls in versioned_classes():
         coll = cls._get_collection()
         if orphans.unknown_tags:
             changed += coll.update_many(

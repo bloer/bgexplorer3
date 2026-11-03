@@ -38,6 +38,8 @@ NO_CATEGORY = '(uncategorized)'
 
 
 class SourceTerm(VersionedDocument):
+    VERSION_REFERENCED = False
+
     # these fields are keys used for finding SourceTerms in the db
     assemblyRoot = VersionedReferenceField(Component, required=True,
                                            reverse_delete_rule=CASCADE)

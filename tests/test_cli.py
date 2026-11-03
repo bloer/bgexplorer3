@@ -5,6 +5,7 @@ from click.testing import CliRunner
 from bgexplorer.cli import cli, versions_cli
 from bgexplorer.models.users import User, Role
 from bgexplorer.models import versioncontrol as vc
+from bgexplorer.models.verdoc import versioned_classes
 from bgexplorer.models.settings import VersionSettings, get_settings
 from bgexplorer.models.history import VersionEvent
 from bgexplorer.models.versiondiff import diff_versions
@@ -85,7 +86,7 @@ class TestVersionsCli(unittest.TestCase):
     def setUp(self):
         mongoengine.connect(host=TEST_MONGODB_URI)
         self.addCleanup(mongoengine.disconnect)
-        for cls in [VersionSettings, VersionEvent] + vc._versioned_classes:
+        for cls in [VersionSettings, VersionEvent] + versioned_classes():
             cls.drop_collection()
         make_model('src')
 

@@ -4,7 +4,8 @@ import unittest
 from unittest import mock
 from mongoengine import disconnect
 from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models.versioncontrol import (_versioned_classes, MergeRule,
+from bgexplorer.models.verdoc import versioned_classes
+from bgexplorer.models.versioncontrol import (MergeRule,
                                               MergeError, plan_merge,
                                               merge_version, version_exists)
 from bgexplorer.models.component import Component, Assembly, Placement
@@ -46,7 +47,7 @@ def snapshot(tag):
     """ Which copies are in `tag`, and its settings """
     return ({cls.__name__: sorted(cls._get_collection().distinct(
                  '_id', {'version_tags': tag}))
-             for cls in _versioned_classes},
+             for cls in versioned_classes()},
             settings_content(tag))
 
 
@@ -60,7 +61,7 @@ class TestMerge(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in [VersionSettings, VersionEvent] + _versioned_classes:
+        for cls in [VersionSettings, VersionEvent] + versioned_classes():
             cls.drop_collection()
         vc.create_version('main')
         self.e1 = EmissionSpec(name='e1', sources=[
@@ -86,7 +87,7 @@ class TestMerge(unittest.TestCase):
     def test_plan(self):
         plan = plan_merge('b', 'main', MergeRule.newest)
         self.assertEqual(plan.problems, [])
-        components = plan.classes[0]
+        components = next(c for c in plan.classes if c.cls is Component)
         self.assertEqual([i.name for i in components.add], ['c4', 'new'])
         self.assertEqual([i.name for i in components.replace], ['c2', 'c3'])
         self.assertEqual([i.name for i in components.keep], ['c1'])

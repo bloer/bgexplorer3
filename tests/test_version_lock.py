@@ -6,6 +6,7 @@ from bson import ObjectId
 from bgexplorer.models.versioncontrol import (create_version, create_tag,
                                               delete_version)
 from bgexplorer.models.verdoc import VersionLockedError
+from bgexplorer.models.verdoc import versioned_classes
 from bgexplorer.models.component import Component
 from bgexplorer.models.settings import (VersionSettings, get_settings,
                                         acquire_lock, release_lock,
@@ -26,7 +27,7 @@ class TestVersionLock(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in (VersionSettings, Component, VersionEvent):
+        for cls in [VersionSettings, VersionEvent] + versioned_classes():
             cls.drop_collection()
         create_version('b')
         Component(name='c1', mass='1 kg', version_tag='b').save()

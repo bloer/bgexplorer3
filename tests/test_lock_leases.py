@@ -16,6 +16,7 @@ from bgexplorer.models.settings import (VersionSettings, get_settings,
                                         acquire_lock, release_lock,
                                         refresh_lock, hold_locks, holding)
 from bgexplorer.models.verdoc import VersionLockedError, LockLostError
+from bgexplorer.models.verdoc import versioned_classes
 from tests.dbutil import connect_test_db
 
 SECOND = datetime.timedelta(seconds=1)
@@ -37,7 +38,7 @@ class LockTestCase(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in (VersionSettings, Component, VersionEvent):
+        for cls in [VersionSettings, VersionEvent] + versioned_classes():
             cls.drop_collection()
         vc.create_version('b')
         Component(name='c1', mass='1 kg', version_tag='b').save()

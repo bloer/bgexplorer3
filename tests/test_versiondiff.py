@@ -2,7 +2,7 @@
 import unittest
 from mongoengine import disconnect
 from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models.versioncontrol import _versioned_classes
+from bgexplorer.models.verdoc import versioned_classes
 from bgexplorer.models.versiondiff import (diff_values, diff_documents,
                                            compare_document, diff_versions)
 from bgexplorer.models.component import Component, Assembly, Placement
@@ -69,7 +69,7 @@ class TestCompareDocuments(unittest.TestCase):
 
     def setUp(self):
         VersionSettings.drop_collection()
-        for cls in _versioned_classes:
+        for cls in versioned_classes():
             cls.drop_collection()
         vc.create_version('main')
         self.e1 = EmissionSpec(name='e1', sources=[
@@ -203,14 +203,13 @@ class TestCompareVersions(unittest.TestCase):
 
     def setUp(self):
         VersionSettings.drop_collection()
-        for cls in _versioned_classes:
+        for cls in versioned_classes():
             cls.drop_collection()
         branch_with_changes()
 
     def test_categories(self):
         result = diff_versions('main', 'b')
-        components = result.classes[0]
-        self.assertIs(components.cls, Component)
+        components = next(c for c in result.classes if c.cls is Component)
 
         def names(items):
             return [i.name for i in items]
@@ -220,13 +219,15 @@ class TestCompareVersions(unittest.TestCase):
         self.assertEqual(names(components.equal), ['equal'])
         self.assertEqual(names(components.same), ['same'])
         self.assertEqual(components.differ[0].newer, 'right')
-        self.assertFalse(result.classes[1].changed)
+        self.assertFalse(any(c.changed for c in result.classes
+                                if c.cls is not Component))
         self.assertEqual([e.pathstr for e in result.settings],
                          ['hiteffdbconfig.extra_columns'])
         self.assertTrue(result.changed)
         # without checking content, equal copies count as changed
-        components = diff_versions('main', 'b', check_content=False)\
-            .classes[0]
+        components = next(c for c in diff_versions(
+            'main', 'b', check_content=False).classes
+            if c.cls is Component)
         self.assertEqual(names(components.differ), ['changed', 'equal'])
 
     def test_unchanged(self):

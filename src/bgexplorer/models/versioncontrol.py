@@ -8,6 +8,7 @@ from .settings import (VersionSettings, get_settings, touch, hold_locks,
                        holding, check_unlocked, new_lock, abandon_lock,
                        held_locks)
 from .verdoc import (VersionedDocument, ReadOnlyVersionError,
+                     versioned_classes, referenced_classes,
                      check_writable, strip_identity, current_user_name)
 from .versiondiff import (find_refs, raw_content, diff_versions,
                           settings_content, ItemVersions, DiffEntry,
@@ -26,9 +27,6 @@ import re
 import logging
 log = logging.getLogger(__name__)
 
-
-_versioned_classes = [Component, EmissionSpec, HitEfficiency, ActivatedMaterial,
-                      SourceTerm]
 
 class ProtectedVersionError(PermissionError):
     """ Raised when trying to delete the default version """
@@ -63,7 +61,7 @@ def version_summary(version_tag: str) -> Dict[str, Dict[str, int]]:
                            .count(),
                            'unique': cls.objects(version_tags=[version_tag])
                            .count()}
-            for cls in _versioned_classes}
+            for cls in versioned_classes()}
 
 
 def version_exists(version_tag: str) -> bool:
@@ -133,7 +131,7 @@ def _create_version(version_tag: str, fromtag: Optional[str],
                 if description is not None:
                     changes['set__description'] = description
                 newsettings.update(**changes)
-                for cls in _versioned_classes:
+                for cls in versioned_classes():
                     cls.create_tag(version_tag, fromtag)
             except BaseException:
                 log.exception(f"Creating '{version_tag}' failed, removing it")
@@ -180,7 +178,7 @@ def _delete_version(version_tag: str) -> None:
     # The whole version goes away, so references within it (and the signals
     # that maintain them) don't matter; work directly on the collections
     # without loading any documents.
-    for cls in _versioned_classes:
+    for cls in versioned_classes():
         coll = cls._get_collection()
         # documents used only by this version (exact array match)
         coll.delete_many({'version_tags': [version_tag]})
@@ -221,15 +219,10 @@ def _adopt_copies(cls, version_tag: str, copy_ids) -> None:
                      {'$push': {'version_tags': version_tag}})
 
 
-# classes that versioned documents refer to
-_referenced_classes = [Component, EmissionSpec, HitEfficiency,
-                       ActivatedMaterial]
-
-
 def missing_refs(ids, version_tag: str) -> Set[ObjectId]:
     """ The items among `ids` that aren't in `version_tag` """
     missing = set(ids)
-    for cls in _referenced_classes:
+    for cls in referenced_classes():
         if not missing:
             break
         missing -= set(cls._get_collection().distinct(
@@ -378,7 +371,7 @@ def plan_merge(source: str, target: str,
             check(tag)
         except PermissionError as e:
             problems.append(str(e))
-    comparison = diff_versions(target, source, classes=_referenced_classes)
+    comparison = diff_versions(target, source, classes=referenced_classes())
     classes = []
     for result in comparison.classes:
         plan = ClassMergePlan(result.cls, add=result.only_right,
@@ -440,7 +433,7 @@ def _restore(target: str, backup: str) -> None:
     """ Make `target` contain exactly the documents and settings of
     `backup` again, keeping `target`'s own settings document and lock
     """
-    for cls in _versioned_classes:
+    for cls in versioned_classes():
         coll = cls._get_collection()
         ids = coll.distinct('_id', {'version_tags': target})
         coll.update_many({'_id': {'$in': ids}},

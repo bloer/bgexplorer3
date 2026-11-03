@@ -26,7 +26,7 @@ from mongoengine.errors import ValidationError, InvalidDocumentError
 from . import versioncontrol as vc
 from .history import EventAction, log_event
 from .settings import VersionSettings, new_lock, holding
-from .verdoc import current_user_name
+from .verdoc import current_user_name, referenced_classes
 from .versiondiff import find_refs, SETTINGS_IDENTITY_FIELDS
 log = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class VersionFileError(ValueError):
 def _classes() -> Dict[str, type]:
     """ {tar member name: class} for the exported classes """
     return {f"{cls._get_collection_name()}.jsonl": cls
-            for cls in vc._referenced_classes}
+            for cls in referenced_classes()}
 
 
 def _add_member(tar: tarfile.TarFile, name: str, fileobj: IO[bytes],

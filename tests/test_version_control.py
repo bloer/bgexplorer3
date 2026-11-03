@@ -1,7 +1,7 @@
 import unittest
 from mongoengine import *
 from bgexplorer.models.versioncontrol import *
-from bgexplorer.models.versioncontrol import _versioned_classes
+from bgexplorer.models.verdoc import versioned_classes
 from bgexplorer.models.component import Component
 from bgexplorer.models.assay import Assay
 from tests.dbutil import connect_test_db
@@ -21,7 +21,7 @@ class TestVersionedDocument(unittest.TestCase):
     def setUp(self):
         VersionSettings.drop_collection()
         # every versioned collection, so tags left by other tests don't clash
-        for cls in _versioned_classes:
+        for cls in versioned_classes():
             cls.drop_collection()
 
     def tearDown(self):
@@ -162,14 +162,14 @@ class TestDeleteVersion(unittest.TestCase):
 
     def setUp(self):
         VersionSettings.drop_collection()
-        for cls in _versioned_classes:
+        for cls in versioned_classes():
             cls.drop_collection()
 
     @staticmethod
     def _raw():
         """ every stored document, by collection and id """
         return {cls.__name__: {d['_id']: d for d in cls._get_collection().find()}
-                for cls in _versioned_classes}
+                for cls in versioned_classes()}
 
     @staticmethod
     def _add(tag, name):
@@ -206,7 +206,7 @@ class TestDeleteVersion(unittest.TestCase):
         # exactly the expected documents remain, and only version_tags changed
         self.assertEqual(self._raw(), expected)
         # nothing is left unversioned or still carrying the deleted tag
-        for cls in _versioned_classes:
+        for cls in versioned_classes():
             coll = cls._get_collection()
             self.assertEqual(coll.count_documents(
                 {'$or': [{'version_tags': {'$exists': False}},

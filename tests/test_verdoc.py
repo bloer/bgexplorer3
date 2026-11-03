@@ -6,25 +6,31 @@ from bgexplorer.models.verdoc import *
 from tests.dbutil import connect_test_db
 
 class A(VersionedDocument):
+    VERSION_REGISTER = False
     name = StringField()
 
 class B(VersionedDocument):
+    VERSION_REGISTER = False
     name = StringField()
     a = VersionedReferenceField(A)
 
 class C(VersionedDocument):
+    VERSION_REGISTER = False
     name = StringField()
     a = VersionedReferenceField(A, reverse_delete_rule=CASCADE)
 
 class C2(VersionedDocument):
+    VERSION_REGISTER = False
     name = StringField()
     a = VersionedReferenceField(A, reverse_delete_rule=NULLIFY)
 
 class C3(VersionedDocument):
+    VERSION_REGISTER = False
     name = StringField()
     a = ListField(VersionedReferenceField(A, reverse_delete_rule=PULL))
 
 class D(VersionedDocument):
+    VERSION_REGISTER = False
     name = StringField()
     a = VersionedListField(VersionedReferenceField(A))
 
@@ -32,6 +38,7 @@ class Holder(EmbeddedDocument):
     a = VersionedReferenceField(A)
 
 class E(VersionedDocument):
+    VERSION_REGISTER = False
     name = StringField()
     holders = VersionedEmbeddedDocumentListField(Holder)
 

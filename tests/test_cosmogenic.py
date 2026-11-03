@@ -12,6 +12,7 @@ from bgexplorer.models.settings import VersionSettings
 from bgexplorer.models.isotope import get_tau
 from bgexplorer.models.common import units
 from bgexplorer.models import versioncontrol as vc
+from bgexplorer.models.verdoc import versioned_classes
 from tests.dbutil import connect_test_db
 
 
@@ -34,7 +35,7 @@ class TestActivatedMaterial(unittest.TestCase):
     def setUp(self):
         # other tests create the same versions, whose documents would be
         # copied into them
-        for cls in [VersionSettings] + vc._versioned_classes:
+        for cls in [VersionSettings] + versioned_classes():
             cls.drop_collection()
 
     def tearDown(self):
