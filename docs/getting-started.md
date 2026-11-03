@@ -66,7 +66,7 @@ dilution refrigerator, with assays and simulated hit efficiencies. Load it
 into the version `examples-qis` with:
 
 ```sh
-python -m examples/qis/qis.py mongodb://localhost:27017/bgexplorer
+python examples/qis/qis.py mongodb://localhost:27017/bgexplorer
 ```
 
 or, with Docker:
