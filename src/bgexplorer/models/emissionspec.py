@@ -253,9 +253,11 @@ class EmissionSpec(VersionedDocument):
         else:
             doinsert = True
             matchout = EmissionSource(name=newsource.newsource,
-                                      generated_from=matchin.id)
+                                      generated_from=matchin.id,
+                                      category=matchin.category,
+                                      multiplier=matchin.multiplier)
 
-        matchout.multiplier = matchin.multiplier
+        # TODO: this check needs to include all types
         rate = matchin.rate * newsource.ratio
         rate_is_concentration = (units('ppb').check(matchin.rate) or
                                  units('g').check(matchin.rate))
