@@ -158,8 +158,16 @@ def _delete_version(version_tag: str) -> None:
     """ delete_version without protecting the default version """
     verify_version(version_tag)
     log.warning(f"About to delete tag {version_tag}")
+    # The whole version goes away, so references within it (and the signals
+    # that maintain them) don't matter; work directly on the collections
+    # without loading any documents.
     for cls in _versioned_classes:
-        cls.delete_tag(version_tag)
+        coll = cls._get_collection()
+        # documents used only by this version (exact array match)
+        coll.delete_many({'version_tags': [version_tag]})
+        # the rest are shared with other versions
+        coll.update_many({'version_tags': version_tag},
+                         {'$pull': {'version_tags': version_tag}})
     VersionSettings.objects(version_tag=version_tag).delete()
 
 
