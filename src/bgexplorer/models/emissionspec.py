@@ -258,6 +258,8 @@ class EmissionSpec(VersionedDocument):
                                       multiplier=matchin.multiplier)
 
         # TODO: this check needs to include all types
+        matchout.category = matchin.category
+        matchout.multiplier = matchin.multiplier
         rate = matchin.rate * newsource.ratio
         rate_is_concentration = (units('ppb').check(matchin.rate) or
                                  units('g').check(matchin.rate))
