@@ -9,6 +9,7 @@ from mongoengine.queryset.field_list import QueryFieldList
 from mongoengine import CASCADE, NULLIFY, PULL
 from bson import ObjectId, DBRef
 import datetime
+from pymongo.errors import DuplicateKeyError
 from typing import Optional, List, Callable
 
 
@@ -143,13 +144,14 @@ class VersionedQuerySet(QuerySet):
         (original_id, version_tags=active_version)
 
         Without transactions the split is done in an order that never loses
-        a document: copies are made under a staging tag that no version
-        uses, the active version is removed from the originals, and only
-        then do the copies take it. A failure in between leaves staged copies
-        that `maintenance.recover_interrupted_edits` restores or discards.
-        Two writers splitting the same shared document at once can still
-        make two copies; version locks guard the operations where that
-        matters.
+        a document: each copy is made under the staging tag of the version,
+        the active version is removed from the originals, and only then do
+        the copies take it. The unique index on (version_tags, original_id)
+        lets only one writer stage a copy of a document, so a writer that
+        finds one raises VersionLockedError, unless it is older than
+        `EDIT_GRACE`, when it is left from a failed edit and replaced. A
+        failure after the originals were changed leaves staged copies that
+        `maintenance.recover_interrupted_edits` restores or discards.
         """
         active = self.active_version
         if active is None:
@@ -161,19 +163,57 @@ class VersionedQuerySet(QuerySet):
                                              version_tags=active)
 
         # now find all matches with more than 1 version tag
-        tobefixed = list(response(version_tags__1__exists=True).scalar('id'))
-        if tobefixed:
-            shared = self.clear_query()(id__in=tobefixed)
-            staging = new_staging_tag(active)
-            shared.aggregate([{'$unset': '_id'},
-                              {'$set': {'version_tags': [staging]}},
-                              {'$merge': shared._collection.name}])
-            shared.update(pull__version_tags=active,
-                          bypass_version_control=True,
-                          bypass_reverse_delete=True)
-            self.clear_query()(__raw__={'version_tags': [staging]}).update(
-                set__version_tags=[active], bypass_version_control=True)
+        shared = list(response(version_tags__1__exists=True)
+                      .scalar('id', 'original_id'))
+        if shared:
+            staging = staging_tag(active)
+            staged = self._stage_copies(shared, staging)
+            self.clear_query()(id__in=[i for i, _ in shared]).update(
+                pull__version_tags=active, bypass_version_control=True,
+                bypass_reverse_delete=True)
+            self.clear_query()(__raw__={
+                'original_id': {'$in': staged}, 'version_tags': [staging]}
+            ).update(set__version_tags=[active], bypass_version_control=True)
         return response
+
+    def _stage_copies(self, shared, staging: str) -> list:
+        """ Copy the documents `shared`, a list of (id, original_id), with
+        only the tag `staging`. Returns the original_ids copied. If any can't
+        be copied the copies made are removed again
+        """
+        coll = self._collection
+        staged = []
+        try:
+            for _id, original_id in shared:
+                self._stage_copy(_id, original_id, staging)
+                staged.append(original_id)
+        except BaseException:
+            coll.delete_many({'original_id': {'$in': staged},
+                              'version_tags': [staging]})
+            raise
+        return staged
+
+    def _stage_copy(self, _id, original_id, staging: str) -> None:
+        source = self.clear_query()(id=_id)
+        pipeline = [{'$unset': '_id'},
+                    {'$set': {'version_tags': [staging]}},
+                    {'$merge': self._collection.name}]
+        for retry in (True, False):
+            try:
+                source.aggregate(pipeline)
+                return
+            except DuplicateKeyError:
+                blocking = self._collection.find_one(
+                    {'original_id': original_id, 'version_tags': [staging]},
+                    {'_id': 1})
+                if blocking is None:
+                    raise
+                if not retry or not staged_edit_is_stale(blocking['_id']):
+                    raise VersionLockedError(
+                        "The document is being edited by someone else, "
+                        "try again later") from None
+                self._collection.delete_one({'_id': blocking['_id'],
+                                             'version_tags': [staging]})
 
     def handle_reverse_delete(self, write_concern=None,
                               bypass_readonly: bool = False):
@@ -265,28 +305,36 @@ class VersionedQuerySet(QuerySet):
         return QuerySet.modify(qs, *args, **kwargs)
 
 
-# Copies being split off a shared document are tagged `editing/<version>/<id>`
-# until they take the version. The id's time tells how old the edit is. Version
-# names can't contain '/', so these can't be the tag of a version.
+# Copies being split off a shared document are tagged `editing/<version>`
+# until they take the version. Version names can't contain '/', so these
+# can't be the tag of a version. The age of the copy is the time in its id.
 STAGING_PREFIX = 'editing/'
 
+# staged copies younger than this may still belong to a running edit
+EDIT_GRACE = datetime.timedelta(minutes=1)
 
-def new_staging_tag(version_tag: str) -> str:
-    return f'{STAGING_PREFIX}{version_tag}/{ObjectId()}'
+
+def staging_tag(version_tag: str) -> str:
+    return f'{STAGING_PREFIX}{version_tag}'
 
 
-def parse_staging_tag(tag: str):
-    """ (version, time created) for a tag made by `new_staging_tag`, or None
-    for any other tag
+def parse_staging_tag(tag: str) -> Optional[str]:
+    """ The version of a tag made by `staging_tag`, or None for any other tag
     """
-    if not tag.startswith(STAGING_PREFIX):
-        return None
-    try:
-        version, oid = tag[len(STAGING_PREFIX):].rsplit('/', 1)
-        created = ObjectId(oid).generation_time
-    except Exception:
-        return None
-    return version, created.replace(tzinfo=None)
+    if tag.startswith(STAGING_PREFIX) and len(tag) > len(STAGING_PREFIX):
+        return tag[len(STAGING_PREFIX):]
+    return None
+
+
+def staged_edit_is_stale(doc_id: ObjectId,
+                         grace: Optional[datetime.timedelta] = None) -> bool:
+    """ Whether the staged copy `doc_id` was made more than `grace`
+    (`EDIT_GRACE` by default) ago
+    """
+    grace = EDIT_GRACE if grace is None else grace
+    made = doc_id.generation_time.replace(tzinfo=None)
+    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    return made <= now - grace
 
 
 # every subclass of VersionedDocument, in definition order

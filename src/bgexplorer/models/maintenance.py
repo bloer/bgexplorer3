@@ -8,7 +8,8 @@ from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, clear_results_cache
 from .settings import VersionSettings, release_lock
-from .verdoc import (versioned_classes, parse_staging_tag, STAGING_PREFIX)
+from .verdoc import (versioned_classes, parse_staging_tag, STAGING_PREFIX,
+                     staged_edit_is_stale, EDIT_GRACE)
 from . import versioncontrol as vc
 from .history import EventAction, log_event
 log = logging.getLogger(__name__)
@@ -62,22 +63,17 @@ def _ref_id(ref):
     return getattr(ref, 'id', ref)
 
 
-# edits younger than this may still be running
-EDIT_GRACE = datetime.timedelta(minutes=1)
-
-
 def _interrupted_copies(coll, grace: datetime.timedelta):
     """ (id, original_id, version, tags) of the staged copies in `coll` that
     were made more than `grace` ago, see `VersionedQuerySet.prepare_edit`
     """
-    cutoff = datetime.datetime.now(datetime.timezone.utc).replace(
-        tzinfo=None) - grace
     for doc in coll.find({'version_tags': {'$regex': '^' + STAGING_PREFIX}},
                          {'original_id': 1, 'version_tags': 1}):
+        if not staged_edit_is_stale(doc['_id'], grace):
+            continue
         for tag in doc['version_tags']:
-            parsed = parse_staging_tag(tag)
-            if parsed and parsed[1] <= cutoff:
-                yield (doc['_id'], doc['original_id'], parsed[0],
+            if (version := parse_staging_tag(tag)) is not None:
+                yield (doc['_id'], doc['original_id'], version,
                        doc['version_tags'])
                 break
 
@@ -87,8 +83,8 @@ def recover_interrupted_edits(grace: Optional[datetime.timedelta] = None
     """ Finish or undo the edits that stopped between making a copy of a
     shared document and giving it the version: a copy whose item is no longer
     in its version takes its place, and any other is discarded. Edits that
-    started less than `grace` ago (`EDIT_GRACE` by default) are left alone. Returns the number
-    `restored` and `discarded`
+    started less than `grace` ago (`EDIT_GRACE` by default) are left alone.
+    Returns the number `restored` and `discarded`
     """
     grace = EDIT_GRACE if grace is None else grace
     known = set(VersionSettings.objects.distinct('version_tag'))

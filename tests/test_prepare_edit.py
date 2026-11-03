@@ -10,24 +10,29 @@ from bgexplorer.models import versioncontrol as vc
 from bgexplorer.models.component import Component
 from bgexplorer.models.settings import VersionSettings
 from bgexplorer.models.history import VersionEvent
-from bgexplorer.models.verdoc import (versioned_classes, new_staging_tag,
-                                      parse_staging_tag, VersionedQuerySet)
+from bgexplorer.models.verdoc import (versioned_classes, staging_tag,
+                                      parse_staging_tag, VersionedQuerySet,
+                                      staged_edit_is_stale, VersionLockedError)
+from bgexplorer.models import verdoc
 from tests.dbutil import connect_test_db
 
 
 class TestStagingTag(unittest.TestCase):
     def test_roundtrip(self):
-        tag = new_staging_tag('main')
-        version, created = parse_staging_tag(tag)
-        self.assertEqual(version, 'main')
-        age = datetime.datetime.now(datetime.timezone.utc).replace(
-            tzinfo=None) - created
-        self.assertLess(abs(age.total_seconds()), 5)
+        tag = staging_tag('main')
+        self.assertEqual(parse_staging_tag(tag), 'main')
         self.assertIsNone(vc.VERSION_NAME_PATTERN.fullmatch(tag))
 
     def test_other_tags(self):
-        for tag in ('main', 'editing/', 'editing/main', 'editing/a/nonsense'):
+        for tag in ('main', 'editing/', 'editing', 'xediting/main'):
             self.assertIsNone(parse_staging_tag(tag), tag)
+
+    def test_staleness_from_id(self):
+        fresh = ObjectId()
+        self.assertFalse(staged_edit_is_stale(fresh))
+        self.assertTrue(staged_edit_is_stale(fresh, datetime.timedelta(0)))
+        old = ObjectId.from_datetime(datetime.datetime(2020, 1, 1))
+        self.assertTrue(staged_edit_is_stale(old))
 
 
 class PrepareEditCase(unittest.TestCase):
@@ -124,6 +129,73 @@ class TestPrepareEdit(PrepareEditCase):
         staged = list(self.coll.find({'version_tags': {'$regex': '^editing/'}}))
         self.assertEqual(len(staged), 1)
         self.assertEqual(staged[0]['name'], 'c1')
+
+
+class TestConcurrentEdits(PrepareEditCase):
+    def stage(self, name='c1', tag='b', age=None):
+        """ Put a staged copy of `name` in place, as left by another edit """
+        doc = self.coll.find_one({'name': name})
+        doc['_id'] = (ObjectId() if age is None else
+                      ObjectId.from_datetime(
+                          datetime.datetime.now(datetime.timezone.utc) - age))
+        doc['version_tags'] = [staging_tag(tag)]
+        self.coll.insert_one(doc)
+        return doc['_id']
+
+    def test_running_edit_blocks_a_second(self):
+        staged = self.stage()
+        with self.assertRaises(VersionLockedError):
+            self.edit()
+        # nothing changed, and the other edit's copy was not touched
+        self.assertEqual(self.tags('c1'), [['a', 'b'], ['editing/b']])
+        self.assertIsNotNone(self.coll.find_one({'_id': staged}))
+        self.assertEqual(
+            Component.select_version('b').get(name='c1').description, None)
+
+    def test_other_versions_do_not_block(self):
+        self.stage(tag='a')
+        self.edit()
+        self.assertEqual(self.tags('c1'), [['a'], ['b'], ['editing/a']])
+
+    def test_stale_copy_is_replaced(self):
+        old = self.stage(age=datetime.timedelta(hours=1))
+        self.edit()
+        self.assertEqual(self.tags('c1'), [['a'], ['b']])
+        self.assertIsNone(self.coll.find_one({'_id': old}))
+        self.assertEqual(
+            Component.select_version('b').get(name='c1').description,
+            'edited')
+
+    def test_collision_removes_the_copies_already_made(self):
+        # editing both documents: c2 is blocked after c1 was staged
+        self.stage('c2')
+        with self.assertRaises(VersionLockedError):
+            Component.select_version('b').update(set__description='x')
+        self.assertEqual(self.tags('c1'), [['a', 'b']])
+        self.assertEqual(self.tags('c2'), [['a', 'b'], ['editing/b']])
+        self.assertEqual(
+            Component.select_version('b').get(name='c1').description, None)
+
+    def test_interleaved_edits_make_one_copy(self):
+        # a second editor that starts after the first has staged
+        real = VersionedQuerySet._stage_copy
+        errors = []
+
+        def interleave(qs, *args, **kwargs):
+            real(qs, *args, **kwargs)
+            if not errors:
+                errors.append(None)
+                try:
+                    self.edit()
+                except VersionLockedError as e:
+                    errors[0] = e
+        with mock.patch.object(VersionedQuerySet, '_stage_copy', interleave):
+            self.edit()
+        self.assertIsInstance(errors[0], VersionLockedError)
+        self.assertEqual(self.tags('c1'), [['a'], ['b']])
+        self.assertEqual(
+            Component.select_version('b').get(name='c1').description,
+            'edited')
 
 
 class TestRecovery(PrepareEditCase):
