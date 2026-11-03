@@ -8,9 +8,8 @@ from mongoengine.queryset.field_list import QueryFieldList
 
 from mongoengine import CASCADE, NULLIFY, PULL
 from bson import ObjectId, DBRef
-import contextvars
 import datetime
-from typing import Optional, List, Callable, FrozenSet
+from typing import Optional, List, Callable
 
 
 class ReadOnlyVersionError(PermissionError):
@@ -22,29 +21,16 @@ class VersionLockedError(ReadOnlyVersionError):
     such as a merge """
 
 
-# versions whose lock is held by the current thread or task, which may
-# still write to them, see settings.hold_locks
-held_locks: contextvars.ContextVar[FrozenSet[str]] = \
-    contextvars.ContextVar('held_version_locks', default=frozenset())
+# Checks that a version may be written. Installed by `settings`, which owns
+# the data that decides it, so this module doesn't depend on it
+_write_guard: Callable[[str], None] = lambda version_tag: None
 
 
-def _lock_error(version_tag: str, lock: dict) -> VersionLockedError:
-    reason = lock.get('reason') or 'another operation'
-    return VersionLockedError(f"Version '{version_tag}' is locked by "
-                              f"{reason}, try again later")
-
-
-def check_unlocked(version_tag: Optional[str]) -> None:
-    """ Raise VersionLockedError if `version_tag` is locked by an operation
-    that isn't running in this context
-    """
-    if version_tag is None or version_tag in held_locks.get():
-        return
-    from .settings import VersionSettings
-    doc = VersionSettings.objects(version_tag=version_tag)\
-        .only('lock').as_pymongo().first()
-    if doc is not None and doc.get('lock'):
-        raise _lock_error(version_tag, doc['lock'])
+def set_write_guard(guard: Callable[[str], None]) -> None:
+    """ Install the function that raises ReadOnlyVersionError or
+    VersionLockedError if the given version can't be written """
+    global _write_guard
+    _write_guard = guard
 
 
 def check_writable(version_tag: Optional[str]) -> None:
@@ -52,18 +38,8 @@ def check_writable(version_tag: Optional[str]) -> None:
     or VersionLockedError if it is locked by another operation.
     Versions without a VersionSettings document are writable
     """
-    if version_tag is None:
-        return
-    # imported here to avoid a circular import
-    from .settings import VersionSettings
-    doc = VersionSettings.objects(version_tag=version_tag)\
-        .only('editable', 'lock').as_pymongo().first()
-    if doc is None:
-        return
-    if doc.get('editable', True) is False:
-        raise ReadOnlyVersionError(f"Version '{version_tag}' is read-only")
-    if doc.get('lock') and version_tag not in held_locks.get():
-        raise _lock_error(version_tag, doc['lock'])
+    if version_tag is not None:
+        _write_guard(version_tag)
 
 
 # FIXME: need to override update, modify, etc

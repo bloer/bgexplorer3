@@ -4,8 +4,9 @@ from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .cosmogenic import ActivatedMaterial
 from .sourceterm import SourceTerm, check_version_units
-from .settings import VersionSettings, get_settings, touch, hold_locks
-from .verdoc import (VersionedDocument, ReadOnlyVersionError, check_unlocked,
+from .settings import (VersionSettings, get_settings, touch, hold_locks,
+                       check_unlocked)
+from .verdoc import (VersionedDocument, ReadOnlyVersionError,
                      check_writable, strip_identity, current_user_name)
 from .versiondiff import (find_refs, raw_content, diff_versions,
                           settings_content, ItemVersions, DiffEntry,

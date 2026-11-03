@@ -13,8 +13,9 @@ from . import hiteff
 from . import verdoc
 from .common import units
 from enum import Enum
-from typing import Optional, Iterable, Iterator
+from typing import Optional, Iterable, Iterator, FrozenSet
 import contextlib
+import contextvars
 import secrets
 import datetime
 import logging
@@ -88,6 +89,46 @@ def get_calc_token(version_tag: str) -> Optional[ObjectId]:
     return _get_token(version_tag, 'calc_token')
 
 
+# versions whose lock is held by the current thread or task, which may
+# still write to them, see `hold_locks`
+held_locks: contextvars.ContextVar[FrozenSet[str]] = \
+    contextvars.ContextVar('held_version_locks', default=frozenset())
+
+
+def _lock_error(version_tag: str, lock: dict) -> verdoc.VersionLockedError:
+    reason = lock.get('reason') or 'another operation'
+    return verdoc.VersionLockedError(f"Version '{version_tag}' is locked by "
+                                     f"{reason}, try again later")
+
+
+def check_unlocked(version_tag: Optional[str]) -> None:
+    """ Raise VersionLockedError if `version_tag` is locked by an operation
+    that isn't running in this context. This only reports the lock at the
+    moment of the check, use `hold_locks` to guarantee it stays unlocked
+    """
+    if version_tag is None or version_tag in held_locks.get():
+        return
+    doc = VersionSettings.objects(version_tag=version_tag)\
+        .only('lock').as_pymongo().first()
+    if doc is not None and doc.get('lock'):
+        raise _lock_error(version_tag, doc['lock'])
+
+
+def _enforce_writable(version_tag: str) -> None:
+    doc = VersionSettings.objects(version_tag=version_tag)\
+        .only('editable', 'lock').as_pymongo().first()
+    if doc is None:
+        return
+    if doc.get('editable', True) is False:
+        raise verdoc.ReadOnlyVersionError(
+            f"Version '{version_tag}' is read-only")
+    if doc.get('lock') and version_tag not in held_locks.get():
+        raise _lock_error(version_tag, doc['lock'])
+
+
+verdoc.set_write_guard(_enforce_writable)
+
+
 def acquire_lock(version_tag: str, reason: str,
                  user: Optional[str] = None) -> ObjectId:
     """ Lock `version_tag` and return the lock's token. Raises
@@ -103,7 +144,7 @@ def acquire_lock(version_tag: str, reason: str,
         doc = coll.find_one({'version_tag': version_tag}, {'lock': 1})
         if doc is None:
             raise KeyError(version_tag)
-        raise verdoc._lock_error(version_tag, doc.get('lock') or {})
+        raise _lock_error(version_tag, doc.get('lock') or {})
     return lock.token
 
 
@@ -145,11 +186,11 @@ def holding(tokens: dict) -> Iterator[None]:
     """ Allow writes to the versions locked with {version_tag: token}
     during the context, then release the locks
     """
-    reset = verdoc.held_locks.set(verdoc.held_locks.get() | set(tokens))
+    reset = held_locks.set(held_locks.get() | set(tokens))
     try:
         yield
     finally:
-        verdoc.held_locks.reset(reset)
+        held_locks.reset(reset)
         for tag, token in tokens.items():
             release_lock(tag, token)
 
