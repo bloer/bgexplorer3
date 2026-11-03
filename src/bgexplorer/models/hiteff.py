@@ -2,6 +2,7 @@ from mongoengine.fields import (StringField, MapField, UUIDField, ListField,
                                 SortedListField, IntField, DynamicField,
                                 EnumField, FloatField, DictField)
 from mongoengine.errors import ValidationError
+from mongoengine import signals
 from .verdoc import DynamicVersionedDocument
 from .fields import QuantityField, UncertainQuantityField, HistogramField
 from .common import units as unitreg
@@ -265,3 +266,88 @@ class HitEfficiency(DynamicVersionedDocument):
             log.error("Error calculating livetime for HitEfficiency %s "
                       "(%s, %s)", self.key, self.source, self.location)
         return None
+
+
+def _stored_units(version_tag: str, type_: str, key: str):
+    """ (unit string, a value with that unit, norm) for each unique
+    combination of unit and norm type of `key` in the version's
+    HitEfficiencies, found in the database without loading them
+    """
+    # values are stored as the string a user typed, either
+    # plain or as a dict with 'str' and 'id', or as a dict with 'units'
+    value = f'${type_}.{key}'
+    isstr = {'$eq': [{'$type': value}, 'string']}
+    unitlist = HitEfficiency.select_version(version_tag).aggregate([
+        {'$project': {'norm': 1,
+                      'str': {'$cond': [isstr, value, f'{value}.str']},
+                      'units': f'{value}.units'}},
+        {'$group': {'_id': ['$units', '$norm', '$str']}}])
+    for entry in unitlist:
+        ustr, normstr, typed = entry['_id']
+        if typed is not None:
+            val = HitEfficiency.scalars.field.to_python(typed)
+            ustr = str(val.u)
+        elif ustr is None:
+            # this hiteff doesn't have this key
+            continue
+        else:
+            val = 1 * unitreg(ustr)
+        yield ustr, val, normstr or 'rate'
+
+
+def _check_display_unit(version_tag: str, type_: str, key: str, cfg) -> None:
+    """ Raise ValidationError if the display unit of `cfg` conflicts with a
+    HitEfficiency. If it has none, it is set from the HitEfficiencies
+    """
+    for ustr, val, normstr in _stored_units(version_tag, type_, key):
+        testhe = HitEfficiency(norm=normstr)
+        if cfg.display_unit is None:
+            cfg.display_unit = testhe.get_result_unit(val)
+        elif not testhe.check_result_unit(val, cfg.display_unit):
+            raise ValidationError(
+                f"display_{type_}: {key} the unit {cfg.display_unit} "
+                f"conflicts with at least one HitEfficiency document, "
+                f"which has units of {ustr}",
+                field_name=f"hiteffdbconfig.display_{type_}")
+
+
+def _check_roi_unit(version_tag: str, roi) -> None:
+    """ Raise ValidationError if `roi` can't be evaluated for, or has a
+    display unit that conflicts with, a HitEfficiency. If it has no display
+    unit, it is set from the HitEfficiencies
+    """
+    for he in HitEfficiency.select_version(version_tag)(
+            spectra_keys=roi.link_spectrum):
+        try:
+            result = roi.evaluate(he, store=False)
+        except ValidationError as e:
+            raise ValidationError(
+                str(e), field_name="hiteffdbconfig.rois") from e
+        if result is not None and roi.display_unit is None:
+            roi.display_unit = he.get_result_unit(result)
+
+
+def check_settings(version_settings) -> None:
+    """ Every scalar, spectrum and ROI needs a display unit that agrees with
+    all of the HitEfficiencies in the version
+    """
+    config = version_settings.hiteffdbconfig
+    tag = version_settings.version_tag
+    for type_ in ('scalars', 'spectra'):
+        for key, cfg in getattr(config, f'display_{type_}').items():
+            _check_display_unit(tag, type_, key, cfg)
+    for roi in config.rois:
+        _check_roi_unit(tag, roi)
+
+
+def update_rois(sender, document, **kwargs) -> None:
+    """ Update the ROIs of all HitEfficiencies when the settings are saved """
+    for he in HitEfficiency.select_version(document.version_tag):
+        rois = {roi.key: roi.evaluate(he, store=False)
+                for roi in document.hiteffdbconfig.rois}
+        # use update rather than save or we'll get stuck in a loop
+        he.update(set__rois=rois)
+
+
+settings.VersionSettings.clean_hooks.append(check_settings)
+signals.post_save.connect(update_rois, sender=settings.VersionSettings)

@@ -5,7 +5,7 @@ from bson import ObjectId
 from mongoengine.errors import ValidationError, NotUniqueError
 from werkzeug.datastructures import MultiDict
 from ..models import versioncontrol as vc
-from ..models import maintenance
+from ..models import maintenance, signals
 from ..models.settings import ApplicationSettings, get_application_settings
 from ..models.users import User, is_last_site_admin
 from .api import validation_fields
@@ -93,7 +93,7 @@ def create_admin_blueprint() -> flask.Blueprint:
         version = flask.request.form.get('version', '')
         if not vc.version_exists(version):
             flask.abort(404, f"No version '{version}'")
-        count = maintenance.rebuild_sourceterms(version)
+        count = signals.rebuild_sourceterms(version)
         flask.flash(f"Rebuilt {count} source terms in '{version}'", 'success')
         return flask.redirect(flask.url_for('.maintenance_page'))
 

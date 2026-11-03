@@ -194,6 +194,7 @@ class EmissionSource(EmbeddedDocument):
         return f"EmissionSource({self.name}, {self.rate})"
 
 class EmissionSpec(VersionedDocument):
+    VERSION_TOUCH_TERMS_ONLY = True
     name = StringField(required=True)
     description = StringField()
     comment = StringField()

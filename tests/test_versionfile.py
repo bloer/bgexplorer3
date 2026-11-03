@@ -263,7 +263,7 @@ class TestVersionFile(unittest.TestCase):
     def test_rollback(self):
         data = export_bytes()
         before = snapshot()
-        with mock.patch('bgexplorer.models.maintenance.rebuild_sourceterms',
+        with mock.patch('bgexplorer.models.signals.rebuild_sourceterms',
                         side_effect=RuntimeError('boom')):
             with self.assertRaises(VersionFileError) as cm:
                 import_version(io.BytesIO(data), 'new')

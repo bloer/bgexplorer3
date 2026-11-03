@@ -2,7 +2,8 @@
 from bson import ObjectId
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional
-from .verdoc import VersionedDocument, strip_identity
+from .settings import VersionSettings
+from .verdoc import VersionedDocument, strip_identity, referenced_classes
 
 # fields that don't count as content
 IGNORED_FIELDS = ('enteredby',)
@@ -219,7 +220,6 @@ SETTINGS_IDENTITY_FIELDS = ('_id', 'version_tag', 'editable', 'description',
 
 def settings_content(version_tag: str) -> dict:
     """ The raw VersionSettings of `version_tag` that a merge can change """
-    from .settings import VersionSettings
     son = VersionSettings._get_collection().find_one(
         {'version_tag': version_tag}) or {}
     for key in SETTINGS_IDENTITY_FIELDS:
@@ -287,11 +287,7 @@ def diff_versions(left: str, right: str, classes=None,
     the other documents, so aren't compared
     """
     if classes is None:
-        from .component import Component
-        from .emissionspec import EmissionSpec
-        from .hiteff import HitEfficiency
-        from .cosmogenic import ActivatedMaterial
-        classes = (Component, EmissionSpec, HitEfficiency, ActivatedMaterial)
+        classes = referenced_classes()
     return VersionComparison(
         left, right,
         [compare_class(cls, left, right, check_content) for cls in classes],

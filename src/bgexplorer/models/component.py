@@ -82,6 +82,7 @@ def _noslash(value):
 
 
 class Component(VersionedDocument):
+    VERSION_TOUCH_TERMS_ONLY = True
     name = StringField(required=True, validation=_noslash)
     description = StringField()
     comment = StringField(input_type='textarea')

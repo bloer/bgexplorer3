@@ -3,15 +3,14 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Iterable
 import datetime
 import logging
-from .component import Component, Assembly
+from .component import Component
 from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, clear_results_cache
-from .settings import VersionSettings, touch, release_lock
-from .verdoc import check_writable, versioned_classes
+from .settings import VersionSettings, release_lock
+from .verdoc import versioned_classes
 from . import versioncontrol as vc
 from .history import EventAction, log_event
-from . import signals
 log = logging.getLogger(__name__)
 
 
@@ -127,20 +126,6 @@ def clear_calculation_cache() -> None:
     """
     SourceTerm._get_db().drop_collection('calculated_results')
     clear_results_cache()
-
-
-def rebuild_sourceterms(version: str) -> int:
-    """ Delete the SourceTerms of a (writable) version and regenerate them
-    from its components. Returns the new number of SourceTerms
-    """
-    check_writable(version)
-    log.warning(f"Rebuilding SourceTerms for version '{version}'")
-    SourceTerm.select_version(version).delete()
-    for component in Component.select_version(version):
-        if not isinstance(component, Assembly):
-            signals.update_component(sender=None, document=component)
-    touch(version)
-    return SourceTerm.select_version(version).count()
 
 
 @dataclass

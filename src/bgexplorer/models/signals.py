@@ -6,7 +6,7 @@ from .cosmogenic import ActivatedMaterial, CosmogenicActivation
 from .hiteff import HitEfficiency
 from .sourceterm import (SourceTerm, find_sourceterms, sync_sourceterms,
                          placed_sourceterms)
-from .verdoc import ref_id
+from .verdoc import ref_id, check_writable
 from . import settings
 import logging
 log = logging.getLogger(__name__)
@@ -216,6 +216,20 @@ def update_hiteff(sender, document, **kwargs):
     # call update rather than save to bypass cleaning and post-save signals
     vsettings.update(set__hiteffdbconfig=vsettings.hiteffdbconfig)
     settings.touch(hiteff.active_version)
+
+
+def rebuild_sourceterms(version: str) -> int:
+    """ Delete the SourceTerms of a (writable) version and regenerate them
+    from its components. Returns the new number of SourceTerms
+    """
+    check_writable(version)
+    log.warning(f"Rebuilding SourceTerms for version '{version}'")
+    SourceTerm.select_version(version).delete()
+    for component in Component.select_version(version):
+        if not isinstance(component, Assembly):
+            update_component(sender=None, document=component)
+    settings.touch(version)
+    return SourceTerm.select_version(version).count()
 
 
 def post_save(sender, document, **kwargs):

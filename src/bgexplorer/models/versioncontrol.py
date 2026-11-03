@@ -466,7 +466,6 @@ def _update_sourceterms(target: str, plan: MergePlan) -> None:
     any of them, so then all are rebuilt, as they are when most components
     are affected
     """
-    from .maintenance import rebuild_sourceterms
     adopted = {c.cls: [i.original_id for i in c.adopted]
                for c in plan.classes}
     components = Component.select_version(target)
@@ -475,7 +474,7 @@ def _update_sourceterms(target: str, plan: MergePlan) -> None:
         {'original_id': {'$in': adopted.get(Component, [])}},
         {'spec_entries.spec': {'$in': adopted.get(EmissionSpec, [])}}]}).count()
     if plan.replace_settings or touched > components.count() / 2:
-        rebuild_sourceterms(target)
+        signals.rebuild_sourceterms(target)
         return
     docs = []
     # materials update their activation specs, specs their components, and

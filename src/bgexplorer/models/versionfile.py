@@ -23,9 +23,11 @@ from bson import ObjectId, json_util
 from mongoengine.base import get_document
 from mongoengine.errors import ValidationError, InvalidDocumentError
 
+from . import signals
 from . import versioncontrol as vc
 from .history import EventAction, log_event
 from .settings import VersionSettings, new_lock, holding
+from .sourceterm import check_version_units
 from .verdoc import current_user_name, referenced_classes
 from .versiondiff import find_refs, SETTINGS_IDENTITY_FIELDS
 log = logging.getLogger(__name__)
@@ -216,8 +218,6 @@ def import_version(fileobj: IO[bytes], version_tag: str,
     bad name, KeyError if the version exists and VersionFileError if the
     file can't be imported; the database is unchanged in all cases
     """
-    from .maintenance import rebuild_sourceterms
-    from .sourceterm import check_version_units
     vc.validate_version_name(version_tag)
     vc.verify_version(version_tag, want_exists=False)
     manifest, settings, docs = read_version_file(fileobj)
@@ -250,7 +250,7 @@ def import_version(fileobj: IO[bytes], version_tag: str,
                         son['_id'] = ObjectId()
                         son['version_tags'] = [version_tag]
                     coll.insert_many(batch)
-            rebuild_sourceterms(version_tag)
+            signals.rebuild_sourceterms(version_tag)
             # the documents were written without being validated
             unit_problems = check_version_units(version_tag)
             if not editable:

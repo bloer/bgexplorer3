@@ -283,6 +283,10 @@ class VersionedDocument(Document):
     # Whether other versioned documents refer to this class's documents, so
     # that merges and imports must bring them along
     VERSION_REFERENCED = True
+    # Whether saving or deleting a document only invalidates the SourceTerms
+    # that depend on it, rather than every calculation in the version, see
+    # `settings.touch`. For documents the SourceTerms are stamped with.
+    VERSION_TOUCH_TERMS_ONLY = False
 
     id = ObjectIdField(primary_key=True, default=ObjectId)
     original_id = ObjectIdField()

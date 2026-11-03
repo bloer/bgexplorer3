@@ -14,7 +14,7 @@ from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.settings import (VersionSettings, get_settings,
                                         acquire_lock)
 from bgexplorer.models.history import VersionEvent, EventAction
-from bgexplorer.models.maintenance import rebuild_sourceterms
+from bgexplorer.models.signals import rebuild_sourceterms
 from bgexplorer.models.versiondiff import settings_content
 from tests.dbutil import connect_test_db
 from tests.test_app_components import AppTestCase
@@ -147,7 +147,7 @@ class TestMerge(unittest.TestCase):
         e1.sources.append(EmissionSource(name='Co60', rate='1 mBq/kg'))
         e1.save()
         # every component uses the spec, so all terms are rebuilt
-        with mock.patch('bgexplorer.models.maintenance.rebuild_sourceterms',
+        with mock.patch('bgexplorer.models.signals.rebuild_sourceterms',
                         wraps=rebuild_sourceterms) as rebuild:
             merge_version('b', 'main', MergeRule.newest)
         rebuild.assert_called_once_with('main')
@@ -231,7 +231,7 @@ class TestMerge(unittest.TestCase):
             component=Component.select_version('b').get(name='c3'),
             weight=2))
         top.save()
-        with mock.patch('bgexplorer.models.maintenance.rebuild_sourceterms'
+        with mock.patch('bgexplorer.models.signals.rebuild_sourceterms'
                         ) as rebuild:
             merge_version('b', 'main', MergeRule.newest)
         rebuild.assert_not_called()
@@ -244,7 +244,7 @@ class TestMerge(unittest.TestCase):
         settings = get_settings('b')
         settings.hiteffdbconfig.extra_columns = ['material']
         settings.save()
-        with mock.patch('bgexplorer.models.maintenance.rebuild_sourceterms'
+        with mock.patch('bgexplorer.models.signals.rebuild_sourceterms'
                         ) as rebuild:
             merge_version('b', 'main', MergeRule.source)
         rebuild.assert_called_once_with('main')
