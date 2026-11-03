@@ -26,7 +26,9 @@ Every document (component, emission spec, hit efficiency or activated
 material) belongs to a list of versions. When you create a branch from another
 version, the new branch shares all of its documents; nothing is copied. As
 soon as you change a document in one branch, that branch gets its own copy, and
-the other versions keep the old one.
+the other versions keep the old one. The copy is made first and only then taken
+out of the original, so an interrupted edit can't lose a document; if one is
+left behind, the administrator's *Delete orphans* action restores or discards it.
 
 All copies of the same item share an `original_id`, and references between
 documents use it. That's why a component in a new branch still finds "its"

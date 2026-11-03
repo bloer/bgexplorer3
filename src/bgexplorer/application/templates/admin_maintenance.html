@@ -85,6 +85,9 @@
     {% for version, ids in orphans.sourceterms.items() %}
     <li>{{ ids | length }} source term(s) in {{ version }} refer to a missing component or emission spec</li>
     {% endfor %}
+    {% for name, ids in orphans.interrupted.items() %}
+    <li>{{ ids | length }} {{ name }} cop{{ 'y' if ids | length == 1 else 'ies' }} left by an edit that didn't finish</li>
+    {% endfor %}
     {% if orphans.unknown_tags %}
     <li>Documents are tagged with unknown versions: {{ orphans.unknown_tags | join(', ') }}</li>
     {% endif %}

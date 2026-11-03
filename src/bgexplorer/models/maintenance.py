@@ -8,7 +8,7 @@ from .emissionspec import EmissionSpec
 from .hiteff import HitEfficiency
 from .sourceterm import SourceTerm, clear_results_cache
 from .settings import VersionSettings, release_lock
-from .verdoc import versioned_classes
+from .verdoc import (versioned_classes, parse_staging_tag, STAGING_PREFIX)
 from . import versioncontrol as vc
 from .history import EventAction, log_event
 log = logging.getLogger(__name__)
@@ -44,9 +44,12 @@ class Orphans:
     sourceterms: Dict[str, List] = field(default_factory=dict)
     # tags used by documents that have no VersionSettings
     unknown_tags: List[str] = field(default_factory=list)
+    # class name: ids of copies left by an edit that didn't finish
+    interrupted: Dict[str, List] = field(default_factory=dict)
 
     def __bool__(self):
-        return bool(self.untagged or self.sourceterms or self.unknown_tags)
+        return bool(self.untagged or self.sourceterms or self.unknown_tags
+                    or self.interrupted)
 
 
 def _ids_in_version(doc_cls, version: str) -> set:
@@ -59,6 +62,54 @@ def _ref_id(ref):
     return getattr(ref, 'id', ref)
 
 
+# edits younger than this may still be running
+EDIT_GRACE = datetime.timedelta(minutes=1)
+
+
+def _interrupted_copies(coll, grace: datetime.timedelta):
+    """ (id, original_id, version, tags) of the staged copies in `coll` that
+    were made more than `grace` ago, see `VersionedQuerySet.prepare_edit`
+    """
+    cutoff = datetime.datetime.now(datetime.timezone.utc).replace(
+        tzinfo=None) - grace
+    for doc in coll.find({'version_tags': {'$regex': '^' + STAGING_PREFIX}},
+                         {'original_id': 1, 'version_tags': 1}):
+        for tag in doc['version_tags']:
+            parsed = parse_staging_tag(tag)
+            if parsed and parsed[1] <= cutoff:
+                yield (doc['_id'], doc['original_id'], parsed[0],
+                       doc['version_tags'])
+                break
+
+
+def recover_interrupted_edits(grace: Optional[datetime.timedelta] = None
+                              ) -> Dict[str, int]:
+    """ Finish or undo the edits that stopped between making a copy of a
+    shared document and giving it the version: a copy whose item is no longer
+    in its version takes its place, and any other is discarded. Edits that
+    started less than `grace` ago (`EDIT_GRACE` by default) are left alone. Returns the number
+    `restored` and `discarded`
+    """
+    grace = EDIT_GRACE if grace is None else grace
+    known = set(VersionSettings.objects.distinct('version_tag'))
+    result = dict(restored=0, discarded=0)
+    for cls in versioned_classes():
+        coll = cls._get_collection()
+        for _id, original_id, version, tags in list(
+                _interrupted_copies(coll, grace)):
+            has_item = version in known and coll.count_documents(
+                {'original_id': original_id, 'version_tags': version,
+                 '_id': {'$ne': _id}}, limit=1)
+            if version in known and not has_item:
+                done = coll.update_one({'_id': _id, 'version_tags': tags},
+                                       {'$set': {'version_tags': [version]}})
+                result['restored'] += done.modified_count
+            else:
+                done = coll.delete_one({'_id': _id, 'version_tags': tags})
+                result['discarded'] += done.deleted_count
+    return result
+
+
 def find_orphans() -> Orphans:
     """ Find documents that no version can reach or that reference missing
     documents
@@ -69,13 +120,16 @@ def find_orphans() -> Orphans:
         ids = coll.distinct('_id', {'version_tags': {'$in': [None, []]}})
         if ids:
             result.untagged[cls.__name__] = ids
+        if copies := [c[0] for c in _interrupted_copies(coll, EDIT_GRACE)]:
+            result.interrupted[cls.__name__] = copies
 
     known = set(VersionSettings.objects.distinct('version_tag'))
     used = set()
     for cls in versioned_classes():
         used.update(cls._get_collection().distinct('version_tags'))
     # an empty array counts as null for distinct
-    result.unknown_tags = sorted(used - known - {None})
+    result.unknown_tags = sorted(
+        t for t in used - known - {None} if not t.startswith(STAGING_PREFIX))
 
     stcoll = SourceTerm._get_collection()
     for version in sorted(known):
@@ -95,12 +149,15 @@ def find_orphans() -> Orphans:
 
 def delete_orphans(orphans: Orphans = None) -> int:
     """ Remove the documents found by `find_orphans`: untagged documents are
-    deleted, unknown tags are removed from all documents, and orphaned
-    SourceTerms are removed from their version. Returns the number of
-    documents changed or deleted
+    deleted, unknown tags are removed from all documents, orphaned
+    SourceTerms are removed from their version, and interrupted edits are
+    recovered. Returns the number of documents changed or deleted
     """
     orphans = orphans if orphans is not None else find_orphans()
     changed = 0
+    if orphans.interrupted:
+        done = recover_interrupted_edits()
+        changed += done['restored'] + done['discarded']
     for version, ids in orphans.sourceterms.items():
         coll = SourceTerm._get_collection()
         changed += coll.update_many({'_id': {'$in': ids}},

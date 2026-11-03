@@ -20,6 +20,7 @@ import tempfile
 from typing import IO, Dict, List, Optional
 
 from bson import ObjectId, json_util
+from pymongo.errors import DuplicateKeyError
 from mongoengine.base import get_document
 from mongoengine.errors import ValidationError, InvalidDocumentError
 
@@ -239,7 +240,11 @@ def import_version(fileobj: IO[bytes], version_tag: str,
     # the new version is locked from the start, until it is complete
     lock = new_lock("an import", current_user_name())
     settings['lock'] = lock.to_mongo().to_dict()
-    VersionSettings._get_collection().insert_one(settings)
+    try:
+        VersionSettings._get_collection().insert_one(settings)
+    except DuplicateKeyError as e:
+        raise KeyError(f"Version/tag {version_tag} already exists in the DB"
+                       ) from e
     try:
         with holding({version_tag: lock.token}):
             for cls, sons in docs.items():
@@ -259,7 +264,7 @@ def import_version(fileobj: IO[bytes], version_tag: str,
                     {'$set': {'editable': False}})
     except Exception as e:
         log.exception(f"Importing '{version_tag}' failed, removing it")
-        vc._delete_version(version_tag)
+        vc.purge_version(version_tag)
         raise VersionFileError(f"Importing failed: {e}", [str(e)]) from e
     counts = {cls.__name__: len(sons) for cls, sons in docs.items()}
     log_event(EventAction.import_version, version_tag, source,

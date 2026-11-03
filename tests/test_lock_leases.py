@@ -249,7 +249,7 @@ class TestMaintenance(LockTestCase):
 
 class TestOperationsLock(LockTestCase):
     def test_delete_holds_lock(self):
-        seen, patch = self.recording(vc, '_delete_version', ['b2'])
+        seen, patch = self.recording(vc, 'purge_version', ['b2'])
         with patch:
             vc.delete_version('b2')
         self.assertEqual(seen, [{'b2': True}])

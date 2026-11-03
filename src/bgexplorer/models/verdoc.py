@@ -141,33 +141,38 @@ class VersionedQuerySet(QuerySet):
 
         Returns a queryset pointing to the same objects refernced by
         (original_id, version_tags=active_version)
-        """
-        if self.active_version is None:
-            raise ValueError("Must set active_version before prepare_edit")
 
-        # TODO: possible race condition, this should be a transaction
+        Without transactions the split is done in an order that never loses
+        a document: copies are made under a staging tag that no version
+        uses, the active version is removed from the originals, and only
+        then do the copies take it. A failure in between leaves staged copies
+        that `maintenance.recover_interrupted_edits` restores or discards.
+        Two writers splitting the same shared document at once can still
+        make two copies; version locks guard the operations where that
+        matters.
+        """
+        active = self.active_version
+        if active is None:
+            raise ValueError("Must set active_version before prepare_edit")
 
         # first, get the list of matching objects before we mess with things
         matchids = list(self.scalar('original_id'))
-        # if not matchids:
-        #    return self.clear_query().none()
-
         response = self.clear_query().filter(original_id__in=matchids,
-                                             version_tags=self.active_version)
+                                             version_tags=active)
 
-        # now find all matches with more than 1 version tag. Update the
-        # existing one to remove the active version, then create a clone
-        # with a new ID and active_version
+        # now find all matches with more than 1 version tag
         tobefixed = list(response(version_tags__1__exists=True).scalar('id'))
         if tobefixed:
-            qs = self.clear_query()(id__in=tobefixed)
-            qs.update(pull__version_tags=self.active_version,
-                      bypass_version_control=True,
-                      bypass_reverse_delete=True)
-            qs.aggregate([{'$unset': '_id'},
-                          {'$set': {'version_tags': [self.active_version]}},
-                          {'$merge': qs._collection.name},
-                          ])
+            shared = self.clear_query()(id__in=tobefixed)
+            staging = new_staging_tag(active)
+            shared.aggregate([{'$unset': '_id'},
+                              {'$set': {'version_tags': [staging]}},
+                              {'$merge': shared._collection.name}])
+            shared.update(pull__version_tags=active,
+                          bypass_version_control=True,
+                          bypass_reverse_delete=True)
+            self.clear_query()(__raw__={'version_tags': [staging]}).update(
+                set__version_tags=[active], bypass_version_control=True)
         return response
 
     def handle_reverse_delete(self, write_concern=None,
@@ -232,9 +237,10 @@ class VersionedQuerySet(QuerySet):
             kwargs['inc__revision'] = 1
             kwargs['set__modified'] = datetime.datetime.now()
 
-        delete_after = False
+        pulled = None
         if 'pull__version_tags' in kwargs:
-            delete_after = True
+            # what may end up with no tags, found before the pull hides it
+            pulled = list(qs.scalar('id'))
             if not bypass_reverse_delete:
                 # removing a version tag is equivalent to deleting
                 write_concern = kwargs.get('write_concern')
@@ -242,9 +248,10 @@ class VersionedQuerySet(QuerySet):
                                          bypass_readonly=bypass_readonly)
 
         count = QuerySet.update(qs, *args, **kwargs)
-        if count and delete_after:
-            # remove any object with empty version_tags
-            self._collection.delete_many({'version_tags': {'$size': 0}})
+        if count and pulled:
+            # remove what has no version tags left
+            self._collection.delete_many({'_id': {'$in': pulled},
+                                          'version_tags': {'$size': 0}})
         return count
 
     def modify(self, *args, bypass_version_control: bool = False, **kwargs):
@@ -256,6 +263,30 @@ class VersionedQuerySet(QuerySet):
             kwargs['set__modified'] = datetime.datetime.now()
         # TODO: this doesn't handle most of modify's args
         return QuerySet.modify(qs, *args, **kwargs)
+
+
+# Copies being split off a shared document are tagged `editing/<version>/<id>`
+# until they take the version. The id's time tells how old the edit is. Version
+# names can't contain '/', so these can't be the tag of a version.
+STAGING_PREFIX = 'editing/'
+
+
+def new_staging_tag(version_tag: str) -> str:
+    return f'{STAGING_PREFIX}{version_tag}/{ObjectId()}'
+
+
+def parse_staging_tag(tag: str):
+    """ (version, time created) for a tag made by `new_staging_tag`, or None
+    for any other tag
+    """
+    if not tag.startswith(STAGING_PREFIX):
+        return None
+    try:
+        version, oid = tag[len(STAGING_PREFIX):].rsplit('/', 1)
+        created = ObjectId(oid).generation_time
+    except Exception:
+        return None
+    return version, created.replace(tzinfo=None)
 
 
 # every subclass of VersionedDocument, in definition order
@@ -415,13 +446,6 @@ class VersionedDocument(Document):
         """
         cls.objects(version_tags=fromtag).update(bypass_version_control=True,
                                                  add_to_set__version_tags=newtag)
-
-    @classmethod
-    def delete_tag(cls, tag: str) -> None:
-        """ Remove the version tag `tag` from all documents in the collection
-        If any documents contain *only* this tag, they are deleted.
-        """
-        cls.objects.select_tag(tag).delete(bypass_readonly=True)
 
     @classmethod
     def list_tags(cls) -> List[str]:
@@ -747,36 +771,3 @@ class VersionedEmbeddedDocumentListField(_VersionedDereferenceMixin,
     """ EmbeddedDocumentListField that dereferences VersionedReferenceFields
     inside the embedded documents according to the owner's active_version
     """
-
-
-"""
-        I thought this would be a good way to do it atomically, but now I'm
-        not sure if it would work at all
-
-        qs = self.clone()
-        filt = {'input': '$version_tags',
-                'as': 'this',
-                'cond': {'$ne': ['$$this', self.active_version]},
-                }
-        qs(version_tags__size__gt=1).aggregate([
-            # split version_tags into nested arrays with active and others
-            {'$set': {'version_tags': [[self.active_version],
-                                       {'$filter': filt}]},
-            # make a new document for active
-            {'$unwind': '$version_tags'},
-            # delete the _id for the active tag
-            {'$set': {'_id': {'$cond': {
-                'if': {'$eq': ['$version_tags', [self.active_version]]},
-                'then': '$$REMOVE',
-                'else': '$_id',
-                },
-             },
-             # write back to the collection, copying the  new document
-             # and upating tags on old
-             # this will attempt to merge the whole thing, is that
-             # inefficient, compared to update?
-             # plus if the new insert happens before the merge, it will
-             # violate unique constraints...
-             {'$merge': self._collection.name}
-            ])
-        """

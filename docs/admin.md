@@ -60,7 +60,11 @@ site admin can't be demoted or deactivated.
   removes any single lock, which is only safe if its operation is no longer
   running.
 - **Delete orphans**: removes documents that no version uses, and SourceTerms
-  that refer to missing documents.
+  that refer to missing documents. Editing a document that several versions
+  share first copies it under a temporary tag; if that is interrupted, the
+  copy is listed here and this restores it to its version, or discards it if
+  the version still has the document. Copies younger than a minute are left
+  alone.
 
 ## Configuration
 

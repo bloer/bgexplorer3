@@ -204,6 +204,19 @@ class TestVersionFile(unittest.TestCase):
         self.refused(data, 'src', KeyError)
         self.refused(data, 'bad/name', ValueError)
 
+    def test_import_race_does_not_overwrite(self):
+        # an import that raced past the existence check leaves the
+        # existing version alone
+        data = export_bytes()
+        before = snapshot()
+        token = get_settings('src').cache_token
+        with mock.patch.object(vc, 'verify_version'):
+            with self.assertRaises(KeyError):
+                import_version(io.BytesIO(data), 'src')
+        self.assertEqual(snapshot(), before)
+        self.assertEqual(get_settings('src').cache_token, token)
+        self.assertIsNone(get_settings('src').lock)
+
     def test_bad_files(self):
         good = read_members(export_bytes())
         manifest = json.loads(good['manifest.json'])

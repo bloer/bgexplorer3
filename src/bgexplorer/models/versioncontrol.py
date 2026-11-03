@@ -135,7 +135,7 @@ def _create_version(version_tag: str, fromtag: Optional[str],
                     cls.create_tag(version_tag, fromtag)
             except BaseException:
                 log.exception(f"Creating '{version_tag}' failed, removing it")
-                _delete_version(version_tag)
+                purge_version(version_tag)
                 raise
     newsettings.reload()
     return newsettings
@@ -167,12 +167,14 @@ def delete_version(version_tag: str, allow_tags: bool = True) -> None:
             raise ProtectedVersionError(f"'{version_tag}' is a tag; tags "
                                         "can't be deleted")
     with hold_locks([version_tag], "being deleted", current_user_name()):
-        _delete_version(version_tag)
+        purge_version(version_tag)
     log_event(EventAction.delete, version_tag)
 
 
-def _delete_version(version_tag: str) -> None:
-    """ delete_version without protecting the default version """
+def purge_version(version_tag: str) -> None:
+    """ Remove all of a version's data, without the checks, lock and event of
+    `delete_version`, so the caller must have made sure that is safe
+    """
     verify_version(version_tag)
     log.warning(f"About to delete tag {version_tag}")
     # The whole version goes away, so references within it (and the signals
@@ -550,12 +552,12 @@ def merge_version(source: str, target: str,
                 raise MergeError(f"The merge failed, and so did restoring "
                                  f"'{target}'. Its previous state is in "
                                  f"the tag '{backup}'", [str(e)]) from e
-            _delete_version(backup)
+            purge_version(backup)
             log_event(EventAction.merge_rollback, target, source,
                       message=str(e), error=str(e))
             raise MergeError(f"The merge failed, and '{target}' was "
                              f"restored: {e}", [str(e)]) from e
-        _delete_version(backup)
+        purge_version(backup)
         touch(target)
     log_event(EventAction.merge, target, source, message=_merge_summary(plan),
               rule=rule.value, counts=plan.counts(),
