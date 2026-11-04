@@ -115,8 +115,9 @@ keep a backup, and imported again under a new name:
   bgexplorer-versions --uri mongodb://HOST/DATABASE import NAME.bgx.tar.gz --name NEW [--tag]
   ```
 
-The file is a gzipped tar of `manifest.json`, `settings.json` and one JSON lines
-file per collection, in MongoDB Extended JSON. Imported documents keep their
+The file is a gzipped tar of `manifest.json` and one JSON lines file per
+collection (the version's settings are in `version_settings.jsonl`), in MongoDB
+Extended JSON. Imported documents keep their
 `original_id`, so the imported version can be compared with, and merged into,
 the versions it came from. The whole file is checked before anything is
 created. SourceTerms aren't exported; they are rebuilt on import.
