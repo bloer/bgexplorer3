@@ -2,7 +2,7 @@
 from bson import ObjectId
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional
-from .settings import VersionSettings
+from ..models.settings import VersionSettings
 from .verdoc import VersionedDocument, strip_identity, referenced_classes
 
 # fields that don't count as content

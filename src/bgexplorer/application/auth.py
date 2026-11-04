@@ -15,7 +15,7 @@ from mongoengine import NotUniqueError
 from ..models.settings import (get_application_settings, get_server_secret,
                                use_server_secret)
 from ..models.users import User, Role, check_login, has_site_admin
-from ..models.verdoc import set_user_provider
+from ..versioning.verdoc import set_user_provider
 log = logging.getLogger(__name__)
 
 login_manager = LoginManager()

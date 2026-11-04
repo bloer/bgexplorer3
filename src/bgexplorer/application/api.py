@@ -15,8 +15,8 @@ from mongoengine.errors import ValidationError, FieldDoesNotExist
 from pint.errors import PintError
 from werkzeug.exceptions import HTTPException
 from ..models.settings import VersionSettings, HitEffDbConfig
-from ..models import versioncontrol as vc
-from ..models.versionfile import (export_version, import_version,
+from ..versioning import control as vc
+from ..versioning.archive import (export_version, import_version,
                                   VersionFileError)
 from .auth import require, Role, SAFE_METHODS
 

@@ -5,7 +5,7 @@ from bgexplorer.application.app import create_app
 from bgexplorer.models.component import Component
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import VersionSettings, get_settings
-from bgexplorer.models.versioncontrol import version_exists, create_tag
+from bgexplorer.versioning.control import version_exists, create_tag
 from tests.dbutil import TEST_MONGODB_URI, connect_test_db
 from tests.test_app import reset_database
 

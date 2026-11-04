@@ -22,7 +22,7 @@ from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.users import User, Role
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests.test_app_components import AppTestCase
 from tests.test_radiopurity import fixture
 

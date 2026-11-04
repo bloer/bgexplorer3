@@ -19,7 +19,7 @@ from bgexplorer.models.settings import (get_settings, HitEffDbConfig,
 from bgexplorer.models.sourceterm import (SourceTerm, check_version_units,
                                           load_hiteffs)
 from bgexplorer.models.termcalc import TermCalculator
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests.test_app_components import AppTestCase
 
 # value times norm is in dru for each

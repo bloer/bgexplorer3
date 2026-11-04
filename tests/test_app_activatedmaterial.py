@@ -6,7 +6,7 @@ from bgexplorer.models.cosmogenic import (ActivatedMaterial,
                                           CosmogenicActivation,
                                           ActivationPeriod)
 from bgexplorer.models.sourceterm import SourceTerm
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests.test_app_components import AppTestCase
 from tests.test_app_emissionspec import mainform, rows, set_rows
 from tests.test_cosmogenic import copper

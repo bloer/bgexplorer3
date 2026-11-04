@@ -3,14 +3,14 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Iterable
 import datetime
 import logging
-from .component import Component
-from .emissionspec import EmissionSpec
-from .hiteff import HitEfficiency
-from .sourceterm import SourceTerm, clear_results_cache
-from .settings import VersionSettings, release_lock
+from ..models.component import Component
+from ..models.emissionspec import EmissionSpec
+from ..models.hiteff import HitEfficiency
+from ..models.sourceterm import SourceTerm, clear_results_cache
+from ..models.settings import VersionSettings, release_lock
 from .verdoc import (versioned_classes, parse_staging_tag, STAGING_PREFIX,
                      staged_edit_is_stale, EDIT_GRACE)
-from . import versioncontrol as vc
+from . import control as vc
 from .history import EventAction, log_event
 log = logging.getLogger(__name__)
 

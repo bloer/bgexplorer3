@@ -3,9 +3,9 @@ import time
 import unittest
 from unittest import mock
 from mongoengine import disconnect
-from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models.verdoc import versioned_classes
-from bgexplorer.models.versioncontrol import (MergeRule,
+from bgexplorer.versioning import control as vc
+from bgexplorer.versioning.verdoc import versioned_classes
+from bgexplorer.versioning.control import (MergeRule,
                                               MergeError, plan_merge,
                                               merge_version, version_exists)
 from bgexplorer.models.component import Component, Assembly, Placement
@@ -13,9 +13,9 @@ from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.settings import (VersionSettings, get_settings,
                                         acquire_lock)
-from bgexplorer.models.history import VersionEvent, EventAction
+from bgexplorer.versioning.history import VersionEvent, EventAction
 from bgexplorer.models.signals import rebuild_sourceterms
-from bgexplorer.models.versiondiff import settings_content
+from bgexplorer.versioning.diff import settings_content
 from tests.dbutil import connect_test_db
 from tests.test_app_components import AppTestCase
 

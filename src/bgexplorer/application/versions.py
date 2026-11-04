@@ -2,11 +2,11 @@
 import flask
 from mongoengine.errors import ValidationError
 from werkzeug.datastructures import MultiDict
-from ..models import versioncontrol as vc
-from ..models.verdoc import VersionedDocument, check_writable
-from ..models import maintenance
+from ..versioning import control as vc
+from ..versioning.verdoc import VersionedDocument, check_writable
+from ..versioning import maintenance
 from ..models.settings import get_settings
-from ..models.versiondiff import diff_versions
+from ..versioning.diff import diff_versions
 from ..models.hiteff import HitEfficiency
 from .api import (APIError, validate_new_version, validation_fields,
                   import_uploaded_version, send_version_file)

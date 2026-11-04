@@ -15,9 +15,9 @@ from ..models.hiteff import HitEfficiency
 from ..models.cosmogenic import ActivatedMaterial, CosmogenicActivation
 from ..models.fields import InlineAttachment
 from ..models.importexport import iter_json_documents, import_documents
-from ..models.verdoc import check_writable
-from ..models.versiondiff import compare_document, find_refs
-from ..models.versioncontrol import (version_exists, import_document,
+from ..versioning.verdoc import check_writable
+from ..versioning.diff import compare_document, find_refs
+from ..versioning.control import (version_exists, import_document,
                                      VersionControlError)
 from .api import validation_fields
 from .auth import require_for_changes, Role

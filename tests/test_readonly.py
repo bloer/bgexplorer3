@@ -1,10 +1,10 @@
 """ Read-only versions (tags) can't be modified """
 import unittest
 from mongoengine import disconnect
-from bgexplorer.models.versioncontrol import (create_version, create_tag,
+from bgexplorer.versioning.control import (create_version, create_tag,
                                               create_branch, delete_version,
                                               version_exists)
-from bgexplorer.models.verdoc import ReadOnlyVersionError
+from bgexplorer.versioning.verdoc import ReadOnlyVersionError
 from bgexplorer.models.component import Component, Assembly
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency

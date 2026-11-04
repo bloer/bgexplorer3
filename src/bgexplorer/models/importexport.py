@@ -11,7 +11,7 @@ from mongoengine.base import get_document
 from mongoengine.fields import (EmbeddedDocumentField, ListField, MapField,
                                 DictField)
 
-from .verdoc import (VersionedDocument, VersionedReferenceField,
+from ..versioning.verdoc import (VersionedDocument, VersionedReferenceField,
                      strip_identity)
 
 # derived fields that `clean` rebuilds

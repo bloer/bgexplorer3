@@ -9,7 +9,7 @@ from pint.errors import PintError
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from .fields import UnitField, QuantityField
-from . import verdoc
+from ..versioning import verdoc
 from enum import Enum
 from typing import Optional, Iterable, Iterator, Mapping
 import contextlib

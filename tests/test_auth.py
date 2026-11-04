@@ -6,7 +6,7 @@ from bgexplorer.models.settings import (ApplicationSettings, get_secret_key,
                                         get_server_secret)
 from bgexplorer.application.auth import SETUP_TOKEN
 from bgexplorer.models.users import User, Role
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from bgexplorer.models.component import Component
 from tests.dbutil import TEST_MONGODB_URI
 from tests.test_app_components import AppTestCase

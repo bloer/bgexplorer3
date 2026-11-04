@@ -4,7 +4,7 @@ from mongoengine import (EmbeddedDocument, StringField, EmbeddedDocumentField,
                          ValidationError)
 
 from .common import PublicationInfo, validate_unique_ids, units
-from .verdoc import VersionedDocument, VersionedReferenceField
+from ..versioning.verdoc import VersionedDocument, VersionedReferenceField
 from .fields import UncertainQuantityField, AttachmentsField, QuantityField
 from .emissionspec import (EmissionSpec, EmissionSource, Multiplier,
                            SourceCategory)

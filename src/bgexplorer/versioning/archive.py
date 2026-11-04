@@ -24,13 +24,13 @@ from pymongo.errors import DuplicateKeyError
 from mongoengine.base import get_document
 from mongoengine.errors import ValidationError, InvalidDocumentError
 
-from . import signals
-from . import versioncontrol as vc
+from ..models import signals
+from . import control as vc
 from .history import EventAction, log_event
-from .settings import VersionSettings, new_lock, holding
-from .sourceterm import check_version_units
+from ..models.settings import VersionSettings, new_lock, holding
+from ..models.sourceterm import check_version_units
 from .verdoc import current_user_name, referenced_classes
-from .versiondiff import find_refs, SETTINGS_IDENTITY_FIELDS
+from .diff import find_refs, SETTINGS_IDENTITY_FIELDS
 log = logging.getLogger(__name__)
 
 MANIFEST_FORMAT = 'bgexplorer-version'

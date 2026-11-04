@@ -9,7 +9,7 @@ from html import unescape
 from bgexplorer.application.app import create_app
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from bgexplorer.models.settings import VersionSettings
 from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.hiteff import HitEfficiency

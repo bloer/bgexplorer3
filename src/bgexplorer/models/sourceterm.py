@@ -10,11 +10,11 @@ from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
                          SortedListField, CASCADE, PULL, ReferenceField,
                          EmbeddedDocumentListField, ObjectIdField,
                          ValidationError, IntField)
-from .verdoc import (VersionedDocument, VersionedReferenceField,
+from ..versioning.verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedQuerySet, VersionedListField,
                      VersionedEmbeddedDocumentListField)
-from .verdoc import ref_id as _ref_id
-from .verdoc import (IDENTITY_FIELDS, check_writable, current_user_name)
+from ..versioning.verdoc import ref_id as _ref_id
+from ..versioning.verdoc import (IDENTITY_FIELDS, check_writable, current_user_name)
 from .component import (Component, Placement, Assembly, ComponentSpec,
                         LocationMode)
 from .emissionspec import EmissionSpec, EmissionSource, Multiplier

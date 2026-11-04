@@ -8,7 +8,7 @@ import requests
 from bgexplorer.models import radiopurity as rp
 from bgexplorer.models.assay import Assay
 from bgexplorer.models.fields import UncertainQuantityField, get_fromstr
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from bgexplorer.models.settings import VersionSettings
 from tests.dbutil import TEST_MONGODB_URI, check_test_db
 

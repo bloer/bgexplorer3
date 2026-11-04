@@ -6,7 +6,7 @@ from .cosmogenic import ActivatedMaterial, CosmogenicActivation
 from .hiteff import HitEfficiency
 from .sourceterm import (SourceTerm, find_sourceterms, sync_sourceterms,
                          placed_sourceterms)
-from .verdoc import ref_id, check_writable
+from ..versioning.verdoc import ref_id, check_writable
 from . import settings
 import logging
 log = logging.getLogger(__name__)

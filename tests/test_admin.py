@@ -8,8 +8,8 @@ from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import (ApplicationSettings, VersionSettings,
                                         acquire_lock, _now)
 from bgexplorer.models.sourceterm import SourceTerm, _cached
-from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models import maintenance
+from bgexplorer.versioning import control as vc
+from bgexplorer.versioning import maintenance
 from tests import results
 from tests.test_app_components import AppTestCase
 

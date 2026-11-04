@@ -2,17 +2,17 @@
 import unittest
 from mongoengine import disconnect
 from bson import ObjectId
-from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models.verdoc import versioned_classes
-from bgexplorer.models.versioncontrol import (import_document,
+from bgexplorer.versioning import control as vc
+from bgexplorer.versioning.verdoc import versioned_classes
+from bgexplorer.versioning.control import (import_document,
                                               VersionControlError)
-from bgexplorer.models.verdoc import ReadOnlyVersionError, VersionLockedError
+from bgexplorer.versioning.verdoc import ReadOnlyVersionError, VersionLockedError
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.settings import (VersionSettings, acquire_lock,
                                         release_lock, get_settings)
-from bgexplorer.models.history import VersionEvent, EventAction
+from bgexplorer.versioning.history import VersionEvent, EventAction
 from tests.dbutil import connect_test_db
 from tests.test_app_components import AppTestCase
 

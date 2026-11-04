@@ -11,8 +11,8 @@ from math import exp
 from bgexplorer.models.settings import VersionSettings
 from bgexplorer.models.isotope import get_tau
 from bgexplorer.models.common import units
-from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models.verdoc import versioned_classes
+from bgexplorer.versioning import control as vc
+from bgexplorer.versioning.verdoc import versioned_classes
 from tests.dbutil import connect_test_db
 
 

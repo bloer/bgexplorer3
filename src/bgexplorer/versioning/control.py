@@ -1,20 +1,20 @@
 """ functions for creating, saving, merging, and deleting versions """
-from .component import Component, Assembly
-from .emissionspec import EmissionSpec
-from .hiteff import HitEfficiency
-from .cosmogenic import ActivatedMaterial
-from .sourceterm import SourceTerm, check_version_units
-from .settings import (VersionSettings, get_settings, touch, hold_locks,
+from ..models.component import Component, Assembly
+from ..models.emissionspec import EmissionSpec
+from ..models.hiteff import HitEfficiency
+from ..models.cosmogenic import ActivatedMaterial
+from ..models.sourceterm import SourceTerm, check_version_units
+from ..models.settings import (VersionSettings, get_settings, touch, hold_locks,
                        holding, check_unlocked, new_lock, abandon_lock,
                        held_locks)
 from .verdoc import (VersionedDocument, ReadOnlyVersionError,
                      versioned_classes, referenced_classes,
                      check_writable, strip_identity, current_user_name)
-from .versiondiff import (find_refs, raw_content, diff_versions,
+from .diff import (find_refs, raw_content, diff_versions,
                           settings_content, ItemVersions, DiffEntry,
                           VersionComparison)
 from .history import EventAction, log_event
-from . import signals
+from ..models import signals
 from bson import ObjectId
 from mongoengine import NotUniqueError
 from typing import Optional, Dict, List, Set

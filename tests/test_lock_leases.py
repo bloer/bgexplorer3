@@ -7,16 +7,16 @@ import unittest
 from unittest import mock
 from bson import ObjectId
 from mongoengine import disconnect
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from bgexplorer.models import settings as settings_module
 from bgexplorer.models.component import Component
-from bgexplorer.models.history import VersionEvent, EventAction
-from bgexplorer.models.maintenance import find_locks, clear_locks
+from bgexplorer.versioning.history import VersionEvent, EventAction
+from bgexplorer.versioning.maintenance import find_locks, clear_locks
 from bgexplorer.models.settings import (VersionSettings, get_settings,
                                         acquire_lock, release_lock,
                                         refresh_lock, hold_locks, holding)
-from bgexplorer.models.verdoc import VersionLockedError, LockLostError
-from bgexplorer.models.verdoc import versioned_classes
+from bgexplorer.versioning.verdoc import VersionLockedError, LockLostError
+from bgexplorer.versioning.verdoc import versioned_classes
 from tests.dbutil import connect_test_db
 
 SECOND = datetime.timedelta(seconds=1)

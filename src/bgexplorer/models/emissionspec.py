@@ -10,7 +10,7 @@ from .isotope import (concentration_to_rate, rate_to_concentration,
                       compare_source_names, is_radioactive)
 from .fields import UncertainQuantityField, AttachmentsField
 from .hiteff import NormMultiplier
-from .verdoc import VersionedDocument, VersionedReferenceField
+from ..versioning.verdoc import VersionedDocument, VersionedReferenceField
 from . import settings
 from collections.abc import Mapping
 

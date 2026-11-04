@@ -21,9 +21,9 @@ from .versions import (create_versions_blueprint, edit_settings,
                        compare_versions, export_version)
 from .admin import create_admin_blueprint
 from .radiopurity import create_radiopurity_blueprint
-from ..models.versioncontrol import list_versions, version_exists
-from ..models.verdoc import VersionedDocument
-from ..models.history import recent_events
+from ..versioning.control import list_versions, version_exists
+from ..versioning.verdoc import VersionedDocument
+from ..versioning.history import recent_events
 from .forms import input_type, input_value, field_kind
 from . import auth
 

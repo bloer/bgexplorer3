@@ -15,7 +15,7 @@ from .common import units as unitreg, Quantity, UnitMismatchError
 from .asymmetric import sum_values
 from .histogram import Histogram
 from .hiteff import HitEfficiency
-from .verdoc import ref_id as _ref_id
+from ..versioning.verdoc import ref_id as _ref_id
 
 log = logging.getLogger(__name__)
 _DIMENSIONLESS = unitreg.Unit('')

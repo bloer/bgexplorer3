@@ -4,8 +4,9 @@ import flask
 from bson import ObjectId
 from mongoengine.errors import ValidationError, NotUniqueError
 from werkzeug.datastructures import MultiDict
-from ..models import versioncontrol as vc
-from ..models import maintenance, signals
+from ..versioning import control as vc
+from ..versioning import maintenance
+from ..models import signals
 from ..models.settings import ApplicationSettings, get_application_settings
 from ..models.users import User, is_last_site_admin
 from .api import validation_fields

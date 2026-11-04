@@ -11,8 +11,8 @@ import mongoengine
 from mongoengine.errors import NotUniqueError
 from .application.config_default import MONGODB_URI
 from .models.users import User, Role
-from .models import versioncontrol as vc
-from .models.versionfile import (export_version, import_version,
+from .versioning import control as vc
+from .versioning.archive import (export_version, import_version,
                                  VersionFileError)
 
 ROLE_NAMES = [role.name for role in Role]

@@ -3,15 +3,15 @@ versions are logged """
 import unittest
 from mongoengine import disconnect
 from bson import ObjectId
-from bgexplorer.models.versioncontrol import (create_version, create_tag,
+from bgexplorer.versioning.control import (create_version, create_tag,
                                               delete_version)
-from bgexplorer.models.verdoc import VersionLockedError
-from bgexplorer.models.verdoc import versioned_classes
+from bgexplorer.versioning.verdoc import VersionLockedError
+from bgexplorer.versioning.verdoc import versioned_classes
 from bgexplorer.models.component import Component
 from bgexplorer.models.settings import (VersionSettings, get_settings,
                                         acquire_lock, release_lock,
                                         hold_locks)
-from bgexplorer.models.history import (VersionEvent, EventAction,
+from bgexplorer.versioning.history import (VersionEvent, EventAction,
                                        recent_events)
 from tests.dbutil import connect_test_db
 from tests.test_app_components import AppTestCase

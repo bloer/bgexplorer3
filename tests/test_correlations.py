@@ -11,7 +11,7 @@ from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import VersionSettings
 from bgexplorer.models.sourceterm import SourceTerm, clear_results_cache
 from bgexplorer.models.common import units
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests.dbutil import connect_test_db
 from tests.test_cosmogenic import copper
 

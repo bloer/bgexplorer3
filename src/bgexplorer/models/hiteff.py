@@ -3,7 +3,7 @@ from mongoengine.fields import (StringField, MapField, UUIDField, ListField,
                                 EnumField, FloatField, DictField)
 from mongoengine.errors import ValidationError
 from mongoengine import signals
-from .verdoc import DynamicVersionedDocument
+from ..versioning.verdoc import DynamicVersionedDocument
 from .fields import QuantityField, UncertainQuantityField, HistogramField
 from .common import units as unitreg
 from .histogram import Histogram

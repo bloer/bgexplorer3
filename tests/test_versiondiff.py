@@ -1,9 +1,9 @@
 """ Comparing documents and versions """
 import unittest
 from mongoengine import disconnect
-from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models.verdoc import versioned_classes
-from bgexplorer.models.versiondiff import (diff_values, diff_documents,
+from bgexplorer.versioning import control as vc
+from bgexplorer.versioning.verdoc import versioned_classes
+from bgexplorer.versioning.diff import (diff_values, diff_documents,
                                            compare_document, diff_versions)
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource

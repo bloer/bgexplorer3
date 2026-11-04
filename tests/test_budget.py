@@ -14,7 +14,7 @@ from bgexplorer.models.common import (DimensionalityError, UnitMismatchError,
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import get_settings, HitEffConfig
 from bgexplorer.models.sourceterm import find_sourceterms
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests import results
 from tests.test_app_components import AppTestCase
 

@@ -3,7 +3,7 @@ import flask
 from mongoengine.errors import ValidationError
 from ..models.assay import Assay
 from ..models import radiopurity as rp
-from ..models.verdoc import check_writable
+from ..versioning.verdoc import check_writable
 from .auth import require_for_changes, Role
 
 

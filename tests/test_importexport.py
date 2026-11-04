@@ -13,7 +13,7 @@ from bgexplorer.models.settings import VersionSettings
 from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.importexport import iter_json_documents, \
     import_documents
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests.dbutil import connect_test_db
 
 

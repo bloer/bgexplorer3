@@ -7,7 +7,7 @@ from bgexplorer.models.emissionspec import EmissionSpec
 from bgexplorer.models.exposure import RadonExposure, RadonPeriod
 from bgexplorer.models.settings import VersionSettings
 from bgexplorer.models.sourceterm import SourceTerm
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests.dbutil import connect_test_db
 
 

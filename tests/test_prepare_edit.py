@@ -5,15 +5,15 @@ import unittest
 from unittest import mock
 from bson import ObjectId
 from mongoengine import disconnect
-from bgexplorer.models import maintenance
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import maintenance
+from bgexplorer.versioning import control as vc
 from bgexplorer.models.component import Component
 from bgexplorer.models.settings import VersionSettings
-from bgexplorer.models.history import VersionEvent
-from bgexplorer.models.verdoc import (versioned_classes, staging_tag,
+from bgexplorer.versioning.history import VersionEvent
+from bgexplorer.versioning.verdoc import (versioned_classes, staging_tag,
                                       parse_staging_tag, VersionedQuerySet,
                                       staged_edit_is_stale, VersionLockedError)
-from bgexplorer.models import verdoc
+from bgexplorer.versioning import verdoc
 from tests.dbutil import connect_test_db
 
 

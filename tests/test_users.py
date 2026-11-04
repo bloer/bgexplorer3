@@ -3,9 +3,9 @@ import unittest
 from mongoengine import disconnect, NotUniqueError
 from bgexplorer.models.users import User, Role
 from bgexplorer.models.component import Component
-from bgexplorer.models.verdoc import set_user_provider
+from bgexplorer.versioning.verdoc import set_user_provider
 from bgexplorer.models.settings import VersionSettings
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests.dbutil import connect_test_db
 
 

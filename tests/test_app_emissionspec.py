@@ -9,7 +9,7 @@ from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
 from bgexplorer.models.exposure import RadonExposure
 from bgexplorer.models.fields import get_fromstr
 from bgexplorer.models.hiteff import HitEfficiency
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests import results
 from tests.test_app_components import AppTestCase
 

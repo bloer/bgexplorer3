@@ -1,7 +1,7 @@
 from enum import Enum
 import mongoengine as me
 from pint.errors import PintError
-from ..models.verdoc import VersionedDocument
+from ..versioning.verdoc import VersionedDocument
 from ..models.fields import get_fromstr, InlineAttachment
 
 def input_type(field):

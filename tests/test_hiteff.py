@@ -206,7 +206,7 @@ class TestPartialLoad(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        from bgexplorer.models.versioncontrol import create_version
+        from bgexplorer.versioning.control import create_version
         HitEfficiency.drop_collection()
         VersionSettings.drop_collection()
         config = get_settings('main')

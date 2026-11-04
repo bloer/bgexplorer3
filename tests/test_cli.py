@@ -4,11 +4,11 @@ import mongoengine
 from click.testing import CliRunner
 from bgexplorer.cli import cli, versions_cli
 from bgexplorer.models.users import User, Role
-from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models.verdoc import versioned_classes
+from bgexplorer.versioning import control as vc
+from bgexplorer.versioning.verdoc import versioned_classes
 from bgexplorer.models.settings import VersionSettings, get_settings
-from bgexplorer.models.history import VersionEvent
-from bgexplorer.models.versiondiff import diff_versions
+from bgexplorer.versioning.history import VersionEvent
+from bgexplorer.versioning.diff import diff_versions
 from tests.test_versionfile import make_model
 from tests.dbutil import TEST_MONGODB_URI, check_test_db
 

@@ -1,7 +1,7 @@
 import unittest
 from mongoengine import *
-from bgexplorer.models.versioncontrol import *
-from bgexplorer.models.verdoc import versioned_classes
+from bgexplorer.versioning.control import *
+from bgexplorer.versioning.verdoc import versioned_classes
 from bgexplorer.models.component import Component
 from bgexplorer.models.assay import Assay
 from tests.dbutil import connect_test_db

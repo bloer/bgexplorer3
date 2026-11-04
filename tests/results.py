@@ -7,7 +7,7 @@ from typing import Iterable, Optional
 from bgexplorer.models.asymmetric import sum_values
 from bgexplorer.models.common import multnone
 from bgexplorer.models.sourceterm import find_sourceterms, load_hiteffs
-from bgexplorer.models.verdoc import ref_id
+from bgexplorer.versioning.verdoc import ref_id
 
 
 @dataclass

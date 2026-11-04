@@ -4,7 +4,7 @@ import requests
 from werkzeug.datastructures import MultiDict
 from bgexplorer.application.auth import Role
 from bgexplorer.models.assay import Assay
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests.test_app_components import AppTestCase
 from tests.test_auth import AuthTestCase
 from tests.test_radiopurity import fixture

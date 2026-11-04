@@ -7,13 +7,13 @@ from unittest import mock
 import numpy as np
 from bson import ObjectId, json_util
 from mongoengine import disconnect
-from bgexplorer.models import versioncontrol as vc
-from bgexplorer.models.verdoc import versioned_classes, referenced_classes
-from bgexplorer.models.versioncontrol import MergeRule
-from bgexplorer.models.versionfile import (export_version, import_version,
+from bgexplorer.versioning import control as vc
+from bgexplorer.versioning.verdoc import versioned_classes, referenced_classes
+from bgexplorer.versioning.control import MergeRule
+from bgexplorer.versioning.archive import (export_version, import_version,
                                            read_version_file,
                                            VersionFileError)
-from bgexplorer.models.versiondiff import diff_versions
+from bgexplorer.versioning.diff import diff_versions
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.assay import Assay
@@ -27,7 +27,7 @@ from bgexplorer.models.common import units
 from bgexplorer.models.fields import InlineAttachment
 from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.settings import VersionSettings, get_settings
-from bgexplorer.models.history import VersionEvent, EventAction
+from bgexplorer.versioning.history import VersionEvent, EventAction
 from tests.dbutil import connect_test_db
 from tests.test_app_components import AppTestCase
 

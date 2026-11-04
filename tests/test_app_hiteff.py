@@ -11,7 +11,7 @@ from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.settings import get_settings, SpectrumROI
 from bgexplorer.models.common import units
 from tests import EXAMPLES_DIR
-from bgexplorer.models import versioncontrol as vc
+from bgexplorer.versioning import control as vc
 from tests.test_app_components import AppTestCase
 
 

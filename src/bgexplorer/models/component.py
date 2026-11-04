@@ -7,7 +7,7 @@ from bson import ObjectId
 from enum import Enum
 from typing import Optional
 
-from .verdoc import (VersionedDocument, VersionedReferenceField,
+from ..versioning.verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedEmbeddedDocumentListField, ref_id)
 from .fields import QuantityField, AttachmentsField
 from .emissionspec import EmissionSpec

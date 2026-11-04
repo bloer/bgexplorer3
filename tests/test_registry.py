@@ -7,7 +7,7 @@ from bgexplorer.models.cosmogenic import ActivatedMaterial, CosmogenicActivation
 from bgexplorer.models.emissionspec import EmissionSpec
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.sourceterm import SourceTerm
-from bgexplorer.models.verdoc import (VersionedDocument, versioned_classes,
+from bgexplorer.versioning.verdoc import (VersionedDocument, versioned_classes,
                                       referenced_classes)
 
 
@@ -50,6 +50,6 @@ class TestRegistry(unittest.TestCase):
             self.assertNotIn(Abstract, versioned_classes())
             self.assertNotIn(ExtraChild, versioned_classes())
         finally:
-            from bgexplorer.models import verdoc
+            from bgexplorer.versioning import verdoc
             for cls in (Extra, ExtraChild, Hidden, Abstract):
                 verdoc._defined.remove(cls)
