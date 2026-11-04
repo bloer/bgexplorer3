@@ -2,7 +2,7 @@ from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSource, EmissionSpec
 from bgexplorer.models.assay import Assay, PublicationInfo, SampleInfo, MeasurementInfo, MeasurementResult
 from bgexplorer.models.settings import get_settings, HitEffConfig
-from bgexplorer.models.versioncontrol import create_version, delete_version
+from bgexplorer.versioning import create_version, delete_version
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.sourceterm import find_sourceterms
 from pathlib import Path

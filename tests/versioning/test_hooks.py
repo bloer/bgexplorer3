@@ -5,8 +5,7 @@ import unittest
 from bgexplorer.versioning import (create_branch, merge_version, plan_merge,
                                    export_version, import_version, hooks,
                                    version_exists, get_record, MergeRule,
-                                   MergeError, VersionFileError,
-                                   VersionedDocument)
+                                   MergeError, VersionFileError)
 from tests.versioning.toy import ToyTestCase, archive_format
 
 
