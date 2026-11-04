@@ -48,7 +48,6 @@ def check_writable(version_tag: Optional[str]) -> None:
         _write_guard(version_tag)
 
 
-# FIXME: need to override update, modify, etc
 def _readonly_kwargs(document_cls, bypass_readonly: bool) -> dict:
     """ Pass bypass_readonly on only to versioned querysets """
     if bypass_readonly and issubclass(document_cls, VersionedDocument):
@@ -60,7 +59,6 @@ class VersionedQuerySet(QuerySet):
     """ Override queryset to keep track of the currently active tag """
     def __init__(self, *args, active_version: Optional[str] = None, **kwargs):
         """ initialize and set active_version """
-        # TODO: should we always set a default active version?
         self.active_version = active_version
         super().__init__(*args, **kwargs)
 
@@ -130,8 +128,8 @@ class VersionedQuerySet(QuerySet):
                               bypass_readonly=bypass_readonly)
             # empty version tags objects are deleted by the update call
             return count
-        # TODO: should this cause an error? how to prevent accidental
-        # TODO: where to check if version is protected?
+        # without an active version, this is an administrative delete from
+        # every version; protected versions are checked in `control`
         return super().delete(*args, **kwargs)
 
     def prepare_edit(self) -> 'VersionedQuerySet':
@@ -301,7 +299,7 @@ class VersionedQuerySet(QuerySet):
             qs = self.prepare_edit()
             kwargs['inc__revision'] = 1
             kwargs['set__modified'] = datetime.datetime.now()
-        # TODO: this doesn't handle most of modify's args
+        # only the update is versioned, other arguments pass through
         return QuerySet.modify(qs, *args, **kwargs)
 
 
@@ -392,7 +390,6 @@ class VersionedDocument(Document):
 
     def __init__(self, *args, version_tag: Optional[str] = None,
                  active_version: Optional[str] = None, **kwargs):
-        # TODO: do we want to allow setting version tag on create?
         if version_tag is not None:
             kwargs['version_tags'] = [version_tag]
             if active_version is None:
@@ -712,7 +709,6 @@ class VersionedReferenceField(ReferenceField):
 
     Reverse delete rules have not been tested and will probably not work!
     """
-    # TODO: handle reverse_delete_rules
     def __init__(self, document_type, *args, **kwargs):
         if not isinstance(document_type, str) and not issubclass(
             document_type, VersionedDocument

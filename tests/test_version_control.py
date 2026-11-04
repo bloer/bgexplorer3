@@ -1,6 +1,8 @@
 import unittest
-from mongoengine import *
-from bgexplorer.versioning.control import *
+from mongoengine import disconnect
+from bgexplorer.versioning.control import (
+    ProtectedVersionError, create_branch, create_tag, create_version,
+    delete_version, list_versions, version_exists, version_summary)
 from bgexplorer.versioning.record import VersionRecord, get_record
 from bgexplorer.models.settings import VersionSettings, get_settings
 from bgexplorer.versioning.verdoc import versioned_classes

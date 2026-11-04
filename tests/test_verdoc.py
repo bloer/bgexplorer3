@@ -1,8 +1,11 @@
 import unittest
 from mongoengine import (connect, disconnect, StringField, ReferenceField,
-                         EmbeddedDocument, CASCADE, NULLIFY, PULL)
+                         EmbeddedDocument, ListField, ValidationError,
+                         CASCADE, NULLIFY, PULL)
 import mongomock
-from bgexplorer.versioning.verdoc import *
+from bgexplorer.versioning.verdoc import (
+    VersionedDocument, VersionedReferenceField, VersionedListField,
+    VersionedEmbeddedDocumentListField, get_active_version)
 from tests.dbutil import connect_test_db
 
 class A(VersionedDocument):
