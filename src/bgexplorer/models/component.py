@@ -113,7 +113,7 @@ class Component(VersionedDocument):
 
     spec_entries = VersionedEmbeddedDocumentListField(ComponentSpec)
 
-    meta = {'allow_inheritance': True}
+    meta = {'allow_inheritance': True, 'strict': False}
 
     def __init__(self, *args, surface_area=None, specs=None, **kwargs):
         """ `surface_area` is a shortcut for the outer surface area, and
@@ -298,6 +298,7 @@ class Assembly(Component):
     children = VersionedEmbeddedDocumentListField(Placement)
     meta = {
         'indexes': ['children.component'],
+        'strict': False,
     }
     # TODO: can't use a reverse delete rule here, so need a signal
     # handler for whenever a child gets deleted
