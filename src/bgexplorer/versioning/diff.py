@@ -2,8 +2,7 @@
 from bson import ObjectId
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional
-from ..models.settings import VersionSettings
-from .verdoc import VersionedDocument, strip_identity, referenced_classes
+from .verdoc import VersionedDocument, strip_identity, primary_classes
 
 # fields that don't count as content
 IGNORED_FIELDS = ('enteredby',)
@@ -140,13 +139,13 @@ class DocumentComparison:
                 and not self.entries)
 
 
-def compare_document(cls, original_id, left: str, right: str,
-                     exclude=('attachments__data',)) -> DocumentComparison:
+def compare_document(cls, original_id, left: str, right: str
+                     ) -> DocumentComparison:
     """ Compare the copies of item `original_id` of class `cls` in versions
     `left` and `right`
     """
     original_id = ObjectId(original_id)
-    skip = [f for f in exclude if f.split('__')[0] in cls._fields]
+    skip = [f.replace('.', '__') for f in cls.VERSION_BULKY_FIELDS]
 
     def load(tag):
         qs = cls.select_version(tag)(original_id=original_id)
@@ -205,32 +204,10 @@ class VersionComparison:
     left: str
     right: str
     classes: List[ClassComparison]
-    settings: List[DiffEntry]
 
     @property
     def changed(self) -> bool:
-        return bool(self.settings) or any(c.changed for c in self.classes)
-
-
-# VersionSettings fields that belong to the version rather than its content
-SETTINGS_IDENTITY_FIELDS = ('_id', 'version_tag', 'editable', 'description',
-                            'lock', 'modified', 'cache_token',
-                            'calc_token')
-
-
-def settings_content(version_tag: str) -> dict:
-    """ The raw VersionSettings of `version_tag` that a merge can change """
-    son = VersionSettings._get_collection().find_one(
-        {'version_tag': version_tag}) or {}
-    for key in SETTINGS_IDENTITY_FIELDS:
-        son.pop(key, None)
-    return son
-
-
-def _item_name(son: dict) -> str:
-    return son.get('name') or ' @ '.join(
-        str(son[k]) for k in ('source', 'location') if son.get(k)) \
-        or str(son['original_id'])
+        return any(c.changed for c in self.classes)
 
 
 def compare_class(cls, left: str, right: str,
@@ -240,12 +217,12 @@ def compare_class(cls, left: str, right: str,
     """
     coll = cls._get_collection()
     items: Dict[ObjectId, ItemVersions] = {}
-    for son in coll.find({'version_tags': {'$in': [left, right]}},
-                         {'original_id': 1, 'version_tags': 1, 'modified': 1,
-                          'name': 1, 'source': 1, 'location': 1}):
+    fields = {key: 1 for key in ('original_id', 'version_tags', 'modified',
+                                 *cls.VERSION_LABEL_FIELDS)}
+    for son in coll.find({'version_tags': {'$in': [left, right]}}, fields):
         item = items.setdefault(son['original_id'],
                                 ItemVersions(son['original_id'],
-                                             _item_name(son)))
+                                             cls.item_label(son)))
         for side, tag in (('left', left), ('right', right)):
             if tag in son['version_tags']:
                 setattr(item, f'{side}_id', son['_id'])
@@ -264,8 +241,8 @@ def compare_class(cls, left: str, right: str,
     if check_content and differ:
         ids = [i.left_id for i in differ] + [i.right_id for i in differ]
         content = {}
-        for son in coll.find({'_id': {'$in': ids}},
-                             {'attachments.data': 0}):
+        bulky = {key: 0 for key in cls.VERSION_BULKY_FIELDS}
+        for son in coll.find({'_id': {'$in': ids}}, bulky or None):
             copy_id = son['_id']
             strip_identity(son)
             for key in IGNORED_FIELDS:
@@ -283,12 +260,11 @@ def compare_class(cls, left: str, right: str,
 
 def diff_versions(left: str, right: str, classes=None,
                   check_content: bool = True) -> VersionComparison:
-    """ Compare the content of two versions. SourceTerms are derived from
-    the other documents, so aren't compared
+    """ Compare the content of two versions. Classes whose documents are
+    derived from others aren't compared
     """
     if classes is None:
-        classes = referenced_classes()
+        classes = primary_classes()
     return VersionComparison(
         left, right,
-        [compare_class(cls, left, right, check_content) for cls in classes],
-        list(diff_values(settings_content(left), settings_content(right))))
+        [compare_class(cls, left, right, check_content) for cls in classes])

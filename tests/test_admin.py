@@ -5,8 +5,9 @@ from bson import ObjectId
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
-from bgexplorer.models.settings import (ApplicationSettings, VersionSettings,
-                                        acquire_lock, _now)
+from bgexplorer.models.settings import ApplicationSettings
+from bgexplorer.versioning.locks import acquire_lock
+from bgexplorer.versioning.record import now, VersionRecord
 from bgexplorer.models.sourceterm import SourceTerm, _cached
 from bgexplorer.versioning import control as vc
 from bgexplorer.versioning import maintenance
@@ -139,8 +140,8 @@ class TestAdmin(AppTestCase):
         self.assertIn('No versions are locked', page)
         acquire_lock('main', 'running')
         acquire_lock('t', 'crashed')
-        VersionSettings.objects(version_tag='t').update(
-            set__lock__expires=_now() - datetime.timedelta(seconds=1))
+        VersionRecord.objects(version_tag='t').update(
+            set__lock__expires=now() - datetime.timedelta(seconds=1))
         page = self.html(self.client.get(self.url('admin.maintenance_page')))
         self.assertIn('id="clearlocks"', page)
         self.assertIn('running', page)

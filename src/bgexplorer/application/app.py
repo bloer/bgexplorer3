@@ -8,6 +8,7 @@ import logging
 import importlib
 from ..models.settings import (get_settings, get_application_settings,
                                get_secret_key, ApplicationSettings)
+from ..versioning.record import get_record
 from ..models.common import UnitMismatchError
 from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
@@ -196,13 +197,19 @@ def create_app(config_file=None, config=None):
         if tag is None:
             return dict()
         try:
+            version_record = get_record(tag)
             settings = get_settings(tag, create=False)
         except KeyError:
             return dict()
         # whether to show buttons and forms that change this version
-        return dict(settings=settings,
-                    can_edit=(settings.editable and settings.active_lock is None
+        return dict(settings=settings, version_record=version_record,
+                    can_edit=(version_record.editable
+                              and version_record.active_lock is None
                               and auth.has_role('editor')))
+
+    @app.template_global()
+    def has_diff_page(cls):
+        return f'{cls.__name__.lower()}.diff' in app.view_functions
 
     app.add_template_global(pretty_date, 'pretty_date')
     app.add_template_filter(pretty_date, 'pretty_date')

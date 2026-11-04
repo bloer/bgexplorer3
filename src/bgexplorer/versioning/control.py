@@ -1,22 +1,15 @@
 """ functions for creating, saving, merging, and deleting versions """
-from ..models.component import Component, Assembly
-from ..models.emissionspec import EmissionSpec
-from ..models.hiteff import HitEfficiency
-from ..models.cosmogenic import ActivatedMaterial
-from ..models.sourceterm import SourceTerm, check_version_units
-from ..models.settings import (VersionSettings, get_settings, touch, hold_locks,
-                       holding, check_unlocked, new_lock, abandon_lock,
-                       held_locks)
-from .verdoc import (VersionedDocument, ReadOnlyVersionError,
-                     versioned_classes, referenced_classes,
+from . import hooks
+from .verdoc import (VersionedDocument, versioned_classes, primary_classes,
                      check_writable, strip_identity, current_user_name)
-from .diff import (find_refs, raw_content, diff_versions,
-                          settings_content, ItemVersions, DiffEntry,
-                          VersionComparison)
+from .record import VersionRecord, get_record, touch
+from .locks import (hold_locks, holding, check_unlocked, new_lock,
+                    abandon_lock, held_locks)
+from .diff import find_refs, raw_content, diff_versions, ItemVersions, \
+    VersionComparison
 from .history import EventAction, log_event
-from ..models import signals
 from bson import ObjectId
-from mongoengine import NotUniqueError
+from mongoengine import NotUniqueError, signals
 from typing import Optional, Dict, List, Set
 from dataclasses import dataclass, field
 from enum import Enum
@@ -46,8 +39,8 @@ def validate_version_name(version_tag: str) -> None:
 
 
 def list_versions():
-    """ Get all versions' settings, ordered by name """
-    return VersionSettings.objects.order_by('version_tag')
+    """ Get all versions' records, ordered by name """
+    return VersionRecord.objects.order_by('version_tag')
 
 
 def version_summary(version_tag: str) -> Dict[str, Dict[str, int]]:
@@ -66,7 +59,7 @@ def version_summary(version_tag: str) -> Dict[str, Dict[str, int]]:
 
 def version_exists(version_tag: str) -> bool:
     """ test whether version_tag exists in the DB """
-    return bool(VersionSettings.objects(version_tag=version_tag).count())
+    return bool(VersionRecord.objects(version_tag=version_tag).count())
 
 
 def verify_version(version_tag: str, want_exists: bool = True) -> None:
@@ -83,72 +76,73 @@ def verify_version(version_tag: str, want_exists: bool = True) -> None:
 
 def create_version(version_tag: str, fromtag: Optional[str] = None,
                    editable: bool = True, description: Optional[str] = None,
-                   record: bool = True) -> VersionSettings:
+                   record: bool = True) -> VersionRecord:
     """ Create a new branch/tag. If `fromtag` is provided, create from that
     tag, otherwise create an empty version. Editable and description
-    are passed to the VersionSettings object, which is returned. If `record`
+    are passed to the VersionRecord, which is returned. If `record`
     is True, the creation is logged as a VersionEvent
     """
-    settings = _create_version(version_tag, fromtag, editable, description)
+    created = _create_version(version_tag, fromtag, editable, description)
     if record:
         log_event(EventAction.create_branch if editable
                   else EventAction.create_tag, version_tag, fromtag)
-    return settings
+    return created
 
 
 def _create_version(version_tag: str, fromtag: Optional[str],
                     editable: bool, description: Optional[str],
-                    ) -> VersionSettings:
+                    ) -> VersionRecord:
     """ create_version without logging an event """
     validate_version_name(version_tag)
     # make sure such a version doesn't already exist
     verify_version(version_tag, want_exists=False)
     if not fromtag:
-        # this is the easy case, all we have to do is create a settings object
+        # this is the easy case, all we have to do is create a record
         log.info(f"Creating new empty version {version_tag}")
         try:
-            return VersionSettings(version_tag=version_tag, editable=editable,
-                                   description=description).save()
+            return VersionRecord(version_tag=version_tag, editable=editable,
+                                 description=description).save()
         except NotUniqueError as e:
             raise KeyError(f"Version/tag {version_tag} already exists in the "
                            "DB") from e
 
-    # if we get here, we are constructing from previous version
-    # clone into a new version. The source can't change while it is copied,
-    # and the new version is locked from the start, until it is complete
+    # if we get here, we are constructing from previous version. The source
+    # can't change while it is copied, and the new version is locked from the
+    # start, until it is complete
     log.info(f"Creating new version {version_tag} from {fromtag}")
     user = current_user_name()
     with hold_locks([fromtag], f"creating '{version_tag}' from it", user):
+        if description is None:
+            description = get_record(fromtag).description
         lock = new_lock("being created", user)
-        newsettings = get_settings(fromtag, create=False).clone(
-            version_tag, lock=lock, overwrite=False)
+        try:
+            created = VersionRecord(version_tag=version_tag,
+                                    editable=editable,
+                                    description=description,
+                                    lock=lock).save()
+        except NotUniqueError as e:
+            raise KeyError(f"Version/tag {version_tag} already exists in the "
+                           "DB") from e
         with holding({version_tag: lock.token}):
             try:
-                # use update rather than save: settings cloned from a tag are
-                # read-only
-                changes = dict(set__editable=editable,
-                               set__modified=datetime.datetime.now())
-                if description is not None:
-                    changes['set__description'] = description
-                newsettings.update(**changes)
                 for cls in versioned_classes():
                     cls.create_tag(version_tag, fromtag)
             except BaseException:
                 log.exception(f"Creating '{version_tag}' failed, removing it")
                 purge_version(version_tag)
                 raise
-    newsettings.reload()
-    return newsettings
+    created.reload()
+    return created
 
 
 def create_tag(version_tag: str, fromtag: Optional[str] = None,
-               description: Optional[str] = None) -> VersionSettings:
+               description: Optional[str] = None) -> VersionRecord:
     """ Alias for create_version with editable False """
     return create_version(version_tag, fromtag, False, description)
 
 
 def create_branch(version_tag: str, fromtag: Optional[str] = None,
-                  description: Optional[str] = None) -> VersionSettings:
+                  description: Optional[str] = None) -> VersionRecord:
     """ Alias for create_version with editable True """
     return create_version(version_tag, fromtag, True, description)
 
@@ -163,7 +157,7 @@ def delete_version(version_tag: str, allow_tags: bool = True) -> None:
                          "can't be deleted")
     if not allow_tags:
         verify_version(version_tag)
-        if not VersionSettings.objects.get(version_tag=version_tag).editable:
+        if not get_record(version_tag).editable:
             raise ProtectedVersionError(f"'{version_tag}' is a tag; tags "
                                         "can't be deleted")
     with hold_locks([version_tag], "being deleted", current_user_name()):
@@ -187,7 +181,7 @@ def purge_version(version_tag: str) -> None:
         # the rest are shared with other versions
         coll.update_many({'version_tags': version_tag},
                          {'$pull': {'version_tags': version_tag}})
-    VersionSettings.objects(version_tag=version_tag).delete()
+    VersionRecord.objects(version_tag=version_tag).delete()
 
 
 class VersionControlError(ValueError):
@@ -224,7 +218,7 @@ def _adopt_copies(cls, version_tag: str, copy_ids) -> None:
 def missing_refs(ids, version_tag: str) -> Set[ObjectId]:
     """ The items among `ids` that aren't in `version_tag` """
     missing = set(ids)
-    for cls in referenced_classes():
+    for cls in primary_classes():
         if not missing:
             break
         missing -= set(cls._get_collection().distinct(
@@ -264,9 +258,8 @@ def import_document(cls, original_id, from_tag: str, to_tag: str
                 [str(ref) for ref in sorted(missing)])
         _adopt_copies(type(source), to_tag, [source.id])
         doc = cls.select_version(to_tag).get(original_id=original_id)
-        # update the SourceTerms that are derived from it
-        signals.post_save(sender=type(doc), document=doc)
-        touch(to_tag)
+        # lets receivers update what is derived from it
+        signals.post_save.send(type(doc), document=doc, created=False)
     log_event(EventAction.import_document, to_tag, from_tag,
               message=f"{type(doc).__name__} "
                       f"{getattr(doc, 'name', None) or original_id}",
@@ -317,16 +310,15 @@ class MergePlan:
     target: str
     rule: MergeRule
     classes: List[ClassMergePlan]
-    settings: List[DiffEntry]
-    replace_settings: bool
     fingerprint: str
     problems: List[str] = field(default_factory=list)
-    # set once the merge is done: units that don't agree in the merged version
-    unit_problems: List[str] = field(default_factory=list)
+    # set once the merge is done: what receivers of `hooks.version_merged`
+    # want to point out about the merged version
+    warnings: List[str] = field(default_factory=list)
 
     @property
     def changes(self) -> bool:
-        return self.replace_settings or any(c.adopted for c in self.classes)
+        return any(c.adopted for c in self.classes)
 
     def counts(self) -> Dict[str, Dict[str, int]]:
         return {c.name: {'add': len(c.add), 'replace': len(c.replace),
@@ -340,8 +332,6 @@ def _fingerprint(comparison: VersionComparison) -> str:
               for i in (c.only_left + c.only_right + c.differ + c.equal
                         + c.same)]
              for c in comparison.classes]
-    state.append([settings_content(comparison.left),
-                  settings_content(comparison.right)])
     return hashlib.sha1(json.dumps(state, sort_keys=True, default=str)
                         .encode()).hexdigest()
 
@@ -358,9 +348,8 @@ def plan_merge(source: str, target: str,
                rule: MergeRule = MergeRule.newest) -> MergePlan:
     """ Work out what merging `source` into `target` would do, without
     changing anything. Items only in one version are kept, so a merge never
-    removes anything from `target`. Items that differ, and the settings,
-    are taken from the source or kept according to `rule`. For settings,
-    `newest` compares the times the versions were last changed
+    removes anything from `target`. Items that differ are taken from the
+    source or kept according to `rule`
     """
     rule = MergeRule(rule)
     verify_version(source)
@@ -373,7 +362,7 @@ def plan_merge(source: str, target: str,
             check(tag)
         except PermissionError as e:
             problems.append(str(e))
-    comparison = diff_versions(target, source, classes=referenced_classes())
+    comparison = diff_versions(target, source, classes=primary_classes())
     classes = []
     for result in comparison.classes:
         plan = ClassMergePlan(result.cls, add=result.only_right,
@@ -382,22 +371,16 @@ def plan_merge(source: str, target: str,
             (plan.replace if _source_wins(item, rule) else plan.keep)\
                 .append(item)
         classes.append(plan)
-    if rule is MergeRule.newest:
-        modified = {tag: get_settings(tag, create=False).modified
-                    for tag in (source, target)}
-        source_settings = modified[source] > modified[target]
-    else:
-        source_settings = rule is MergeRule.source
-    result = MergePlan(source, target, rule, classes, comparison.settings,
-                       bool(comparison.settings) and source_settings,
+    result = MergePlan(source, target, rule, classes,
                        _fingerprint(comparison), problems)
     # everything the merged documents refer to must be in the target
     adopted = {c.cls: [i.right_id for i in c.adopted] for c in classes}
     merged_ids = {i.original_id for c in classes for i in c.adopted}
     refs = set()
     for cls, ids in adopted.items():
+        bulky = {key: 0 for key in cls.VERSION_BULKY_FIELDS}
         for son in cls._get_collection().find({'_id': {'$in': ids}},
-                                              {'attachments.data': 0}):
+                                              bulky or None):
             refs.update(find_refs(strip_identity(son)))
     if missing := missing_refs(refs - merged_ids, target):
         problems.append(f"Merged documents refer to {len(missing)} items "
@@ -416,24 +399,9 @@ def _backup_name(target: str) -> str:
     return name
 
 
-def _copy_settings(source: str, target: str) -> None:
-    """ Replace the content of `target`'s settings with `source`'s, keeping
-    what belongs to the version itself, such as its name and lock
-    """
-    content = settings_content(source)
-    unset = {key: '' for key in settings_content(target)
-             if key not in content}
-    update = {'$set': content} if content else {}
-    if unset:
-        update['$unset'] = unset
-    if update:
-        VersionSettings._get_collection().update_one(
-            {'version_tag': target}, update)
-
-
 def _restore(target: str, backup: str) -> None:
-    """ Make `target` contain exactly the documents and settings of
-    `backup` again, keeping `target`'s own settings document and lock
+    """ Make `target` contain exactly the documents of `backup` again,
+    keeping `target`'s own record and lock
     """
     for cls in versioned_classes():
         coll = cls._get_collection()
@@ -443,56 +411,7 @@ def _restore(target: str, backup: str) -> None:
         coll.delete_many({'_id': {'$in': ids}, 'version_tags': {'$size': 0}})
         coll.update_many({'version_tags': backup},
                          {'$push': {'version_tags': target}})
-    _copy_settings(backup, target)
     touch(target)
-
-
-def _update_rois(version_tag: str) -> None:
-    """ Evaluate the ROIs of the hit efficiencies in `version_tag` with its
-    settings, and save those that changed
-    """
-    rois = get_settings(version_tag).hiteffdbconfig.rois
-    for hiteff in HitEfficiency.select_version(version_tag):
-        values = {roi.key: roi.evaluate(hiteff, store=False) for roi in rois}
-        try:
-            changed = values != dict(hiteff.rois)
-        except Exception:
-            changed = True
-        if changed:
-            hiteff.update(set__rois=values)
-
-
-def _update_sourceterms(target: str, plan: MergePlan) -> None:
-    """ Update the SourceTerms of `target` that depend on the documents a
-    merge adopted, as if each had been saved there. New settings can change
-    any of them, so then all are rebuilt, as they are when most components
-    are affected
-    """
-    adopted = {c.cls: [i.original_id for i in c.adopted]
-               for c in plan.classes}
-    components = Component.select_version(target)
-    # updating each term separately costs more per term than a rebuild
-    touched = components(__raw__={'$or': [
-        {'original_id': {'$in': adopted.get(Component, [])}},
-        {'spec_entries.spec': {'$in': adopted.get(EmissionSpec, [])}}]}).count()
-    if plan.replace_settings or touched > components.count() / 2:
-        signals.rebuild_sourceterms(target)
-        return
-    docs = []
-    # materials update their activation specs, specs their components, and
-    # components their assemblies; hit efficiencies match the final terms
-    for cls in (ActivatedMaterial, EmissionSpec, Component, HitEfficiency):
-        if ids := adopted.get(cls):
-            found = list(cls.select_version(target)(original_id__in=ids))
-            if cls is Component:
-                # leaves, then assemblies from the bottom up
-                found.sort(key=lambda c: (isinstance(c, Assembly),
-                                          c.hierarchy_level))
-            docs.extend(found)
-    log.info(f"Updating SourceTerms in '{target}' for {len(docs)} merged "
-             "documents")
-    for doc in docs:
-        signals.post_save(sender=type(doc), document=doc)
 
 
 def merge_version(source: str, target: str,
@@ -526,16 +445,10 @@ def merge_version(source: str, target: str,
             for cls_plan in plan.classes:
                 _adopt_copies(cls_plan.cls, target,
                               [i.right_id for i in cls_plan.adopted])
-            if plan.replace_settings:
-                _copy_settings(source, target)
-            if any(entry.path[:2] == ['hiteffdbconfig', 'rois']
-                   for entry in plan.settings):
-                # some hit efficiencies' ROIs were evaluated with the other
-                # version's settings
-                _update_rois(target)
-            _update_sourceterms(target, plan)
-            # the merged documents were not validated together
-            plan.unit_problems = check_version_units(target)
+            # receivers update what is derived from the merged documents and
+            # can check them together; they raise to undo the merge
+            plan.warnings = hooks.send_collecting_warnings(
+                hooks.version_merged, target, source=source, plan=plan)
         except Exception as e:
             log.exception(f"Merge of '{source}' into '{target}' failed, "
                           "restoring it")
@@ -561,16 +474,12 @@ def merge_version(source: str, target: str,
         touch(target)
     log_event(EventAction.merge, target, source, message=_merge_summary(plan),
               rule=rule.value, counts=plan.counts(),
-              settings=plan.replace_settings,
-              unit_problems=plan.unit_problems)
+              warnings=plan.warnings)
     return plan
 
 
 def _merge_summary(plan: MergePlan) -> str:
-    """ e.g. 'newest copies: 2 added, 1 replaced, settings replaced' """
+    """ e.g. 'newest copies: 2 added, 1 replaced' """
     added = sum(len(c.add) for c in plan.classes)
     replaced = sum(len(c.replace) for c in plan.classes)
-    text = f"{plan.rule.value} copies: {added} added, {replaced} replaced"
-    if plan.replace_settings:
-        text += ", settings replaced"
-    return text
+    return f"{plan.rule.value} copies: {added} added, {replaced} replaced"

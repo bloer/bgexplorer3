@@ -195,6 +195,7 @@ class EmissionSource(EmbeddedDocument):
 
 class EmissionSpec(VersionedDocument):
     VERSION_TOUCH_TERMS_ONLY = True
+    VERSION_BULKY_FIELDS = ('attachments.data',)
     name = StringField(required=True)
     description = StringField()
     comment = StringField()

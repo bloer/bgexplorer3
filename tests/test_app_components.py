@@ -11,6 +11,7 @@ from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.versioning import control as vc
 from bgexplorer.models.settings import VersionSettings
+from bgexplorer.versioning.record import VersionRecord
 from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.cosmogenic import ActivatedMaterial
@@ -36,7 +37,7 @@ class AppTestCase(unittest.TestCase):
         mongoengine.disconnect()
 
     def setUp(self):
-        for cls in (VersionSettings, Component, EmissionSpec, SourceTerm,
+        for cls in (VersionRecord, VersionSettings, Component, EmissionSpec, SourceTerm,
                     HitEfficiency, ActivatedMaterial):
             cls.drop_collection()
         self.client = self.app.test_client()

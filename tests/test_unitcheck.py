@@ -14,8 +14,7 @@ from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
                                             Multiplier)
 from bgexplorer.models.hiteff import HitEfficiency, NormMultiplier
 from bgexplorer.models.isotope import concentration_to_rate
-from bgexplorer.models.settings import (get_settings, HitEffDbConfig,
-                                        SpectrumROI)
+from bgexplorer.models.settings import get_settings, HitEffDbConfig, SpectrumROI
 from bgexplorer.models.sourceterm import (SourceTerm, check_version_units,
                                           load_hiteffs)
 from bgexplorer.models.termcalc import TermCalculator

@@ -1,9 +1,12 @@
 import unittest
 from mongoengine import *
 from bgexplorer.versioning.control import *
+from bgexplorer.versioning.record import VersionRecord, get_record
+from bgexplorer.models.settings import VersionSettings, get_settings
 from bgexplorer.versioning.verdoc import versioned_classes
 from bgexplorer.models.component import Component
 from bgexplorer.models.assay import Assay
+from bgexplorer.models.hiteff import HitEfficiency
 from tests.dbutil import connect_test_db
 
 DROPONTEARDOWN = False
@@ -19,6 +22,7 @@ class TestVersionedDocument(unittest.TestCase):
         disconnect()
 
     def setUp(self):
+        VersionRecord.drop_collection()
         VersionSettings.drop_collection()
         # every versioned collection, so tags left by other tests don't clash
         for cls in versioned_classes():
@@ -26,14 +30,15 @@ class TestVersionedDocument(unittest.TestCase):
 
     def tearDown(self):
         if DROPONTEARDOWN:
+            VersionRecord.drop_collection()
             VersionSettings.drop_collection()
             Component.drop_collection()
             Assay.drop_collection()
 
     def test1_createversion(self):
         create_version('test')
-        settings = get_settings('test', create=False)
-        self.assertEqual(settings.version_tag, 'test')
+        record = get_record('test')
+        self.assertEqual(record.version_tag, 'test')
 
     def _make_branch(self):
         create_version('test')
@@ -66,7 +71,7 @@ class TestVersionedDocument(unittest.TestCase):
         tag = create_tag('v1', 'test', description='a tag')
         self.assertFalse(tag.editable)
         self.assertEqual(tag.description, 'a tag')
-        self.assertFalse(get_settings('v1', create=False).editable)
+        self.assertFalse(get_record('v1').editable)
         # a branch of a tag is editable, and keeps the source description
         branch = create_branch('b1', 'v1')
         self.assertTrue(branch.editable)
@@ -161,6 +166,7 @@ class TestDeleteVersion(unittest.TestCase):
         disconnect()
 
     def setUp(self):
+        VersionRecord.drop_collection()
         VersionSettings.drop_collection()
         for cls in versioned_classes():
             cls.drop_collection()
@@ -175,6 +181,7 @@ class TestDeleteVersion(unittest.TestCase):
     def _add(tag, name):
         """ one document of each kind of versioned class that we make by hand
         """
+        # saving a HitEfficiency gives the version its settings
         Component(name=name, version_tag=tag).save()
         Assay(name=name, version_tag=tag).save()
         HitEfficiency(source=name, location=name, version_tag=tag).save()
@@ -215,7 +222,7 @@ class TestDeleteVersion(unittest.TestCase):
             self.assertEqual(coll.count_documents({'version_tags': tag}), 0,
                              cls.__name__)
         self.assertFalse(version_exists(tag))
-        self.assertEqual(VersionSettings.objects(version_tag=tag).count(), 0)
+        self.assertEqual(VersionRecord.objects(version_tag=tag).count(), 0)
         return deleted, untagged, untouched
 
     def test_exclusive_shared_unrelated(self):
@@ -232,9 +239,9 @@ class TestDeleteVersion(unittest.TestCase):
                          ['base', 'branch', 'tag'])
 
         deleted, untagged, untouched = self._delete_and_check('branch')
-        # 3 kinds of documents each: branch_only deleted;
+        # 3 kinds of documents each, and the settings: branch_only deleted;
         # shared and branch_and_tag shared with others; the rest unrelated
-        self.assertEqual((deleted, untagged, untouched), (3, 6, 6))
+        self.assertEqual((deleted, untagged, untouched), (4, 6, 9))
 
         self.assertEqual(Component.objects(name='shared').get().version_tags,
                          ['base', 'tag'])
@@ -262,10 +269,10 @@ class TestDeleteVersion(unittest.TestCase):
         create_version('c', 'b')
         self.assertEqual(Component.objects(name='x').get().version_tags,
                          ['a', 'b', 'c'])
-        self.assertEqual(self._delete_and_check('b'), (0, 3, 0))
+        self.assertEqual(self._delete_and_check('b'), (0, 4, 0))
         self.assertEqual(Component.objects(name='x').get().version_tags,
                          ['a', 'c'])
-        self.assertEqual(self._delete_and_check('a'), (0, 3, 0))
+        self.assertEqual(self._delete_and_check('a'), (0, 4, 0))
         self.assertEqual(Component.objects(name='x').get().version_tags, ['c'])
 
     def test_similar_tag_names(self):
@@ -278,7 +285,7 @@ class TestDeleteVersion(unittest.TestCase):
             Component.objects(name='only_' + tag).update(
                 add_to_set__version_tags='v1')
         deleted, untagged, untouched = self._delete_and_check('v1')
-        self.assertEqual((deleted, untagged, untouched), (3, 2, 10))
+        self.assertEqual((deleted, untagged, untouched), (4, 2, 14))
         self.assertEqual(sorted(
             Component.objects.distinct('name')),
             ['only_V1', 'only_v1.0', 'only_v10', 'only_xv1'])
@@ -289,16 +296,16 @@ class TestDeleteVersion(unittest.TestCase):
         create_version('main_line')
         self._add('main_line', 'x')
         create_version('empty')
-        self.assertEqual(self._delete_and_check('empty'), (0, 0, 3))
+        self.assertEqual(self._delete_and_check('empty'), (0, 0, 4))
 
     def test_last_version(self):
         create_version('only')
         self._add('only', 'x')
         self._add('only', 'y')
-        self.assertEqual(self._delete_and_check('only'), (6, 0, 0))
+        self.assertEqual(self._delete_and_check('only'), (7, 0, 0))
         for docs in self._raw().values():
             self.assertEqual(docs, {})
-        self.assertEqual(VersionSettings.objects.count(), 0)
+        self.assertEqual(VersionRecord.objects.count(), 0)
 
     def test_references(self):
         """ components and the specs they refer to, deleted without checking

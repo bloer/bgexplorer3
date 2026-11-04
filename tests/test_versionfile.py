@@ -8,7 +8,7 @@ import numpy as np
 from bson import ObjectId, json_util
 from mongoengine import disconnect
 from bgexplorer.versioning import control as vc
-from bgexplorer.versioning.verdoc import versioned_classes, referenced_classes
+from bgexplorer.versioning.verdoc import versioned_classes, primary_classes
 from bgexplorer.versioning.control import MergeRule
 from bgexplorer.versioning.archive import (export_version, import_version,
                                            read_version_file,
@@ -27,6 +27,7 @@ from bgexplorer.models.common import units
 from bgexplorer.models.fields import InlineAttachment
 from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.settings import VersionSettings, get_settings
+from bgexplorer.versioning.record import VersionRecord, get_record
 from bgexplorer.versioning.history import VersionEvent, EventAction
 from tests.dbutil import connect_test_db
 from tests.test_app_components import AppTestCase
@@ -113,7 +114,7 @@ class TestVersionFile(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in [VersionSettings, VersionEvent] + versioned_classes():
+        for cls in [VersionRecord, VersionEvent] + versioned_classes():
             cls.drop_collection()
         make_model()
 
@@ -122,29 +123,30 @@ class TestVersionFile(unittest.TestCase):
         self.assertEqual(sorted(members), [
             'activated_material.jsonl', 'component.jsonl',
             'emission_spec.jsonl', 'hit_efficiency.jsonl', 'manifest.json',
-            'settings.json'])
+            'version_settings.jsonl'])
         manifest = json.loads(members['manifest.json'])
         self.assertEqual(manifest['format'], 'bgexplorer-version')
         self.assertEqual(manifest['version_tag'], 'src')
         self.assertEqual(manifest['counts'], {
             'Component': 3, 'EmissionSpec': 3, 'HitEfficiency': 1,
-            'ActivatedMaterial': 1})
+            'ActivatedMaterial': 1, 'VersionSettings': 1})
         doc = json_util.loads(members['component.jsonl'].splitlines()[0])
         self.assertNotIn('_id', doc)
         self.assertNotIn('version_tags', doc)
         self.assertIn('original_id', doc)
-        settings = json_util.loads(members['settings.json'])
-        self.assertNotIn('version_tag', settings)
+        settings = json_util.loads(members['version_settings.jsonl'])
+        self.assertNotIn('version_tags', settings)
         self.assertEqual(settings['hiteffdbconfig']['extra_columns'],
                          ['material'])
 
     def test_round_trip(self):
-        settings = import_version(io.BytesIO(export_bytes()), 'copy')
-        self.assertTrue(settings.editable)
-        self.assertIn("Imported from 'src'", settings.description)
-        self.assertIsNone(settings.lock)
-        self.assertEqual(settings.hiteffdbconfig.extra_columns, ['material'])
-        for cls in referenced_classes():
+        record = import_version(io.BytesIO(export_bytes()), 'copy')
+        self.assertTrue(record.editable)
+        self.assertIn("Imported from 'src'", record.description)
+        self.assertIsNone(record.lock)
+        self.assertEqual(get_settings('copy').hiteffdbconfig.extra_columns,
+                         ['material'])
+        for cls in primary_classes():
             with self.subTest(cls=cls.__name__):
                 src = set(cls._get_collection().distinct(
                     'original_id', {'version_tags': 'src'}))
@@ -158,7 +160,6 @@ class TestVersionFile(unittest.TestCase):
         for result in comparison.classes:
             self.assertEqual((result.differ, result.only_left,
                               result.only_right), ([], [], []))
-        self.assertEqual(comparison.settings, [])
         self.assertEqual(sourceterm_signature('copy'),
                          sourceterm_signature('src'))
         # the documents work as usual
@@ -179,16 +180,17 @@ class TestVersionFile(unittest.TestCase):
         self.assertEqual({c.cls.__name__: [i.name for i in c.replace]
                           for c in plan.classes},
                          {'Component': ['c1'], 'EmissionSpec': [],
-                          'HitEfficiency': [], 'ActivatedMaterial': []})
+                          'HitEfficiency': [], 'ActivatedMaterial': [],
+                          'VersionSettings': []})
         event = VersionEvent.objects.first()
         self.assertEqual((event.action, event.version, event.other_version),
                          (EventAction.import_version, 'copy', 'src'))
 
     def test_import_as_tag(self):
-        settings = import_version(io.BytesIO(export_bytes()), 't',
-                                  editable=False, description='a tag')
-        self.assertFalse(settings.editable)
-        self.assertEqual(settings.description, 'a tag')
+        record = import_version(io.BytesIO(export_bytes()), 't',
+                                editable=False, description='a tag')
+        self.assertFalse(record.editable)
+        self.assertEqual(record.description, 'a tag')
         self.assertEqual(SourceTerm.select_version('t').count(),
                          SourceTerm.select_version('src').count())
 
@@ -209,13 +211,13 @@ class TestVersionFile(unittest.TestCase):
         # existing version alone
         data = export_bytes()
         before = snapshot()
-        token = get_settings('src').cache_token
+        token = get_record('src').cache_token
         with mock.patch.object(vc, 'verify_version'):
             with self.assertRaises(KeyError):
                 import_version(io.BytesIO(data), 'src')
         self.assertEqual(snapshot(), before)
-        self.assertEqual(get_settings('src').cache_token, token)
-        self.assertIsNone(get_settings('src').lock)
+        self.assertEqual(get_record('src').cache_token, token)
+        self.assertIsNone(get_record('src').lock)
 
     def test_bad_files(self):
         good = read_members(export_bytes())
@@ -233,7 +235,6 @@ class TestVersionFile(unittest.TestCase):
         cases = {
             'not a tar': b'hello',
             'no manifest': with_(manifest__json=None),
-            'no settings': with_(settings__json=None),
             'unknown member': with_(**{'other__txt': b'x'}),
             'wrong format': with_(manifest__json=json.dumps(
                 dict(manifest, format='other')).encode()),
@@ -284,7 +285,7 @@ class TestVersionFile(unittest.TestCase):
         self.assertEqual(snapshot(), before)
 
     def test_read_only_checks(self):
-        manifest, settings, docs = read_version_file(
+        manifest, docs = read_version_file(
             io.BytesIO(export_bytes()))
         self.assertEqual(manifest['version_tag'], 'src')
         self.assertEqual(len(docs[Component]), 3)

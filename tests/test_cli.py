@@ -7,6 +7,7 @@ from bgexplorer.models.users import User, Role
 from bgexplorer.versioning import control as vc
 from bgexplorer.versioning.verdoc import versioned_classes
 from bgexplorer.models.settings import VersionSettings, get_settings
+from bgexplorer.versioning.record import VersionRecord, get_record
 from bgexplorer.versioning.history import VersionEvent
 from bgexplorer.versioning.diff import diff_versions
 from tests.test_versionfile import make_model
@@ -86,7 +87,7 @@ class TestVersionsCli(unittest.TestCase):
     def setUp(self):
         mongoengine.connect(host=TEST_MONGODB_URI)
         self.addCleanup(mongoengine.disconnect)
-        for cls in [VersionSettings, VersionEvent] + versioned_classes():
+        for cls in [VersionRecord, VersionEvent] + versioned_classes():
             cls.drop_collection()
         make_model('src')
 
@@ -106,9 +107,9 @@ class TestVersionsCli(unittest.TestCase):
             result = self.invoke('import', 'src.bgx.tar.gz', '--name', 'copy',
                                  '--tag', '--description', 'from the cli')
             self.assertEqual(result.exit_code, 0, result.output)
-            settings = get_settings('copy', create=False)
-            self.assertFalse(settings.editable)
-            self.assertEqual(settings.description, 'from the cli')
+            record = get_record('copy')
+            self.assertFalse(record.editable)
+            self.assertEqual(record.description, 'from the cli')
             self.assertFalse(diff_versions('src', 'copy').changed)
             result = self.invoke('list')
             self.assertIn('copy\ttag\tfrom the cli', result.output)

@@ -85,6 +85,7 @@ class HitEfficiency(DynamicVersionedDocument):
     material). A HitEfficiency with no material matches any material.
     Multiple responses are grouped by (primary_particle, primary_spectrum).
     """
+    VERSION_LABEL_FIELDS = ('source', 'location')
     # required metadata and results
     source = StringField(required=True)
     location = StringField(required=True)
@@ -332,21 +333,22 @@ def check_settings(version_settings) -> None:
     all of the HitEfficiencies in the version
     """
     config = version_settings.hiteffdbconfig
-    tag = version_settings.version_tag
-    for type_ in ('scalars', 'spectra'):
-        for key, cfg in getattr(config, f'display_{type_}').items():
-            _check_display_unit(tag, type_, key, cfg)
-    for roi in config.rois:
-        _check_roi_unit(tag, roi)
+    for tag in version_settings.version_tags:
+        for type_ in ('scalars', 'spectra'):
+            for key, cfg in getattr(config, f'display_{type_}').items():
+                _check_display_unit(tag, type_, key, cfg)
+        for roi in config.rois:
+            _check_roi_unit(tag, roi)
 
 
 def update_rois(sender, document, **kwargs) -> None:
     """ Update the ROIs of all HitEfficiencies when the settings are saved """
-    for he in HitEfficiency.select_version(document.version_tag):
-        rois = {roi.key: roi.evaluate(he, store=False)
-                for roi in document.hiteffdbconfig.rois}
-        # use update rather than save or we'll get stuck in a loop
-        he.update(set__rois=rois)
+    for tag in document.version_tags:
+        for he in HitEfficiency.select_version(tag):
+            rois = {roi.key: roi.evaluate(he, store=False)
+                    for roi in document.hiteffdbconfig.rois}
+            # use update rather than save or we'll get stuck in a loop
+            he.update(set__rois=rois)
 
 
 settings.VersionSettings.clean_hooks.append(check_settings)

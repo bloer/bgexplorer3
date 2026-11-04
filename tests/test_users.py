@@ -5,6 +5,7 @@ from bgexplorer.models.users import User, Role
 from bgexplorer.models.component import Component
 from bgexplorer.versioning.verdoc import set_user_provider
 from bgexplorer.models.settings import VersionSettings
+from bgexplorer.versioning.record import VersionRecord
 from bgexplorer.versioning import control as vc
 from tests.dbutil import connect_test_db
 
@@ -56,7 +57,7 @@ class TestUsers(unittest.TestCase):
             User(name='u1').save()
 
     def test_enteredby(self):
-        for cls in (Component, VersionSettings):
+        for cls in (Component, VersionSettings, VersionRecord):
             cls.drop_collection()
         vc.create_version('main')
         name = None

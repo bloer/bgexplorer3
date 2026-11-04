@@ -11,7 +11,10 @@ from bgexplorer.models.budget import dashboard
 from bgexplorer.models.termcalc import TermCalculator
 from bgexplorer.models.sourceterm import (SourceTerm, ResultsCache,
                                           clear_results_cache)
-from bgexplorer.models.settings import VersionSettings, get_settings
+from bgexplorer.models.settings import (VersionSettings, get_settings,
+                                        get_calc_token)
+from bgexplorer.versioning.control import create_version
+from bgexplorer.versioning.record import VersionRecord, get_cache_token
 from bgexplorer.models import signals
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
@@ -412,6 +415,7 @@ class TestSourceTerm(unittest.TestCase):
 
     def test5_cache(self):
         """ Results are cached in memory until data in the version change """
+        VersionRecord.drop_collection()
         VersionSettings.drop_collection()
         get_settings()
         clear_results_cache()
@@ -450,15 +454,15 @@ class TestSourceTerm(unittest.TestCase):
         clear_results_cache()
         assert_allclose(totals(), [8, 8])
 
-        # cloned settings get a new token
-        settings = get_settings()
-        clone = settings.clone('other')
-        self.assertNotEqual(settings.cache_token, clone.cache_token)
+        # a new version gets its own token
+        other = create_version('other', 'main')
+        self.assertNotEqual(get_cache_token('main'), other.cache_token)
 
     def test6_stamps(self):
         """ A SourceTerm's stamp only changes when its content does """
+        VersionRecord.drop_collection()
         VersionSettings.drop_collection()
-        settings = get_settings()
+        get_settings()
         HitEfficiency(source="Co60", location="loc", scalars=dict(
             v1=AsymmetricUncertainty(0.1, 0.01)*units('dru/mBq'))).save()
         e1 = spec_of(EmissionSource(name="Co60", rate="10 +- 1 mBq/kg"))
@@ -477,8 +481,7 @@ class TestSourceTerm(unittest.TestCase):
             self.assertEqual(st.stamp, st.content_stamp())
 
         def tokens():
-            settings.reload()
-            return settings.cache_token, settings.calc_token
+            return get_cache_token('main'), get_calc_token('main')
         tokens_before = tokens()
         # saving again changes nothing about the terms, nor the stamps
         c.reload()

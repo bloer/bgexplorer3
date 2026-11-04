@@ -6,6 +6,7 @@ from bgexplorer.models.component import (Component, Assembly, Placement,
 from bgexplorer.models.emissionspec import EmissionSpec
 from bgexplorer.models.exposure import RadonExposure, RadonPeriod
 from bgexplorer.models.settings import VersionSettings
+from bgexplorer.versioning.record import VersionRecord
 from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.versioning import control as vc
 from tests.dbutil import connect_test_db
@@ -21,7 +22,7 @@ class TestOwnedSpecs(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in (VersionSettings, Component, EmissionSpec, SourceTerm):
+        for cls in (VersionRecord, VersionSettings, Component, EmissionSpec, SourceTerm):
             cls.drop_collection()
         vc.create_version('main')
         self.nominal = RadonExposure(name='1 day cleanroom', periods=[

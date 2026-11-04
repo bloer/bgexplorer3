@@ -5,7 +5,8 @@ from .emissionspec import EmissionSpec, Multiplier
 from .cosmogenic import ActivatedMaterial, CosmogenicActivation
 from .hiteff import HitEfficiency
 from .sourceterm import (SourceTerm, find_sourceterms, sync_sourceterms,
-                         placed_sourceterms)
+                         placed_sourceterms, check_version_units)
+from ..versioning import hooks
 from ..versioning.verdoc import ref_id, check_writable
 from . import settings
 import logging
@@ -267,3 +268,81 @@ def post_delete(sender, document, **kwargs):
 mongoengine.signals.post_save.connect(post_save)
 mongoengine.signals.pre_delete.connect(pre_delete)
 mongoengine.signals.post_delete.connect(post_delete)
+
+
+def _update_rois(version_tag: str) -> None:
+    """ Evaluate the ROIs of the hit efficiencies in `version_tag` with its
+    settings, and save those that changed
+    """
+    rois = settings.get_settings(version_tag).hiteffdbconfig.rois
+    for hiteff in HitEfficiency.select_version(version_tag):
+        values = {roi.key: roi.evaluate(hiteff, store=False) for roi in rois}
+        try:
+            changed = values != dict(hiteff.rois)
+        except Exception:
+            changed = True
+        if changed:
+            hiteff.update(set__rois=values)
+
+
+def _update_sourceterms(target: str, plan, rebuild_all: bool) -> None:
+    """ Update the SourceTerms of `target` that depend on the documents a
+    merge adopted, as if each had been saved there. If `rebuild_all`, as when
+    new settings can change any of them, or when most components are
+    affected, all are rebuilt
+    """
+    adopted = {c.cls: [i.original_id for i in c.adopted]
+               for c in plan.classes}
+    components = Component.select_version(target)
+    # updating each term separately costs more per term than a rebuild
+    touched = components(__raw__={'$or': [
+        {'original_id': {'$in': adopted.get(Component, [])}},
+        {'spec_entries.spec': {'$in': adopted.get(EmissionSpec, [])}}]}).count()
+    if rebuild_all or touched > components.count() / 2:
+        rebuild_sourceterms(target)
+        return
+    docs = []
+    # materials update their activation specs, specs their components, and
+    # components their assemblies; hit efficiencies match the final terms
+    for cls in (ActivatedMaterial, EmissionSpec, Component, HitEfficiency):
+        if ids := adopted.get(cls):
+            found = list(cls.select_version(target)(original_id__in=ids))
+            if cls is Component:
+                # leaves, then assemblies from the bottom up
+                found.sort(key=lambda c: (isinstance(c, Assembly),
+                                          c.hierarchy_level))
+            docs.extend(found)
+    log.info(f"Updating SourceTerms in '{target}' for {len(docs)} merged "
+             "documents")
+    for doc in docs:
+        post_save(type(doc), doc)
+
+
+def after_merge(target, source=None, plan=None, **kwargs):
+    """ Bring everything derived from the documents of `target` up to date
+    after a merge, and report units that don't agree
+    """
+    changed = {c.cls: c for c in plan.classes}
+    settings_plan = changed.get(settings.VersionSettings)
+    if settings_plan is not None and (settings_plan.adopted
+                                      or settings_plan.keep):
+        # some hit efficiencies' ROIs were evaluated with other settings
+        _update_rois(target)
+    _update_sourceterms(target, plan, bool(settings_plan
+                                           and settings_plan.adopted))
+    # the merged documents were not validated together
+    return check_version_units(target)
+
+
+hooks.version_merged.connect(after_merge)
+
+
+def after_import(version_tag, manifest=None, counts=None, **kwargs):
+    """ Create the SourceTerms of an imported version, and report units that
+    don't agree
+    """
+    rebuild_sourceterms(version_tag)
+    return check_version_units(version_tag)
+
+
+hooks.version_imported.connect(after_import)

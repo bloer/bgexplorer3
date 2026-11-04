@@ -9,6 +9,7 @@ from bgexplorer.models.emissionspec import (EmissionSpec, Multiplier,
 from bgexplorer.models.sourceterm import SourceTerm
 from math import exp
 from bgexplorer.models.settings import VersionSettings
+from bgexplorer.versioning.record import VersionRecord
 from bgexplorer.models.isotope import get_tau
 from bgexplorer.models.common import units
 from bgexplorer.versioning import control as vc
@@ -35,7 +36,7 @@ class TestActivatedMaterial(unittest.TestCase):
     def setUp(self):
         # other tests create the same versions, whose documents would be
         # copied into them
-        for cls in [VersionSettings] + versioned_classes():
+        for cls in [VersionRecord] + versioned_classes():
             cls.drop_collection()
 
     def tearDown(self):
@@ -104,7 +105,7 @@ class TestCosmogenicActivation(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in (ActivatedMaterial, VersionSettings, Component,
+        for cls in (VersionRecord, ActivatedMaterial, VersionSettings, Component,
                     EmissionSpec, SourceTerm):
             cls.drop_collection()
         vc.create_version('main')

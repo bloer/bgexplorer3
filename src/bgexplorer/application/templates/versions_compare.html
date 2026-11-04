@@ -19,7 +19,7 @@
 {%- if comparison %}
 {%- set this = g.active_version %}
 {%- macro difflink(cls, item, version, otherversion, text) -%}
-<a href="{{ url_for(cls.__name__.lower() ~ '.diff', itemid=item.original_id|string, other_version=otherversion, active_version=version) }}">{{ text }}</a>
+{% if has_diff_page(cls) %}<a href="{{ url_for(cls.__name__.lower() ~ '.diff', itemid=item.original_id|string, other_version=otherversion, active_version=version) }}">{{ text }}</a>{% else %}{{ text }}{% endif %}
 {%- endmacro %}
 {%- macro itemtable(cls, items, kind) %}
 <table class="table table-sm compare-{{ kind }}">
@@ -65,23 +65,23 @@
 </section>
 {%- endfor %}
 
+{%- if settings_entries %}
 <section id="compare-settings">
     <h2>Settings</h2>
-    {%- if comparison.settings %}
+    {%- if settings_entries %}
     <table class="table">
         <thead><tr><th>Setting</th><th>{{ this }}</th><th>{{ other }}</th></tr></thead>
         <tbody>
-        {%- for entry in comparison.settings %}
+        {%- for entry in settings_entries %}
         <tr class="diff-{{ entry.kind }}"><td><code>{{ entry.pathstr }}</code></td>
             <td>{{ format_value(entry.left, {}, this) }}</td>
             <td>{{ format_value(entry.right, {}, other) }}</td></tr>
         {%- endfor %}
         </tbody>
     </table>
-    {%- else %}
-    <p class="text-muted">The settings are the same.</p>
     {%- endif %}
 </section>
+{%- endif %}
 {%- else %}
 <p>Choose a version to compare {{ g.active_version }} with.</p>
 {%- endif %}

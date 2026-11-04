@@ -135,7 +135,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <fieldset class="mb-4">
         <legend>Description</legend>
-        <textarea class="form-control {%- if errors.description %} is-invalid{% endif %}" name="description" rows="3">{{ settings.description or '' }}</textarea>
+        <textarea class="form-control {%- if errors.description %} is-invalid{% endif %}" name="description" rows="3">{{ version_record.description or '' }}</textarea>
     </fieldset>
 
     <fieldset class="mb-4">

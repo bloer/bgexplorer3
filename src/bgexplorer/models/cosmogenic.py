@@ -54,6 +54,7 @@ class ActivatedMaterial(VersionedDocument):
     """ The cosmogenic isotopes produced in a material and their sea level
     activation rates
     """
+    VERSION_BULKY_FIELDS = ('attachments.data',)
     name = StringField(required=True)
     material = StringField()
     description = StringField()

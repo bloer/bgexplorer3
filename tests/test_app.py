@@ -15,6 +15,7 @@ from bgexplorer.models.cosmogenic import ActivatedMaterial, CosmogenicIsotope
 from bgexplorer.versioning.verdoc import VersionedDocument
 from bgexplorer.models.settings import get_settings
 from bgexplorer.versioning import control as vc
+from bgexplorer.versioning.record import get_record
 from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.users import User
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
@@ -284,9 +285,9 @@ class TestAppVersions(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.location,
                          self.url('overview', active_version='b1'))
-        settings = get_settings('b1', create=False)
-        self.assertTrue(settings.editable)
-        self.assertEqual(settings.description, 'a branch')
+        record = get_record('b1')
+        self.assertTrue(record.editable)
+        self.assertEqual(record.description, 'a branch')
         self.assertEqual(Component.select_version('b1').count(), 1)
         # the flash message is shown
         html = self.client.get(response.location).get_data(as_text=True)
@@ -420,9 +421,10 @@ class TestAppVersions(unittest.TestCase):
                          response.get_data(as_text=True))
         self.assertEqual(response.location,
                          self.url('overview', active_version='main'))
+        record = get_record('main')
+        self.assertEqual(record.description, 'edited')
+        self.assertTrue(record.editable)
         settings = get_settings('main', create=False)
-        self.assertEqual(settings.description, 'edited')
-        self.assertTrue(settings.editable)
         self.assertEqual(len(settings.addsources), 1)
         self.assertEqual(settings.addsources[0].ratio, 0.5)
         self.assertEqual(settings.addsources[0].ratiotype.value, 'abundance')
@@ -468,7 +470,7 @@ class TestAppVersions(unittest.TestCase):
         self.assertIn('addsources.0.newsource', html)
         self.assertIn('must be different', html)
         settings.reload()
-        self.assertEqual(settings.description, 'edited')
+        self.assertEqual(get_record('main').description, 'edited')
         self.assertEqual(str(config.display_scalars['v1'].display_unit),
                          'mdru')
 
@@ -488,7 +490,7 @@ class TestAppVersions(unittest.TestCase):
         self.assertEqual(self.client.get(tagurl).status_code, 403)
         self.assertEqual(self.client.post(tagurl, data={'description': 'x'})
                          .status_code, 403)
-        self.assertEqual(get_settings('v1', create=False).description,
+        self.assertEqual(get_record('v1').description,
                          'first tag')
 
 

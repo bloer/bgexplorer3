@@ -8,13 +8,12 @@ from unittest import mock
 from bson import ObjectId
 from mongoengine import disconnect
 from bgexplorer.versioning import control as vc
-from bgexplorer.models import settings as settings_module
+from bgexplorer.versioning import record as record_module
 from bgexplorer.models.component import Component
 from bgexplorer.versioning.history import VersionEvent, EventAction
 from bgexplorer.versioning.maintenance import find_locks, clear_locks
-from bgexplorer.models.settings import (VersionSettings, get_settings,
-                                        acquire_lock, release_lock,
-                                        refresh_lock, hold_locks, holding)
+from bgexplorer.versioning.locks import acquire_lock, release_lock, refresh_lock, hold_locks, holding
+from bgexplorer.versioning.record import VersionRecord, get_record
 from bgexplorer.versioning.verdoc import VersionLockedError, LockLostError
 from bgexplorer.versioning.verdoc import versioned_classes
 from tests.dbutil import connect_test_db
@@ -24,8 +23,8 @@ SECOND = datetime.timedelta(seconds=1)
 
 def expire(tag, ago=SECOND):
     """ Make the lock on `tag` expire `ago` before now """
-    VersionSettings.objects(version_tag=tag).update(
-        set__lock__expires=settings_module._now() - ago)
+    VersionRecord.objects(version_tag=tag).update(
+        set__lock__expires=record_module.now() - ago)
 
 
 class LockTestCase(unittest.TestCase):
@@ -38,7 +37,7 @@ class LockTestCase(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in [VersionSettings, VersionEvent] + versioned_classes():
+        for cls in [VersionRecord, VersionEvent] + versioned_classes():
             cls.drop_collection()
         vc.create_version('b')
         Component(name='c1', mass='1 kg', version_tag='b').save()
@@ -53,7 +52,7 @@ class LockTestCase(unittest.TestCase):
         c1.save()
 
     def lock_of(self, tag):
-        return get_settings(tag, create=False).active_lock
+        return get_record(tag).active_lock
 
     def heartbeats(self):
         return [t for t in threading.enumerate()
@@ -143,14 +142,14 @@ class TestExpiry(LockTestCase):
 
     def test_no_ttl_never_expires(self):
         acquire_lock('b', 'forever', ttl=None)
-        self.assertIsNone(get_settings('b').lock.expires)
+        self.assertIsNone(get_record('b').lock.expires)
         with self.assertRaises(VersionLockedError):
             acquire_lock('b', 'second')
 
     def test_lock_without_expiry_field(self):
         # locks saved before they could expire
         acquire_lock('b', 'old style')
-        VersionSettings._get_collection().update_one(
+        VersionRecord._get_collection().update_one(
             {'version_tag': 'b'}, {'$unset': {'lock.expires': ''}})
         self.assertIsNotNone(self.lock_of('b'))
         with self.assertRaises(VersionLockedError):
@@ -161,10 +160,10 @@ class TestExpiry(LockTestCase):
     def test_refresh(self):
         ttl = datetime.timedelta(minutes=1)
         token = acquire_lock('b', 'test', ttl=ttl)
-        expires = get_settings('b').lock.expires
+        expires = get_record('b').lock.expires
         time.sleep(0.01)
         self.assertTrue(refresh_lock('b', token, ttl=2 * ttl))
-        self.assertGreater(get_settings('b').lock.expires,
+        self.assertGreater(get_record('b').lock.expires,
                            expires + ttl / 2)
         self.assertFalse(refresh_lock('b', ObjectId()))
         self.assertFalse(refresh_lock('nosuchversion', token))
@@ -228,8 +227,8 @@ class TestMaintenance(LockTestCase):
         self.assertTrue(found['b2'].expired)
 
         self.assertEqual(clear_locks(expired_only=True), ['b2'])
-        self.assertIsNotNone(get_settings('b').lock)
-        self.assertIsNone(get_settings('b2').lock)
+        self.assertIsNotNone(get_record('b').lock)
+        self.assertIsNone(get_record('b2').lock)
 
         self.assertEqual(clear_locks(), ['b'])
         self.assertEqual(find_locks(), [])
@@ -243,8 +242,8 @@ class TestMaintenance(LockTestCase):
         acquire_lock('b', 'x')
         acquire_lock('b2', 'y')
         self.assertEqual(clear_locks(['b2']), ['b2'])
-        self.assertIsNotNone(get_settings('b').lock)
-        self.assertIsNone(get_settings('b2').lock)
+        self.assertIsNotNone(get_record('b').lock)
+        self.assertIsNone(get_record('b2').lock)
 
 
 class TestOperationsLock(LockTestCase):
@@ -298,16 +297,16 @@ class TestOperationsLock(LockTestCase):
         self.assertEqual(self.get('b').mass.m, 1)
         vc.create_version('b3', 'b')
 
-    def test_create_over_existing_settings_fails(self):
-        before = get_settings('b2').cache_token
+    def test_create_over_existing_version_fails(self):
+        before = get_record('b2').cache_token
         with self.assertRaises(KeyError):
-            get_settings('b').clone('b2', overwrite=False)
-        self.assertEqual(get_settings('b2').cache_token, before)
+            vc.create_version('b2', 'b')
+        self.assertEqual(get_record('b2').cache_token, before)
         # a creation that raced past the existence check doesn't overwrite
         with mock.patch.object(vc, 'verify_version'):
             with self.assertRaises(KeyError):
                 vc.create_version('b2', 'b')
-        self.assertEqual(get_settings('b2').cache_token, before)
+        self.assertEqual(get_record('b2').cache_token, before)
         self.assertEqual(self.get('b2').name, 'c1')
         self.assertIsNone(self.lock_of('b'))
 
@@ -345,14 +344,14 @@ class TestMergeAndImportLock(LockTestCase):
         self.assertIsNone(self.lock_of('t'))
 
     def test_failed_restore_keeps_target_locked(self):
-        with mock.patch.object(vc, '_update_sourceterms',
+        with mock.patch('bgexplorer.models.signals._update_sourceterms',
                                side_effect=RuntimeError('merge broke')), \
              mock.patch.object(vc, '_restore',
                                side_effect=RuntimeError('restore broke')):
             with self.assertRaises(vc.MergeError) as cm:
                 vc.merge_version('b2', 'b')
         self.assertIn('restoring', str(cm.exception))
-        lock = get_settings('b').lock
+        lock = get_record('b').lock
         self.assertIsNotNone(lock)
         self.assertIsNone(lock.expires)
         self.assertIn('merge', lock.reason)
@@ -365,7 +364,7 @@ class TestMergeAndImportLock(LockTestCase):
         self.assertEqual(clear_locks(), ['b'])
 
     def test_successful_rollback_releases(self):
-        with mock.patch.object(vc, '_update_sourceterms',
+        with mock.patch('bgexplorer.models.signals._update_sourceterms',
                                side_effect=RuntimeError('merge broke')):
             with self.assertRaises(vc.MergeError):
                 vc.merge_version('b2', 'b')
@@ -394,10 +393,10 @@ class TestAcquireRelease(LockTestCase):
     def test_acquire_stores_lock(self):
         token = acquire_lock('b', 'testing', user='me',
                              ttl=datetime.timedelta(minutes=1))
-        lock = get_settings('b').lock
+        lock = get_record('b').lock
         self.assertEqual((lock.token, lock.reason, lock.user),
                          (token, 'testing', 'me'))
-        self.assertGreater(lock.expires, settings_module._now())
+        self.assertGreater(lock.expires, record_module.now())
 
     def test_release_semantics(self):
         self.assertFalse(release_lock('b'))
@@ -431,4 +430,4 @@ class TestAcquireRelease(LockTestCase):
             t.join()
         winners = [r for r in results if r is not None]
         self.assertEqual(len(winners), 1)
-        self.assertEqual(get_settings('b').lock.token, winners[0])
+        self.assertEqual(get_record('b').lock.token, winners[0])

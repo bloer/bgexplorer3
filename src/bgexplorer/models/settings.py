@@ -1,4 +1,4 @@
-from mongoengine import (Q, Document, DateTimeField, StringField, BooleanField,
+from mongoengine import (Document, StringField, BooleanField,
                          EmbeddedDocument, EmbeddedDocumentListField, signals,
                          FloatField, EnumField, MapField, URLField,
                          EmbeddedDocumentField, ListField, BinaryField,
@@ -9,41 +9,54 @@ from pint.errors import PintError
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from .fields import UnitField, QuantityField
-from ..versioning import verdoc
+from ..versioning import control, hooks, record
+from ..versioning.verdoc import VersionedDocument
 from enum import Enum
-from typing import Optional, Iterable, Iterator, Mapping
-import contextlib
-import contextvars
+from typing import Optional
 import secrets
-import threading
-import datetime
 import logging
 log = logging.getLogger(__name__)
 
 __all__ = ['RatioType', 'get_settings', 'get_application_settings']
 
 
+# Every version has exactly one VersionSettings. They all have this
+# original_id, so the unique index on (version_tags, original_id) keeps it so
+# and a new branch shares the settings of the version it was made from until
+# they are edited there.
+SETTINGS_ORIGINAL_ID = ObjectId('000000000000000000000002')
+
+
 def get_settings(version_tag: Optional[str] = None, create: bool = True,
                  ) -> 'VersionSettings':
     """ Get the settings for a given version (Defaults to default_tag).
-    If it doesn't exist and create is true, create a default one
-    if it doesn't exist and create is false, raise a KeyError
+    A version without any gets default settings. If the version doesn't exist,
+    it is created if `create` is true and otherwise KeyError is raised
     """
     if version_tag is None:
-        version_tag = verdoc.VersionedDocument.get_default_tag()
+        version_tag = VersionedDocument.get_default_tag()
+    settings = VersionSettings.select_version(version_tag).first()
+    if settings is not None:
+        return settings
+    if not control.version_exists(version_tag):
+        if not create:
+            raise KeyError(version_tag)
+        log.warning(f"Version '{version_tag}' not found, creating it with "
+                    "default settings")
+        try:
+            control.create_version(version_tag, record=False)
+        except KeyError:
+            # another process created it at the same time
+            pass
+    # Not saved the usual way: that is refused for a read-only version
+    new = VersionSettings(version_tag=version_tag)
+    new.validate()
     try:
-        return VersionSettings.objects.get(version_tag=version_tag)
-    except VersionSettings.DoesNotExist as e:
-        log.warning("No VersionSettings found for requested version "
-                    f"'{version_tag}',")
-        if create:
-            log.warning("creating version with defaults")
-            try:
-                return VersionSettings(version_tag=version_tag).save()
-            except NotUniqueError:
-                # another process created it at the same time
-                return VersionSettings.objects.get(version_tag=version_tag)
-        raise KeyError(version_tag) from e
+        VersionSettings._get_collection().insert_one(new.to_mongo())
+    except DuplicateKeyError:
+        # another process created it at the same time
+        pass
+    return VersionSettings.select_version(version_tag).get()
 
 
 def touch(version_tag: str, terms_only: bool = False):
@@ -53,242 +66,61 @@ def touch(version_tag: str, terms_only: bool = False):
     every SourceTerm. Use `terms_only` only for changes that are reflected in
     the SourceTerms' own stamps.
     """
-    update = dict(set__modified=datetime.datetime.now(),
-                  set__cache_token=ObjectId())
-    if not terms_only:
-        update['set__calc_token'] = ObjectId()
-    VersionSettings.objects(version_tag=version_tag).update(**update)
+    record.touch(version_tag, terms_only=terms_only)
 
 
-def _get_token(version_tag: str, field: str) -> Optional[ObjectId]:
-    # read the raw value: mongoengine would fill in a new default for
-    # settings saved before the token existed
-    doc = VersionSettings.objects(version_tag=version_tag)\
-                         .only(field).as_pymongo().first()
-    if doc is None:
-        return None
-    if doc.get(field) is None:
-        touch(version_tag)
-        return _get_token(version_tag, field)
-    return doc[field]
-
-
-def get_cache_token(version_tag: str) -> Optional[ObjectId]:
-    """ Return a token that changes whenever data in `version_tag` changes,
-    or None if the version has no settings
+class CalcToken(Document):
+    """ Replaced when something other than a SourceTerm changes how the
+    SourceTerms' values are calculated, such as a HitEfficiency. There is
+    one for each version, with the id of its VersionRecord. They are made
+    when needed, see `get_calc_token`
     """
-    return _get_token(version_tag, 'cache_token')
+    id = ObjectIdField(primary_key=True)
+    token = ObjectIdField(default=ObjectId)
 
 
 def get_calc_token(version_tag: str) -> Optional[ObjectId]:
     """ Return a token that changes whenever something other than a
     SourceTerm changes how the SourceTerms' values are calculated, such as a
-    HitEfficiency. None if the version has no settings
+    HitEfficiency. None if the version doesn't exist
     """
-    return _get_token(version_tag, 'calc_token')
-
-
-# How long a lock lasts without being refreshed. The holder of a lock
-# refreshes it regularly, so one left behind by a crashed process or worker
-# frees itself after this long.
-LOCK_TTL = datetime.timedelta(minutes=5)
-
-# {version_tag: token} of the locks held by the current thread or task, which
-# may write to those versions, see `hold_locks`. Never modified in place.
-held_locks: contextvars.ContextVar[Mapping[str, ObjectId]] = \
-    contextvars.ContextVar('held_version_locks', default={})
-
-
-def _now() -> datetime.datetime:
-    """ The current time as MongoDB stores it: UTC without a time zone """
-    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-
-
-def _live(lock: Optional[Mapping]) -> bool:
-    """ Whether a stored lock is in force: it exists and hasn't expired. A
-    lock without an expiry time never expires """
-    if not lock:
-        return False
-    expires = lock.get('expires')
-    return expires is None or expires > _now()
-
-
-def new_lock(reason: str, user: Optional[str] = None,
-             ttl: Optional[datetime.timedelta] = LOCK_TTL) -> 'VersionLock':
-    """ A lock that expires `ttl` from now, or never if `ttl` is None """
-    return VersionLock(token=ObjectId(), reason=reason, user=user,
-                       expires=None if ttl is None else _now() + ttl)
-
-
-def _lock_error(version_tag: str, lock: Mapping) -> verdoc.VersionLockedError:
-    reason = lock.get('reason') or 'another operation'
-    return verdoc.VersionLockedError(f"Version '{version_tag}' is locked by "
-                                     f"{reason}, try again later")
-
-
-def check_unlocked(version_tag: Optional[str]) -> None:
-    """ Raise VersionLockedError if `version_tag` is locked by an operation
-    that isn't running in this context. This only reports the lock at the
-    moment of the check, use `hold_locks` to guarantee it stays unlocked
-    """
-    if version_tag is None or version_tag in held_locks.get():
-        return
-    doc = VersionSettings.objects(version_tag=version_tag)\
-        .only('lock').as_pymongo().first()
-    if doc is not None and _live(doc.get('lock')):
-        raise _lock_error(version_tag, doc['lock'])
-
-
-def _enforce_writable(version_tag: str) -> None:
-    doc = VersionSettings.objects(version_tag=version_tag)\
-        .only('editable', 'lock').as_pymongo().first()
-    if doc is None:
-        return
-    if doc.get('editable', True) is False:
-        raise verdoc.ReadOnlyVersionError(
-            f"Version '{version_tag}' is read-only")
-    lock = doc.get('lock')
-    if (held := held_locks.get().get(version_tag)) is not None:
-        # the holder writes only while its own lock is still there; one
-        # that expired but wasn't taken over still counts
-        if not lock or lock.get('token') != held:
-            raise verdoc.LockLostError(
-                f"The lock on version '{version_tag}' was lost, the "
-                "operation can't continue")
-    elif _live(lock):
-        raise _lock_error(version_tag, lock)
-
-
-verdoc.set_write_guard(_enforce_writable)
-
-
-def acquire_lock(version_tag: str, reason: str, user: Optional[str] = None,
-                 ttl: Optional[datetime.timedelta] = LOCK_TTL) -> ObjectId:
-    """ Lock `version_tag` and return the lock's token. The lock expires
-    after `ttl` unless refreshed with `refresh_lock`; with None it never
-    does. Raises VersionLockedError if it is already locked and KeyError if
-    it doesn't exist
-    """
-    free = Q(lock=None) | Q(lock__expires__lte=_now())
-    for _ in range(3):
-        lock = new_lock(reason, user, ttl)
-        if VersionSettings.objects(Q(version_tag=version_tag) & free)\
-                          .update_one(set__lock=lock):
-            return lock.token
-        doc = VersionSettings.objects(version_tag=version_tag)\
-            .only('lock').as_pymongo().first()
-        if doc is None:
-            raise KeyError(version_tag)
-        if _live(doc.get('lock')):
-            raise _lock_error(version_tag, doc['lock'])
-        # it was released or expired between the two queries; try again
-    raise _lock_error(version_tag, {})
-
-
-def refresh_lock(version_tag: str, token: ObjectId,
-                 ttl: datetime.timedelta = LOCK_TTL) -> bool:
-    """ Extend the lock with `token` to expire `ttl` from now. Returns False
-    if `version_tag` no longer has that lock, i.e. it was cleared or taken
-    over. Long operations that don't use `hold_locks` should call this
-    regularly
-    """
-    return bool(VersionSettings.objects(
-        version_tag=version_tag, lock__token=token
-        ).update_one(set__lock__expires=_now() + ttl))
-
-
-def release_lock(version_tag: str, token: Optional[ObjectId] = None
-                 ) -> bool:
-    """ Remove the lock from `version_tag`. If `token` is given, only remove
-    it if it matches. Returns whether a lock was removed
-    """
-    query = dict(version_tag=version_tag, lock__ne=None)
-    if token is not None:
-        query['lock__token'] = token
-    return bool(VersionSettings.objects(**query).update_one(set__lock=None))
-
-
-class _Heartbeat(threading.Thread):
-    """ Refreshes locks in the background until stopped """
-    def __init__(self, tokens: Mapping[str, ObjectId],
-                 ttl: datetime.timedelta):
-        super().__init__(name='version-lock-heartbeat', daemon=True)
-        self.tokens = dict(tokens)
-        self.ttl = ttl
-        self._halt = threading.Event()
-
-    def run(self) -> None:
-        while not self._halt.wait(self.ttl.total_seconds() / 3):
-            for tag, token in list(self.tokens.items()):
-                try:
-                    if not refresh_lock(tag, token, self.ttl):
-                        log.error(f"The lock on version '{tag}' was lost")
-                        del self.tokens[tag]
-                except Exception:
-                    log.exception(f"Couldn't refresh the lock on '{tag}'")
-
-    def stop(self) -> None:
-        self._halt.set()
-        self.join()
-
-
-@contextlib.contextmanager
-def hold_locks(version_tags: Iterable[str], reason: str,
-               user: Optional[str] = None,
-               ttl: Optional[datetime.timedelta] = LOCK_TTL
-               ) -> Iterator[None]:
-    """ Lock all of `version_tags` for the duration of the context. Writes
-    to them are allowed only from within the context. Raises
-    VersionLockedError, without holding any locks, if any is already locked.
-    Versions that the current context already holds are left as they are.
-    The locks are refreshed in the background, so they last as long as the
-    context does but free themselves soon after a crash; `ttl` of None
-    disables that
-    """
-    held = held_locks.get()
-    tokens = {}
+    record_id = record.record_id(version_tag)
+    if record_id is None:
+        return None
+    coll = CalcToken._get_collection()
+    query = {'_id': record_id}
     try:
-        # a fixed order, so concurrent callers can't each hold half
-        for tag in sorted(set(version_tags) - set(held)):
-            tokens[tag] = acquire_lock(tag, reason, user, ttl)
-    except BaseException:
-        for tag, token in tokens.items():
-            release_lock(tag, token)
-        raise
-    with holding(tokens, ttl):
-        yield
+        doc = coll.find_one_and_update(
+            query, {'$setOnInsert': {'token': ObjectId()}}, upsert=True,
+            return_document=ReturnDocument.AFTER)
+    except DuplicateKeyError:
+        doc = coll.find_one(query)
+    return doc['token']
 
 
-@contextlib.contextmanager
-def holding(tokens: Mapping[str, ObjectId],
-            ttl: Optional[datetime.timedelta] = LOCK_TTL) -> Iterator[None]:
-    """ Allow writes to the versions locked with {version_tag: token}
-    during the context, keep the locks alive, then release them
-    """
-    reset = held_locks.set({**held_locks.get(), **tokens})
-    heartbeat = None
-    if tokens and ttl is not None:
-        heartbeat = _Heartbeat(tokens, ttl)
-        heartbeat.start()
-    try:
-        yield
-    finally:
-        if heartbeat is not None:
-            heartbeat.stop()
-        held_locks.reset(reset)
-        for tag, token in tokens.items():
-            release_lock(tag, token)
+def _replace_calc_token(version_tag, record_id=None, document=None,
+                        terms_only=False, **kwargs):
+    if (record_id is None or terms_only
+            or getattr(document, 'VERSION_TOUCH_TERMS_ONLY', False)):
+        return
+    for _ in range(2):
+        try:
+            CalcToken._get_collection().update_one(
+                {'_id': record_id}, {'$set': {'token': ObjectId()}},
+                upsert=True)
+            return
+        except DuplicateKeyError:
+            # another process created it at the same time
+            pass
 
 
-def abandon_lock(version_tag: str, token: ObjectId, reason: str) -> None:
-    """ Turn a lock held by this context into one that nobody holds and that
-    never expires, so that it stays when the context ends. For operations
-    that fail and leave a version in a state that needs an administrator,
-    who can clear it, see `maintenance.clear_locks`
-    """
-    VersionSettings.objects(version_tag=version_tag, lock__token=token)\
-        .update_one(set__lock__token=ObjectId(), set__lock__expires=None,
-                    set__lock__reason=reason)
+def _delete_calc_token(sender, document, **kwargs):
+    if isinstance(document, record.VersionRecord):
+        CalcToken._get_collection().delete_one({'_id': document.id})
+
+
+hooks.version_changed.connect(_replace_calc_token)
+signals.post_delete.connect(_delete_calc_token)
 
 
 # the id of a new ApplicationSettings, so processes creating it at the same
@@ -490,92 +322,26 @@ class HitEffDbConfig(EmbeddedDocument):
                 roi.display_unit = hiteff.get_result_unit(hiteff.rois[roi.key])
 
 
-class VersionLock(EmbeddedDocument):
-    """ Marks a version as being changed by a long operation, such as a
-    merge. Only the holder may write to a locked version, see `hold_locks`
-    """
-    token = ObjectIdField(required=True)
-    reason = StringField()
-    user = StringField()
-    since = DateTimeField(default=datetime.datetime.now)
-    # the lock is free after this time (UTC) unless refreshed, see
-    # `refresh_lock`. None: it doesn't expire
-    expires = DateTimeField(default=None)
 
-    @property
-    def expired(self) -> bool:
-        return self.expires is not None and self.expires <= _now()
-
-
-class VersionSettings(Document):
+class VersionSettings(VersionedDocument):
     """ This class contains user-configurable settings """
-    version_tag = StringField(unique=True, required=True)
-    description = StringField()
-    modified = DateTimeField(default=datetime.datetime.now)
-    # replaced whenever any data in this version changes, see `touch`
-    cache_token = ObjectIdField(default=ObjectId)
-    # replaced when SourceTerm values change for reasons other than the
-    # SourceTerms' own content, see `touch`
-    calc_token = ObjectIdField(default=ObjectId)
-    editable = BooleanField(required=True, default=True)
     addsources = EmbeddedDocumentListField(AddSource,
                                            default=_default_auto_sources)
     hiteffdbconfig = EmbeddedDocumentField(HitEffDbConfig,
                                            default=HitEffDbConfig)
-    # set while an operation such as a merge is changing this version
-    lock = EmbeddedDocumentField(VersionLock, default=None)
     # checks that other modules add, each called with the settings being
     # validated and raising ValidationError if they are not acceptable
     clean_hooks = []
-    meta = {
-        'indexes': ['modified'],
-        'ordering': ['-modified'],
-    }
-
-    @property
-    def active_lock(self) -> Optional['VersionLock']:
-        """ The lock on this version, unless it has expired """
-        return None if self.lock is None or self.lock.expired else self.lock
-
-    def clone(self, newtag: str, lock: Optional['VersionLock'] = None,
-              overwrite: bool = True) -> 'VersionSettings':
-        """ Copy ourselves to a new tag, with `lock` already on it, if given.
-        Existing settings for that tag are replaced if `overwrite` is true,
-        and otherwise raise KeyError
-        """
-        stages = [{'$unset': ['_id', 'lock']},
-                  {'$set': {'version_tag': newtag,
-                            'modified': datetime.datetime.now(),
-                            'cache_token': ObjectId(),
-                            'calc_token': ObjectId()}}]
-        if lock is not None:
-            stages.append({'$set': {'lock': lock.to_mongo().to_dict()}})
-        stages.append(
-            {'$merge': {'into': VersionSettings.objects._collection.name,
-                        'on': 'version_tag',
-                        'whenMatched': 'replace' if overwrite else 'fail'}})
-        try:
-            VersionSettings.objects(id=self.id).aggregate(stages)
-        except DuplicateKeyError as e:
-            raise KeyError(f"Version/tag {newtag} already exists in the DB"
-                           ) from e
-        return VersionSettings.objects.get(version_tag=newtag)
-
-    def clean(self):
-        # settings of a read-only version can't be changed, including
-        # making it editable again
-        if self.id is not None:
-            verdoc.check_writable(VersionSettings.objects(id=self.id)
-                                  .scalar('version_tag').first())
-        for check in self.clean_hooks:
-            check(self)
 
     @classmethod
-    def post_save(cls, sender, document, **kwargs):
-        touch(document.version_tag)
+    def item_label(cls, son):
+        return 'Settings'
 
-
-signals.post_save.connect(VersionSettings.post_save, sender=VersionSettings)
+    def clean(self):
+        self.original_id = SETTINGS_ORIGINAL_ID
+        super().clean()
+        for check in self.clean_hooks:
+            check(self)
 
 
 class ApplicationSettings(Document):
@@ -585,17 +351,3 @@ class ApplicationSettings(Document):
     org_logo = BinaryField()
     org_url = URLField()
     allow_anon_view = BooleanField(default=True)
-
-
-def post_save(sender, document, **kwargs):
-    """ Update the 'modified' time and cache token for VersionSettings any
-    time a versioned document is saved or deleted
-    """
-    version_tag = getattr(document, 'active_version', None)
-    if version_tag is not None:
-        touch(version_tag, terms_only=getattr(
-            document, 'VERSION_TOUCH_TERMS_ONLY', False))
-
-
-signals.post_save.connect(post_save)
-signals.post_delete.connect(post_save)

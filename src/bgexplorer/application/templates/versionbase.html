@@ -26,13 +26,13 @@
 
 {% block extranav %}
 {%- if settings is defined %}
-{%- if settings.editable %}
+{%- if version_record.editable %}
 <span id="versionbadge" class="badge text-bg-primary">branch</span>
 {%- else %}
 <span id="versionbadge" class="badge text-bg-secondary" title="Tags are read-only snapshots">tag: read-only</span>
 {%- endif %}
-{%- if settings.active_lock %}
-<span id="lockbadge" class="badge text-bg-warning ms-1" title="Locked by {{ settings.active_lock.reason }} since {{ pretty_date(settings.active_lock.since) }}">locked</span>
+{%- if version_record.active_lock %}
+<span id="lockbadge" class="badge text-bg-warning ms-1" title="Locked by {{ version_record.active_lock.reason }} since {{ pretty_date(version_record.active_lock.since) }}">locked</span>
 {%- endif %}
 {%- endif %}
 {% endblock %}

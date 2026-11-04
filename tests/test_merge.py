@@ -11,11 +11,11 @@ from bgexplorer.versioning.control import (MergeRule,
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.sourceterm import SourceTerm
-from bgexplorer.models.settings import (VersionSettings, get_settings,
-                                        acquire_lock)
+from bgexplorer.models.settings import VersionSettings, get_settings
+from bgexplorer.versioning.locks import acquire_lock
+from bgexplorer.versioning.record import VersionRecord, get_record
 from bgexplorer.versioning.history import VersionEvent, EventAction
 from bgexplorer.models.signals import rebuild_sourceterms
-from bgexplorer.versioning.diff import settings_content
 from tests.dbutil import connect_test_db
 from tests.test_app_components import AppTestCase
 
@@ -44,11 +44,10 @@ def sourceterm_signature(tag):
 
 
 def snapshot(tag):
-    """ Which copies are in `tag`, and its settings """
-    return ({cls.__name__: sorted(cls._get_collection().distinct(
-                 '_id', {'version_tags': tag}))
-             for cls in versioned_classes()},
-            settings_content(tag))
+    """ Which copies are in `tag` """
+    return {cls.__name__: sorted(cls._get_collection().distinct(
+                '_id', {'version_tags': tag}))
+            for cls in versioned_classes()}
 
 
 class TestMerge(unittest.TestCase):
@@ -61,7 +60,7 @@ class TestMerge(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in [VersionSettings, VersionEvent] + versioned_classes():
+        for cls in [VersionRecord, VersionEvent] + versioned_classes():
             cls.drop_collection()
         vc.create_version('main')
         self.e1 = EmissionSpec(name='e1', sources=[
@@ -128,7 +127,6 @@ class TestMerge(unittest.TestCase):
     def test_settings(self):
         settings = get_settings('b')
         settings.hiteffdbconfig.extra_columns = ['material']
-        settings.description = 'b description'
         settings.save()
         merge_version('b', 'main', MergeRule.target)
         self.assertEqual(get_settings('main').hiteffdbconfig.extra_columns,
@@ -136,9 +134,6 @@ class TestMerge(unittest.TestCase):
         merge_version('b', 'main', MergeRule.source)
         settings = get_settings('main')
         self.assertEqual(settings.hiteffdbconfig.extra_columns, ['material'])
-        # the version's own description and editability are kept
-        self.assertIsNone(settings.description)
-        self.assertTrue(settings.editable)
 
     def test_sourceterms_consistent(self):
         # a spec changed in b that main's kept components use
@@ -163,8 +158,8 @@ class TestMerge(unittest.TestCase):
         # the backup is gone and the locks released
         self.assertEqual({v.version_tag for v in vc.list_versions()},
                          versions)
-        self.assertIsNone(get_settings('main').lock)
-        self.assertIsNone(get_settings('b').lock)
+        self.assertIsNone(get_record('main').lock)
+        self.assertIsNone(get_record('b').lock)
         event = VersionEvent.objects.first()
         self.assertEqual((event.action, event.version, event.other_version),
                          (EventAction.merge, 'main', 'b'))
@@ -253,7 +248,7 @@ class TestMerge(unittest.TestCase):
         before = snapshot('main')
         signature = sourceterm_signature('main')
         versions = {v.version_tag for v in vc.list_versions()}
-        with mock.patch.object(vc, '_update_sourceterms',
+        with mock.patch('bgexplorer.models.signals._update_sourceterms',
                                side_effect=RuntimeError('boom')):
             with self.assertRaises(MergeError) as cm:
                 merge_version('b', 'main', MergeRule.source)
@@ -262,14 +257,14 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(sourceterm_signature('main'), signature)
         self.assertEqual({v.version_tag for v in vc.list_versions()},
                          versions)
-        self.assertIsNone(get_settings('main').lock)
+        self.assertIsNone(get_record('main').lock)
         self.assertEqual(VersionEvent.objects.first().action,
                          EventAction.merge_rollback)
         # main still works
         edit('c1', 'main', description='after')
 
     def test_rollback_fails(self):
-        with mock.patch.object(vc, '_update_sourceterms',
+        with mock.patch('bgexplorer.models.signals._update_sourceterms',
                                side_effect=RuntimeError('boom')), \
                 mock.patch.object(vc, '_restore',
                                   side_effect=RuntimeError('worse')):
@@ -279,10 +274,10 @@ class TestMerge(unittest.TestCase):
                    if v.version_tag.startswith('main.premerge-')]
         self.assertEqual(len(backups), 1)
         self.assertIn(backups[0], str(cm.exception))
-        self.assertFalse(get_settings(backups[0]).editable)
+        self.assertFalse(get_record(backups[0]).editable)
         # a target that couldn't be restored stays locked until an
         # administrator has looked at it
-        lock = get_settings('main').lock
+        lock = get_record('main').lock
         self.assertIsNotNone(lock)
         self.assertIsNone(lock.expires)
 

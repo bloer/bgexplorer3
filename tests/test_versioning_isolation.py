@@ -9,10 +9,8 @@ ALLOWED_EXTERNAL = {'mongoengine', 'bson', 'pymongo', 'blinker'}
 
 # modules outside the package that it still imports, to be emptied
 LEAKS = {
-    'bgexplorer.models', 'bgexplorer.models.component',
-    'bgexplorer.models.cosmogenic', 'bgexplorer.models.emissionspec',
-    'bgexplorer.models.hiteff', 'bgexplorer.models.settings',
-    'bgexplorer.models.sourceterm'}
+    'bgexplorer.models.component', 'bgexplorer.models.emissionspec',
+    'bgexplorer.models.hiteff', 'bgexplorer.models.sourceterm'}
 
 
 def imported_modules(path: pathlib.Path):

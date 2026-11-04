@@ -5,8 +5,10 @@ from werkzeug.datastructures import MultiDict
 from ..versioning import control as vc
 from ..versioning.verdoc import VersionedDocument, check_writable
 from ..versioning import maintenance
-from ..models.settings import get_settings
-from ..versioning.diff import diff_versions
+from ..models.settings import (get_settings, VersionSettings,
+                               SETTINGS_ORIGINAL_ID)
+from ..versioning.record import get_record
+from ..versioning.diff import diff_versions, compare_document
 from ..models.hiteff import HitEfficiency
 from .api import (APIError, validate_new_version, validation_fields,
                   import_uploaded_version, send_version_file)
@@ -73,9 +75,9 @@ def create_versions_blueprint() -> flask.Blueprint:
     @bp.route('/<active_version>/delete', methods=['GET', 'POST'])
     def delete():
         tag = flask.g.active_version
-        settings = get_settings(tag)
+        record = get_record(tag)
         protected = (tag == VersionedDocument.get_default_tag()
-                     or not settings.editable)
+                     or not record.editable)
         if flask.request.method == 'POST':
             # the model refuses to delete the default version and tags
             vc.delete_version(tag, allow_tags=False)
@@ -84,7 +86,7 @@ def create_versions_blueprint() -> flask.Blueprint:
         return flask.render_template('versions_delete.html',
                                      summary=vc.version_summary(tag),
                                      protected=protected,
-                                     istag=not settings.editable)
+                                     istag=not record.editable)
 
     @bp.route('/<active_version>/merge', methods=['GET', 'POST'])
     def merge():
@@ -103,6 +105,10 @@ def create_versions_blueprint() -> flask.Blueprint:
             flask.abort(404, f"Version '{source}' does not exist")
         plan, error, status = None, None, 200
         if source is not None and source != tag:
+            # settings are made when first needed, which would change the
+            # versions between planning and merging
+            get_settings(source, create=False)
+            get_settings(tag, create=False)
             if req.method == 'POST':
                 try:
                     done = vc.merge_version(source, tag, rule,
@@ -151,17 +157,20 @@ def _settings_form(form) -> MultiDict:
 
 @role_required(Role.editor)
 def edit_settings():
-    """ Edit the VersionSettings of the active version """
+    """ Edit the description and settings of the active version """
     tag = flask.g.active_version
     check_writable(tag)
+    record = get_record(tag)
     settings = get_settings(tag, create=False)
     errors = {}
     if flask.request.method == 'POST':
-        update_object(settings, _settings_form(flask.request.form),
-                      errors=errors)
+        form = _settings_form(flask.request.form)
+        update_object(settings, form, errors=errors)
+        update_object(record, form, errors=errors)
         if not errors:
             try:
                 settings.save()
+                record.save()
             except ValidationError as e:
                 errors = validation_fields(e)
             else:
@@ -175,6 +184,7 @@ def edit_settings():
                 + sorted(hiteffs.distinct(f'{type_}_keys'))))
             for type_ in ('scalars', 'spectra')}
     return flask.render_template('edit_settings.html', settings=settings,
+                                 version_record=record,
                                  keys=keys, errors=errors), \
         400 if errors else 200
 
@@ -188,8 +198,14 @@ def compare_versions():
     if other is not None and not vc.version_exists(other):
         flask.abort(404, f"Version '{other}' does not exist")
     comparison = diff_versions(tag, other) if other else None
+    settings_entries = []
+    if comparison is not None:
+        # the settings have no page of their own to show the differences
+        settings_entries = compare_document(
+            VersionSettings, SETTINGS_ORIGINAL_ID, tag, other).entries
     return flask.render_template('versions_compare.html', other=other,
                                  comparison=comparison,
+                                 settings_entries=settings_entries,
                                  format_value=format_raw_value)
 
 

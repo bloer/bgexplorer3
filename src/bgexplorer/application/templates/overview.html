@@ -1,8 +1,8 @@
 {% extends "versionbase.html" %}
 {% block pageheader %}
 <div class="col-7">
-    <h1>{{ 'Branch' if settings.editable else 'Tag' }} {{ g.active_version }} </h1>
-    <small class="mb-3">Last modified {{ pretty_date(settings.modified) }}</small>
+    <h1>{{ 'Branch' if version_record.editable else 'Tag' }} {{ g.active_version }} </h1>
+    <small class="mb-3">Last modified {{ pretty_date(version_record.modified) }}</small>
 </div>
 <div class="col-5 d-flex justify-content-end align-items-center">
     <div class="dropdown me-1">
@@ -29,11 +29,11 @@
 </div>
 {% endblock %}
 {% block pagecontent %}
-{% if settings.active_lock %}
+{% if version_record.active_lock %}
 <div id="lockwarning" class="alert alert-warning d-flex align-items-center">
-    <div class="me-auto">This version is locked by {{ settings.active_lock.reason }}
-        {%- if settings.active_lock.user %} ({{ settings.active_lock.user }}){% endif %}
-        since {{ pretty_date(settings.active_lock.since) }}, so it can't be changed until that finishes.</div>
+    <div class="me-auto">This version is locked by {{ version_record.active_lock.reason }}
+        {%- if version_record.active_lock.user %} ({{ version_record.active_lock.user }}){% endif %}
+        since {{ pretty_date(version_record.active_lock.since) }}, so it can't be changed until that finishes.</div>
     {% if has_role('admin') %}
     <form method="post" action="{{ url_for('versions.unlock') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -43,7 +43,7 @@
 </div>
 {% endif %}
 
-{{ settings.description or '' }}
+{{ version_record.description or '' }}
 <ul>
     <li><a href="{{ url_for('component.overview') }}">Components</a></li>
     <li><a href="{{ url_for('emissionspec.overview') }}">Emission Specs</a></li>

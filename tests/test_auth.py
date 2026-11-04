@@ -1,9 +1,7 @@
 """ Logging in, and what each role can do """
 import flask
 from bgexplorer.application.app import create_app
-from bgexplorer.models.settings import (ApplicationSettings, get_secret_key,
-                                        get_application_settings,
-                                        get_server_secret)
+from bgexplorer.models.settings import (ApplicationSettings, get_secret_key, get_application_settings, get_server_secret)
 from bgexplorer.application.auth import SETUP_TOKEN
 from bgexplorer.models.users import User, Role
 from bgexplorer.versioning import control as vc

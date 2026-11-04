@@ -27,7 +27,7 @@ class LockLostError(VersionLockedError):
     after its lock was cleared or taken over, e.g. because it expired """
 
 
-# Checks that a version may be written. Installed by `settings`, which owns
+# Checks that a version may be written. Installed by `locks`, which owns
 # the data that decides it, so this module doesn't depend on it
 _write_guard: Callable[[str], None] = lambda version_tag: None
 
@@ -42,7 +42,7 @@ def set_write_guard(guard: Callable[[str], None]) -> None:
 def check_writable(version_tag: Optional[str]) -> None:
     """ Raise ReadOnlyVersionError if `version_tag` is a read-only version,
     or VersionLockedError if it is locked by another operation.
-    Versions without a VersionSettings document are writable
+    Versions without a record are writable
     """
     if version_tag is not None:
         _write_guard(version_tag)
@@ -359,13 +359,15 @@ class VersionedDocument(Document):
     # versions, deletes from it, checks and compares it, and so on. Subclasses
     # that share their parent's collection are covered by the parent.
     VERSION_REGISTER = True
-    # Whether other versioned documents refer to this class's documents, so
-    # that merges and imports must bring them along
-    VERSION_REFERENCED = True
-    # Whether saving or deleting a document only invalidates the SourceTerms
-    # that depend on it, rather than every calculation in the version, see
-    # `settings.touch`. For documents the SourceTerms are stamped with.
-    VERSION_TOUCH_TERMS_ONLY = False
+    # Whether the documents are computed from those of other classes, so that
+    # comparing, merging and exporting versions leave them out
+    VERSION_DERIVED = False
+    # Fields (dotted paths) that are too large to load when comparing or
+    # merging versions
+    VERSION_BULKY_FIELDS = ()
+    # Fields that name a document when listing the differences between
+    # versions, see `item_label`
+    VERSION_LABEL_FIELDS = ('name',)
 
     id = ObjectIdField(primary_key=True, default=ObjectId)
     original_id = ObjectIdField()
@@ -514,6 +516,14 @@ class VersionedDocument(Document):
     def get_default_tag(cls):
         return cls._DEFAULT_TAG
 
+    @classmethod
+    def item_label(cls, son: dict) -> str:
+        """ A name for the item in the raw document `son` that has the
+        VERSION_LABEL_FIELDS, for listing differences between versions
+        """
+        return ' @ '.join(str(son[k]) for k in cls.VERSION_LABEL_FIELDS
+                          if son.get(k)) or str(son['original_id'])
+
     def delete(self, *args, **kwargs):
         # documents with a single tag are deleted by pk, so the queryset
         # doesn't know the version
@@ -639,12 +649,12 @@ def versioned_classes() -> List[type]:
             continue
         classes.setdefault(cls._get_collection_name(), cls)
     return sorted(classes.values(),
-                  key=lambda cls: (not cls.VERSION_REFERENCED, cls.__name__))
+                  key=lambda cls: (cls.VERSION_DERIVED, cls.__name__))
 
 
-def referenced_classes() -> List[type]:
-    """ The versioned classes that other versioned documents refer to """
-    return [cls for cls in versioned_classes() if cls.VERSION_REFERENCED]
+def primary_classes() -> List[type]:
+    """ The versioned classes whose documents aren't derived from others """
+    return [cls for cls in versioned_classes() if not cls.VERSION_DERIVED]
 
 
 def check_version_tags(document: VersionedDocument) -> None:

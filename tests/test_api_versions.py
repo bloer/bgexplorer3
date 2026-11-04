@@ -5,6 +5,7 @@ from bgexplorer.application.app import create_app
 from bgexplorer.models.component import Component
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import VersionSettings, get_settings
+from bgexplorer.versioning.record import VersionRecord, get_record
 from bgexplorer.versioning.control import version_exists, create_tag
 from tests.dbutil import TEST_MONGODB_URI, connect_test_db
 from tests.test_app import reset_database
@@ -74,7 +75,7 @@ class TestAPIVersions(unittest.TestCase):
                                **{'from': 'a-branch'})
         self.assertEqual(response.status_code, 201)
         self.assertFalse(response.get_json()['editable'])
-        self.assertFalse(get_settings('v1', create=False).editable)
+        self.assertFalse(get_record('v1').editable)
         self.assertEqual(Component.select_version('v1').count(), 1)
 
     def test_create_errors(self):
@@ -130,8 +131,8 @@ class TestAPIVersions(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         data = response.get_json()
         self.assertEqual(data['description'], 'new description')
+        self.assertEqual(get_record('main').description, 'new description')
         settings = get_settings('main', create=False)
-        self.assertEqual(settings.description, 'new description')
         self.assertEqual(len(settings.addsources), 1)
         self.assertEqual(settings.addsources[0].ratio, 0.5)
         roi = settings.hiteffdbconfig.rois[0]
@@ -155,7 +156,7 @@ class TestAPIVersions(unittest.TestCase):
         settings.reload()
         self.assertEqual(settings.hiteffdbconfig.extra_columns, [])
         self.assertEqual(len(settings.hiteffdbconfig.rois), 1)
-        self.assertEqual(settings.description, 'new description')
+        self.assertEqual(get_record('main').description, 'new description')
 
     def test_patch_errors(self):
         def patch(body, tag='main'):
@@ -190,7 +191,7 @@ class TestAPIVersions(unittest.TestCase):
 
         create_tag('v1', 'main')
         self.assertError(patch({'description': 'x'}, 'v1'), 403)
-        self.assertIsNone(get_settings('v1', create=False).description)
+        self.assertIsNone(get_record('v1').description)
 
     def test_delete(self):
         create_tag('v1', 'main')

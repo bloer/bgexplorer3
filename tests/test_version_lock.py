@@ -8,9 +8,10 @@ from bgexplorer.versioning.control import (create_version, create_tag,
 from bgexplorer.versioning.verdoc import VersionLockedError
 from bgexplorer.versioning.verdoc import versioned_classes
 from bgexplorer.models.component import Component
-from bgexplorer.models.settings import (VersionSettings, get_settings,
-                                        acquire_lock, release_lock,
-                                        hold_locks)
+from bgexplorer.models.settings import VersionSettings, get_settings
+from bgexplorer.versioning.record import get_record
+from bgexplorer.versioning.locks import acquire_lock, release_lock, hold_locks
+from bgexplorer.versioning.record import VersionRecord
 from bgexplorer.versioning.history import (VersionEvent, EventAction,
                                        recent_events)
 from tests.dbutil import connect_test_db
@@ -27,7 +28,7 @@ class TestVersionLock(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in [VersionSettings, VersionEvent] + versioned_classes():
+        for cls in [VersionRecord, VersionEvent] + versioned_classes():
             cls.drop_collection()
         create_version('b')
         Component(name='c1', mass='1 kg', version_tag='b').save()
@@ -56,7 +57,7 @@ class TestVersionLock(unittest.TestCase):
         c1.save()
         self.assertEqual(self.get().mass.m, 1)
         self.assertTrue(release_lock('b', token))
-        self.assertIsNone(get_settings('b').lock)
+        self.assertIsNone(get_record('b').lock)
         c1 = self.get()
         c1.mass = '4 kg'
         c1.save()
@@ -74,12 +75,12 @@ class TestVersionLock(unittest.TestCase):
 
     def test_holder_can_write(self):
         with hold_locks(['b', 'b2'], 'test'):
-            self.assertIsNotNone(get_settings('b').lock)
+            self.assertIsNotNone(get_record('b').lock)
             c1 = self.get()
             c1.mass = '2 kg'
             c1.save()
-        self.assertIsNone(get_settings('b').lock)
-        self.assertIsNone(get_settings('b2').lock)
+        self.assertIsNone(get_record('b').lock)
+        self.assertIsNone(get_record('b2').lock)
         self.assertEqual(self.get().mass.m, 2)
 
     def test_hold_releases_on_failure(self):
@@ -88,16 +89,16 @@ class TestVersionLock(unittest.TestCase):
             with hold_locks(['b', 'b2'], 'test'):
                 pass
         # the lock on 'b' was taken first, and released again
-        self.assertIsNone(get_settings('b').lock)
+        self.assertIsNone(get_record('b').lock)
         with self.assertRaises(RuntimeError):
             with hold_locks(['b'], 'test'):
                 raise RuntimeError()
-        self.assertIsNone(get_settings('b').lock)
+        self.assertIsNone(get_record('b').lock)
 
     def test_branch_doesnt_copy_lock(self):
         with hold_locks(['b'], 'test'):
             create_version('b3', 'b')
-        self.assertIsNone(get_settings('b3').lock)
+        self.assertIsNone(get_record('b3').lock)
 
     def test_events(self):
         create_tag('t', 'b')
@@ -138,7 +139,7 @@ class TestLockPages(AppTestCase):
         self.assertEqual(response.status_code, 403)
         response = self.client.post(self.url('versions.unlock', 'b'))
         self.assertEqual(response.status_code, 302)
-        self.assertIsNone(get_settings('b').lock)
+        self.assertIsNone(get_record('b').lock)
         self.assertEqual(recent_events('b')[0].action,
                          EventAction.clear_lock)
         response = self.client.post(url, data={'name': 'c1', 'mass': '2 kg'})

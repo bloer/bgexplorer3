@@ -7,7 +7,8 @@ from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
 from ..models.hiteff import HitEfficiency
 from ..models.sourceterm import SourceTerm, clear_results_cache
-from ..models.settings import VersionSettings, release_lock
+from .record import VersionRecord
+from .locks import release_lock
 from .verdoc import (versioned_classes, parse_staging_tag, STAGING_PREFIX,
                      staged_edit_is_stale, EDIT_GRACE)
 from . import control as vc
@@ -43,7 +44,7 @@ class Orphans:
     untagged: Dict[str, List] = field(default_factory=dict)
     # version: ids of SourceTerms whose component or spec is missing there
     sourceterms: Dict[str, List] = field(default_factory=dict)
-    # tags used by documents that have no VersionSettings
+    # tags used by documents that have no VersionRecord
     unknown_tags: List[str] = field(default_factory=list)
     # class name: ids of copies left by an edit that didn't finish
     interrupted: Dict[str, List] = field(default_factory=dict)
@@ -87,7 +88,7 @@ def recover_interrupted_edits(grace: Optional[datetime.timedelta] = None
     Returns the number `restored` and `discarded`
     """
     grace = EDIT_GRACE if grace is None else grace
-    known = set(VersionSettings.objects.distinct('version_tag'))
+    known = set(VersionRecord.objects.distinct('version_tag'))
     result = dict(restored=0, discarded=0)
     for cls in versioned_classes():
         coll = cls._get_collection()
@@ -119,7 +120,7 @@ def find_orphans() -> Orphans:
         if copies := [c[0] for c in _interrupted_copies(coll, EDIT_GRACE)]:
             result.interrupted[cls.__name__] = copies
 
-    known = set(VersionSettings.objects.distinct('version_tag'))
+    known = set(VersionRecord.objects.distinct('version_tag'))
     used = set()
     for cls in versioned_classes():
         used.update(cls._get_collection().distinct('version_tags'))
@@ -198,7 +199,7 @@ def find_locks(versions: Optional[Iterable[str]] = None) -> List[LockInfo]:
     """ The locks on versions, including expired ones that are still in the
     database, ordered by version
     """
-    query = VersionSettings.objects(lock__ne=None).order_by('version_tag')
+    query = VersionRecord.objects(lock__ne=None).order_by('version_tag')
     if versions is not None:
         query = query(version_tag__in=list(versions))
     return [LockInfo(version=v.version_tag, reason=v.lock.reason,

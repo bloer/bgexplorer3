@@ -14,7 +14,8 @@ from mongoengine.base.document import NON_FIELD_ERRORS
 from mongoengine.errors import ValidationError, FieldDoesNotExist
 from pint.errors import PintError
 from werkzeug.exceptions import HTTPException
-from ..models.settings import VersionSettings, HitEffDbConfig
+from ..models.settings import VersionSettings, HitEffDbConfig, get_settings
+from ..versioning.record import VersionRecord, get_record
 from ..versioning import control as vc
 from ..versioning.archive import (export_version, import_version,
                                   VersionFileError)
@@ -25,12 +26,15 @@ API_VERSION = 'v1'
 # endpoints that take multipart file uploads instead of JSON
 UPLOAD_ENDPOINTS = ('api.import_version',)
 
-# VersionSettings fields that can be changed with PATCH
+# Fields of a version that can be changed with PATCH: the description is
+# the VersionRecord's, the others are VersionSettings'
 SETTINGS_FIELDS = ('description', 'addsources', 'hiteffdbconfig')
 HITEFFDBCONFIG_FIELDS = ('rois', 'display_scalars', 'display_spectra',
                          'extra_columns')
 # fields that are never returned
 HIDDEN_FIELDS = ('_id', '_cls', 'cache_token', 'calc_token')
+# the VersionSettings fields returned with a version
+SETTINGS_RESULT_FIELDS = ('addsources', 'hiteffdbconfig')
 
 
 class APIError(Exception):
@@ -58,25 +62,27 @@ def jsonable(value):
     return value
 
 
-def version_type(settings: VersionSettings) -> str:
-    return 'branch' if settings.editable else 'tag'
+def version_type(record: VersionRecord) -> str:
+    return 'branch' if record.editable else 'tag'
 
 
-def version_to_json(settings: VersionSettings) -> dict:
+def version_to_json(record: VersionRecord) -> dict:
     """ Short description of a version for listing """
-    return dict(version_tag=settings.version_tag,
-                description=settings.description,
-                editable=settings.editable,
-                type=version_type(settings),
-                modified=jsonable(settings.modified),
+    return dict(version_tag=record.version_tag,
+                description=record.description,
+                editable=record.editable,
+                type=version_type(record),
+                modified=jsonable(record.modified),
                 url=flask.url_for('api.get_version',
-                                  active_version=settings.version_tag))
+                                  active_version=record.version_tag))
 
 
-def settings_to_json(settings: VersionSettings) -> dict:
-    """ Full VersionSettings """
-    result = jsonable(settings.to_mongo().to_dict())
-    result.update(version_to_json(settings))
+def settings_to_json(record: VersionRecord) -> dict:
+    """ A version with its settings """
+    son = get_settings(record.version_tag, create=False).to_mongo().to_dict()
+    result = jsonable({k: v for k, v in son.items()
+                       if k in SETTINGS_RESULT_FIELDS})
+    result.update(version_to_json(record))
     result.setdefault('description', None)
     return result
 
@@ -125,24 +131,29 @@ def get_json_object() -> dict:
     return body
 
 
-def get_version_settings(version_tag: str) -> VersionSettings:
+def get_version_record(version_tag: str) -> VersionRecord:
     try:
-        return VersionSettings.objects.get(version_tag=version_tag)
-    except VersionSettings.DoesNotExist:
+        return get_record(version_tag)
+    except KeyError:
         raise APIError(f"Version '{version_tag}' not found", 404) from None
 
 
-def update_settings(settings: VersionSettings, body: dict) -> None:
-    """ Apply the changes in `body` to `settings` and save """
+def update_settings(record: VersionRecord, body: dict) -> None:
+    """ Apply the changes in `body` to the version and save """
     unknown = set(body) - set(SETTINGS_FIELDS)
     if unknown:
         raise APIError("These fields can't be changed: "
                        f"{', '.join(sorted(unknown))}",
                        fields={name: "can't be changed" for name in unknown})
-    for name in ('description', 'addsources'):
-        if name in body:
-            setattr(settings, name,
-                    parse_field(VersionSettings, name, body[name]))
+    settings = None
+    if 'addsources' in body or 'hiteffdbconfig' in body:
+        settings = get_settings(record.version_tag, create=False)
+    if 'description' in body:
+        record.description = parse_field(VersionRecord, 'description',
+                                         body['description'])
+    if 'addsources' in body:
+        settings.addsources = parse_field(VersionSettings, 'addsources',
+                                          body['addsources'])
     if 'hiteffdbconfig' in body:
         config = body['hiteffdbconfig']
         if not isinstance(config, dict):
@@ -159,12 +170,15 @@ def update_settings(settings: VersionSettings, body: dict) -> None:
                     parse_field(HitEffDbConfig, name, value,
                                 'hiteffdbconfig.'))
     try:
-        settings.save()
+        if settings is not None:
+            settings.save()
+        if 'description' in body:
+            record.save()
     except ValidationError as e:
         raise APIError(f"Invalid settings: {e.message}",
                        fields=validation_fields(e)) from e
-    # post_save touches the settings in the db
-    settings.reload()
+    # post_save touches the version in the db
+    record.reload()
 
 
 def send_version_file(version_tag: str):
@@ -177,7 +191,7 @@ def send_version_file(version_tag: str):
                            download_name=f"{version_tag}.bgx.tar.gz")
 
 
-def import_uploaded_version(form, files) -> VersionSettings:
+def import_uploaded_version(form, files) -> VersionRecord:
     """ Import the version file uploaded as `file`, as the version named
     `version_tag` of `type` 'branch' or 'tag' in `form`. Raises APIError
     """
@@ -228,8 +242,7 @@ def plan_to_json(plan) -> dict:
     return dict(source=plan.source, target=plan.target,
                 rule=plan.rule.value, fingerprint=plan.fingerprint,
                 problems=plan.problems, changes=plan.changes,
-                replace_settings=plan.replace_settings,
-                settings=[entry.pathstr for entry in plan.settings],
+                warnings=plan.warnings,
                 classes={c.name: dict(add=items(c.add),
                                       replace=items(c.replace),
                                       keep=items(c.keep),
@@ -323,9 +336,9 @@ def create_api() -> flask.Blueprint:
             body.get('type', 'branch'), body.get('description'))
         if type_ == 'tag':
             require(Role.admin)
-        settings = vc.create_version(tag, fromtag, editable=type_ == 'branch',
+        record = vc.create_version(tag, fromtag, editable=type_ == 'branch',
                                      description=description)
-        response = flask.jsonify(settings_to_json(settings))
+        response = flask.jsonify(settings_to_json(record))
         response.status_code = 201
         response.headers['Location'] = flask.url_for(
             'api.get_version', active_version=tag)
@@ -334,13 +347,13 @@ def create_api() -> flask.Blueprint:
     @api.get('/versions/<active_version>')
     def get_version():
         return flask.jsonify(settings_to_json(
-            get_version_settings(flask.g.active_version)))
+            get_version_record(flask.g.active_version)))
 
     @api.patch('/versions/<active_version>')
     def update_version():
-        settings = get_version_settings(flask.g.active_version)
-        update_settings(settings, get_json_object())
-        return flask.jsonify(settings_to_json(settings))
+        record = get_version_record(flask.g.active_version)
+        update_settings(record, get_json_object())
+        return flask.jsonify(settings_to_json(record))
 
     @api.get('/versions/<active_version>/merge')
     def plan_merge():
@@ -373,17 +386,17 @@ def create_api() -> flask.Blueprint:
 
     @api.post('/versions/import')
     def import_version():
-        settings = import_uploaded_version(flask.request.form,
-                                           flask.request.files)
-        response = flask.jsonify(settings_to_json(settings))
+        record = import_uploaded_version(flask.request.form,
+                                         flask.request.files)
+        response = flask.jsonify(settings_to_json(record))
         response.status_code = 201
         response.headers['Location'] = flask.url_for(
-            'api.get_version', active_version=settings.version_tag)
+            'api.get_version', active_version=record.version_tag)
         return response
 
     @api.delete('/versions/<active_version>')
     def delete_version():
-        get_version_settings(flask.g.active_version)
+        get_version_record(flask.g.active_version)
         vc.delete_version(flask.g.active_version, allow_tags=False)
         return '', 204
 

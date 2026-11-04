@@ -4,8 +4,8 @@ from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.histogram import Histogram
-from bgexplorer.models.settings import (VersionSettings, SpectrumROI,
-                                        get_settings, HitEffConfig)
+from bgexplorer.models.settings import (VersionSettings, SpectrumROI, get_settings, HitEffConfig)
+from bgexplorer.versioning.record import VersionRecord
 from bgexplorer.models import sourceterm  # need this to get signals registered
 import numpy as np
 from tests.dbutil import connect_test_db
@@ -22,6 +22,7 @@ class TestHitEFficiency(unittest.TestCase):
 
     def setUp(self):
         HitEfficiency.drop_collection()
+        VersionRecord.drop_collection()
         VersionSettings.drop_collection()
 
     def tearDown(self):
@@ -208,6 +209,7 @@ class TestPartialLoad(unittest.TestCase):
     def setUp(self):
         from bgexplorer.versioning.control import create_version
         HitEfficiency.drop_collection()
+        VersionRecord.drop_collection()
         VersionSettings.drop_collection()
         config = get_settings('main')
         config.hiteffdbconfig.rois = [

@@ -8,7 +8,7 @@
     'target': "keep the copy in " ~ g.active_version} %}
 <p>Items that are only in the other version are added to {{ g.active_version }}.
 Nothing is removed from {{ g.active_version }}. For items that are different
-in both versions, and for the version settings, one rule decides which copy
+in both versions, including the settings, one rule decides which copy
 {{ g.active_version }} keeps.</p>
 
 <form method="GET" id="mergeoptions" class="row g-3 align-items-end mb-4">
@@ -46,7 +46,7 @@ in both versions, and for the version settings, one rule decides which copy
 <h3 class="h6">{{ title }} <span class="badge text-bg-secondary">{{ items|length }}</span></h3>
 <ul class="merge-{{ kind }}">
     {%- for item in items %}
-    <li><a href="{{ url_for(cls.__name__.lower() ~ '.diff', itemid=item.original_id|string, other_version=source) }}">{{ item.name }}</a></li>
+    <li>{% if has_diff_page(cls) %}<a href="{{ url_for(cls.__name__.lower() ~ '.diff', itemid=item.original_id|string, other_version=source) }}">{{ item.name }}</a>{% else %}{{ item.name }}{% endif %}</li>
     {%- endfor %}
 </ul>
 {%- endif %}
@@ -59,7 +59,7 @@ in both versions, and for the version settings, one rule decides which copy
     </div>
     {%- elif not plan.changes %}
     <div id="nochanges" class="alert alert-info">There is nothing to merge: {{ g.active_version }} already has everything from {{ source }}
-        {%- if plan.classes|selectattr('keep')|list or plan.settings %} that this rule would take{% endif %}.</div>
+        {%- if plan.classes|selectattr('keep')|list %} that this rule would take{% endif %}.</div>
     {%- endif %}
     <div class="row">
     {%- for cls_plan in plan.classes if cls_plan.add or cls_plan.replace or cls_plan.keep or cls_plan.target_only %}
@@ -72,10 +72,6 @@ in both versions, and for the version settings, one rule decides which copy
         </div>
     {%- endfor %}
     </div>
-    {%- if plan.settings %}
-    <p id="mergesettings">The settings differ in {{ plan.settings|map(attribute='pathstr')|join(', ') }}:
-        {% if plan.replace_settings %}they are replaced by those of {{ source }}{% else %}{{ g.active_version }} keeps its own{% endif %}.</p>
-    {%- endif %}
     {%- if plan.changes and not plan.problems %}
     <form method="POST" id="mergeform">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

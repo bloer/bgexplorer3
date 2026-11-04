@@ -10,6 +10,7 @@ from bgexplorer.models.assay import Assay
 from bgexplorer.models.fields import UncertainQuantityField, get_fromstr
 from bgexplorer.versioning import control as vc
 from bgexplorer.models.settings import VersionSettings
+from bgexplorer.versioning.record import VersionRecord
 from tests.dbutil import TEST_MONGODB_URI, check_test_db
 
 DATA = Path(__file__).parent / 'data'
@@ -205,7 +206,7 @@ class TestToAssay(unittest.TestCase):
         mongoengine.disconnect()
 
     def setUp(self):
-        for cls in (VersionSettings, Assay):
+        for cls in (VersionRecord, VersionSettings, Assay):
             cls.drop_collection()
         vc.create_version('main')
 

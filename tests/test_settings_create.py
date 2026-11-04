@@ -4,10 +4,8 @@ import unittest
 from unittest import mock
 from mongoengine import disconnect
 from mongoengine.connection import get_db
-from bgexplorer.models.settings import (VersionSettings, ApplicationSettings,
-                                        get_settings,
-                                        get_application_settings,
-                                        get_server_secret, use_server_secret)
+from bgexplorer.models.settings import (VersionSettings, ApplicationSettings, get_settings, get_application_settings, get_server_secret, use_server_secret)
+from bgexplorer.versioning.record import VersionRecord
 from tests.dbutil import connect_test_db
 
 
@@ -38,15 +36,26 @@ class TestSettingsCreate(unittest.TestCase):
         disconnect()
 
     def setUp(self):
+        VersionRecord.drop_collection()
         VersionSettings.drop_collection()
         ApplicationSettings.drop_collection()
         get_db()['server_secrets'].drop()
 
     def test_version_settings(self):
-        with lose_race(VersionSettings,
-                       lambda: VersionSettings(version_tag='v').save()):
+        # another process makes the version and its settings just after
+        # the first lookup
+        calls = []
+
+        def select(tag):
+            if calls:
+                return real(tag)
+            calls.append(tag)
+            get_settings(tag)
+            return VersionSettings.objects.none()
+        real = VersionSettings.select_version
+        with mock.patch.object(VersionSettings, 'select_version', select):
             settings = get_settings('v')
-        self.assertEqual(settings.version_tag, 'v')
+        self.assertEqual(settings.version_tags, ['v'])
         self.assertEqual(VersionSettings.objects.count(), 1)
 
     def test_application_settings(self):

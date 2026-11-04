@@ -2,9 +2,9 @@
 
 The file is a gzipped tar archive of:
     manifest.json: what the file holds, see `MANIFEST_FORMAT`
-    settings.json: the version's VersionSettings
     <collection>.jsonl: one MongoDB Extended JSON document per line, for each
-        versioned class except the SourceTerms, which are rebuilt on import
+        versioned class except those whose documents are derived from the
+        others, which receivers of `hooks.version_imported` rebuild
 
 Documents keep their `original_id`, so the imported version's items are the
 same items as the exported ones, and references between them still work.
@@ -20,23 +20,22 @@ import tempfile
 from typing import IO, Dict, List, Optional
 
 from bson import ObjectId, json_util
-from pymongo.errors import DuplicateKeyError
 from mongoengine.base import get_document
-from mongoengine.errors import ValidationError, InvalidDocumentError
+from mongoengine.errors import (ValidationError, InvalidDocumentError,
+                                NotUniqueError)
 
-from ..models import signals
 from . import control as vc
+from . import hooks
 from .history import EventAction, log_event
-from ..models.settings import VersionSettings, new_lock, holding
-from ..models.sourceterm import check_version_units
-from .verdoc import current_user_name, referenced_classes
-from .diff import find_refs, SETTINGS_IDENTITY_FIELDS
+from .locks import new_lock, holding
+from .record import VersionRecord, get_record
+from .verdoc import current_user_name, primary_classes
+from .diff import find_refs
 log = logging.getLogger(__name__)
 
 MANIFEST_FORMAT = 'bgexplorer-version'
 FORMAT_VERSION = 1
 MANIFEST_NAME = 'manifest.json'
-SETTINGS_NAME = 'settings.json'
 # fields that identify a copy in its database
 COPY_FIELDS = ('_id', 'version_tags')
 JSON_OPTIONS = json_util.RELAXED_JSON_OPTIONS
@@ -57,7 +56,7 @@ class VersionFileError(ValueError):
 def _classes() -> Dict[str, type]:
     """ {tar member name: class} for the exported classes """
     return {f"{cls._get_collection_name()}.jsonl": cls
-            for cls in referenced_classes()}
+            for cls in primary_classes()}
 
 
 def _add_member(tar: tarfile.TarFile, name: str, fileobj: IO[bytes],
@@ -75,9 +74,7 @@ def export_version(version_tag: str, fileobj: IO[bytes]) -> dict:
     the manifest. Raises KeyError if the version doesn't exist
     """
     vc.verify_version(version_tag)
-    settings = VersionSettings._get_collection().find_one(
-        {'version_tag': version_tag})
-    description = settings.get('description')
+    description = get_record(version_tag).description
     counts = {}
     with tarfile.open(fileobj=fileobj, mode='w|gz') as tar:
         for name, cls in _classes().items():
@@ -92,11 +89,6 @@ def export_version(version_tag: str, fileobj: IO[bytes]) -> dict:
                     count += 1
                 _add_member(tar, name, tmp, tmp.tell())
             counts[cls.__name__] = count
-        for key in SETTINGS_IDENTITY_FIELDS:
-            settings.pop(key, None)
-        data = json_util.dumps(settings, json_options=JSON_OPTIONS,
-                               indent=1).encode()
-        _add_member(tar, SETTINGS_NAME, io.BytesIO(data), len(data))
         manifest = dict(format=MANIFEST_FORMAT, format_version=FORMAT_VERSION,
                         bgexplorer_version=importlib.metadata.version(
                             'bgexplorer'),
@@ -112,7 +104,7 @@ def export_version(version_tag: str, fileobj: IO[bytes]) -> dict:
 
 def read_version_file(fileobj: IO[bytes]) -> tuple:
     """ Read and check a version file without changing the database.
-    Returns (manifest, settings, {class: [raw documents]}). Raises
+    Returns (manifest, {class: [raw documents]}). Raises
     VersionFileError listing everything wrong with it
     """
     classes = _classes()
@@ -124,18 +116,16 @@ def read_version_file(fileobj: IO[bytes]) -> tuple:
                     raise VersionFileError(f"'{member.name}' is in the file "
                                            "twice")
                 if not member.isfile() or member.name not in (
-                        set(classes) | {MANIFEST_NAME, SETTINGS_NAME}):
+                        set(classes) | {MANIFEST_NAME}):
                     raise VersionFileError(f"Unexpected '{member.name}' in "
                                            "the file")
                 members[member.name] = tar.extractfile(member).read()
     except (tarfile.TarError, EOFError, OSError) as e:
         raise VersionFileError(f"Not a version file: {e}") from e
-    for name in (MANIFEST_NAME, SETTINGS_NAME):
-        if name not in members:
-            raise VersionFileError(f"Not a version file: no {name}")
+    if MANIFEST_NAME not in members:
+        raise VersionFileError(f"Not a version file: no {MANIFEST_NAME}")
     try:
         manifest = json.loads(members.pop(MANIFEST_NAME))
-        settings = json_util.loads(members.pop(SETTINGS_NAME))
     except (ValueError, UnicodeDecodeError) as e:
         raise VersionFileError(f"Not a version file: {e}") from e
     if not isinstance(manifest, dict) \
@@ -145,8 +135,6 @@ def read_version_file(fileobj: IO[bytes]) -> tuple:
     if not isinstance(fileversion, int) or fileversion > FORMAT_VERSION:
         raise VersionFileError(f"The file has format version {fileversion}; "
                                f"this server reads up to {FORMAT_VERSION}")
-    if not isinstance(settings, dict):
-        raise VersionFileError("settings.json must hold an object")
 
     problems = []
     docs = {}
@@ -208,43 +196,33 @@ def read_version_file(fileobj: IO[bytes]) -> tuple:
         problems = problems[:MAX_PROBLEMS] + (
             [f"and {more} more"] if more > 0 else [])
         raise VersionFileError("The file can't be imported", problems)
-    return manifest, settings, docs
+    return manifest, docs
 
 
 def import_version(fileobj: IO[bytes], version_tag: str,
                    editable: bool = True,
-                   description: Optional[str] = None) -> VersionSettings:
+                   description: Optional[str] = None) -> VersionRecord:
     """ Create the new version `version_tag` from a file written by
-    `export_version`, and rebuild its SourceTerms. Raises ValueError for a
-    bad name, KeyError if the version exists and VersionFileError if the
-    file can't be imported; the database is unchanged in all cases
+    `export_version`, then let receivers of `hooks.version_imported` rebuild
+    what is derived from it. Raises ValueError for a bad name, KeyError if
+    the version exists and VersionFileError if the file can't be imported;
+    the database is unchanged in all cases
     """
     vc.validate_version_name(version_tag)
     vc.verify_version(version_tag, want_exists=False)
-    manifest, settings, docs = read_version_file(fileobj)
+    manifest, docs = read_version_file(fileobj)
     source = manifest.get('version_tag')
     if description is None:
         description = f"Imported from '{source}' ({manifest.get('exported')})"
-    for key in SETTINGS_IDENTITY_FIELDS:
-        settings.pop(key, None)
-    settings.update(version_tag=version_tag, editable=True,
-                    description=description,
-                    modified=datetime.datetime.now(),
-                    cache_token=ObjectId(), calc_token=ObjectId())
-    try:
-        VersionSettings._from_son(dict(settings)).validate(clean=False)
-    except (ValidationError, InvalidDocumentError, ValueError, TypeError,
-            KeyError) as e:
-        raise VersionFileError("The file can't be imported",
-                               [f"settings.json: {e}"]) from e
     # the new version is locked from the start, until it is complete
     lock = new_lock("an import", current_user_name())
-    settings['lock'] = lock.to_mongo().to_dict()
     try:
-        VersionSettings._get_collection().insert_one(settings)
-    except DuplicateKeyError as e:
+        VersionRecord(version_tag=version_tag, editable=True,
+                      description=description, lock=lock).save()
+    except NotUniqueError as e:
         raise KeyError(f"Version/tag {version_tag} already exists in the DB"
                        ) from e
+    counts = {cls.__name__: len(sons) for cls, sons in docs.items()}
     try:
         with holding({version_tag: lock.token}):
             for cls, sons in docs.items():
@@ -255,21 +233,21 @@ def import_version(fileobj: IO[bytes], version_tag: str,
                         son['_id'] = ObjectId()
                         son['version_tags'] = [version_tag]
                     coll.insert_many(batch)
-            signals.rebuild_sourceterms(version_tag)
             # the documents were written without being validated
-            unit_problems = check_version_units(version_tag)
+            warnings = hooks.send_collecting_warnings(
+                hooks.version_imported, version_tag, manifest=manifest,
+                counts=counts)
             if not editable:
-                VersionSettings._get_collection().update_one(
+                VersionRecord._get_collection().update_one(
                     {'version_tag': version_tag},
                     {'$set': {'editable': False}})
     except Exception as e:
         log.exception(f"Importing '{version_tag}' failed, removing it")
         vc.purge_version(version_tag)
         raise VersionFileError(f"Importing failed: {e}", [str(e)]) from e
-    counts = {cls.__name__: len(sons) for cls, sons in docs.items()}
     log_event(EventAction.import_version, version_tag, source,
               message=', '.join(f"{n} {name}" for name, n in counts.items()
                                 if n),
               counts=counts, exported=manifest.get('exported'),
-              editable=editable, unit_problems=unit_problems)
-    return VersionSettings.objects.get(version_tag=version_tag)
+              editable=editable, warnings=warnings)
+    return get_record(version_tag)

@@ -83,6 +83,7 @@ def _noslash(value):
 
 class Component(VersionedDocument):
     VERSION_TOUCH_TERMS_ONLY = True
+    VERSION_BULKY_FIELDS = ('attachments.data',)
     name = StringField(required=True, validation=_noslash)
     description = StringField()
     comment = StringField(input_type='textarea')

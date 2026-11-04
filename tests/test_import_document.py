@@ -10,8 +10,10 @@ from bgexplorer.versioning.verdoc import ReadOnlyVersionError, VersionLockedErro
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.sourceterm import SourceTerm
-from bgexplorer.models.settings import (VersionSettings, acquire_lock,
-                                        release_lock, get_settings)
+from bgexplorer.models.settings import VersionSettings, get_settings
+from bgexplorer.versioning.record import get_record
+from bgexplorer.versioning.locks import acquire_lock, release_lock
+from bgexplorer.versioning.record import VersionRecord
 from bgexplorer.versioning.history import VersionEvent, EventAction
 from tests.dbutil import connect_test_db
 from tests.test_app_components import AppTestCase
@@ -37,7 +39,7 @@ class TestImportDocument(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in [VersionSettings, VersionEvent] + versioned_classes():
+        for cls in [VersionRecord, VersionEvent] + versioned_classes():
             cls.drop_collection()
         self.e1, self.c1 = make_model()
 
@@ -102,7 +104,7 @@ class TestImportDocument(unittest.TestCase):
         self.assertEqual(cm.exception.problems, [str(e2.original_id)])
         # nothing changed, and the lock was released
         self.assertEqual(len(self.get(Component, 'c1', 'main').specs), 1)
-        self.assertIsNone(get_settings('main').lock)
+        self.assertIsNone(get_record('main').lock)
 
     def test_refused(self):
         vc.create_tag('t', 'b')

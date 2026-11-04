@@ -7,7 +7,9 @@ from bgexplorer.versioning.diff import (diff_values, diff_documents,
                                            compare_document, diff_versions)
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
-from bgexplorer.models.settings import VersionSettings
+from bgexplorer.models.settings import (VersionSettings, get_settings,
+                                        SETTINGS_ORIGINAL_ID)
+from bgexplorer.versioning.record import VersionRecord
 from tests.dbutil import connect_test_db
 from tests.test_app_components import AppTestCase
 
@@ -68,6 +70,7 @@ class TestCompareDocuments(unittest.TestCase):
         disconnect()
 
     def setUp(self):
+        VersionRecord.drop_collection()
         VersionSettings.drop_collection()
         for cls in versioned_classes():
             cls.drop_collection()
@@ -187,7 +190,7 @@ def branch_with_changes():
     Component.select_version('b').get(name='deleted').delete()
     Component(name='added', version_tag='b').save()
     Component(name='mainonly', version_tag='main').save()
-    settings = vc.get_settings('b')
+    settings = get_settings('b')
     settings.hiteffdbconfig.extra_columns = ['material']
     settings.save()
 
@@ -202,6 +205,7 @@ class TestCompareVersions(unittest.TestCase):
         disconnect()
 
     def setUp(self):
+        VersionRecord.drop_collection()
         VersionSettings.drop_collection()
         for cls in versioned_classes():
             cls.drop_collection()
@@ -219,9 +223,12 @@ class TestCompareVersions(unittest.TestCase):
         self.assertEqual(names(components.equal), ['equal'])
         self.assertEqual(names(components.same), ['same'])
         self.assertEqual(components.differ[0].newer, 'right')
-        self.assertFalse(any(c.changed for c in result.classes
-                                if c.cls is not Component))
-        self.assertEqual([e.pathstr for e in result.settings],
+        # the settings of 'b' were edited
+        self.assertEqual([c.name for c in result.classes if c.changed],
+                         ['Component', 'VersionSettings'])
+        entries = compare_document(VersionSettings, SETTINGS_ORIGINAL_ID,
+                                   'main', 'b').entries
+        self.assertEqual([e.pathstr for e in entries],
                          ['hiteffdbconfig.extra_columns'])
         self.assertTrue(result.changed)
         # without checking content, equal copies count as changed

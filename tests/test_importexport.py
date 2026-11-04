@@ -10,6 +10,7 @@ from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.settings import VersionSettings
+from bgexplorer.versioning.record import VersionRecord
 from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.importexport import iter_json_documents, \
     import_documents
@@ -67,7 +68,7 @@ class TestImport(unittest.TestCase):
 
     def setUp(self):
         for cls in (Component, EmissionSpec, HitEfficiency, SourceTerm,
-                    VersionSettings):
+                    VersionSettings, VersionRecord):
             cls.drop_collection()
         vc.create_version('main')
         self.e1 = EmissionSpec(name='e1', sources=[

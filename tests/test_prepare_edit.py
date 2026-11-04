@@ -9,6 +9,7 @@ from bgexplorer.versioning import maintenance
 from bgexplorer.versioning import control as vc
 from bgexplorer.models.component import Component
 from bgexplorer.models.settings import VersionSettings
+from bgexplorer.versioning.record import VersionRecord
 from bgexplorer.versioning.history import VersionEvent
 from bgexplorer.versioning.verdoc import (versioned_classes, staging_tag,
                                       parse_staging_tag, VersionedQuerySet,
@@ -45,7 +46,7 @@ class PrepareEditCase(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in [VersionSettings, VersionEvent] + versioned_classes():
+        for cls in [VersionRecord, VersionEvent] + versioned_classes():
             cls.drop_collection()
         vc.create_version('a')
         Component(name='c1', mass='1 kg', version_tag='a').save()
@@ -242,7 +243,7 @@ class TestRecovery(PrepareEditCase):
 
     def test_discarded_when_the_version_is_gone(self):
         self.interrupt('activate')
-        VersionSettings.objects(version_tag='b').delete()
+        VersionRecord.objects(version_tag='b').delete()
         result = maintenance.recover_interrupted_edits(datetime.timedelta(0))
         self.assertEqual(result, dict(restored=0, discarded=1))
         self.assertEqual(self.tags('c1'), [['a']])

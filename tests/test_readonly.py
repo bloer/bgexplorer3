@@ -10,6 +10,7 @@ from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.sourceterm import SourceTerm
 from bgexplorer.models.settings import VersionSettings, get_settings
+from bgexplorer.versioning.record import VersionRecord, get_record
 from tests.dbutil import connect_test_db
 
 
@@ -23,7 +24,7 @@ class TestReadOnly(unittest.TestCase):
         disconnect()
 
     def setUp(self):
-        for cls in (VersionSettings, Component, EmissionSpec, SourceTerm,
+        for cls in (VersionRecord, VersionSettings, Component, EmissionSpec, SourceTerm,
                     HitEfficiency):
             cls.drop_collection()
         create_version('b')
@@ -89,18 +90,20 @@ class TestReadOnly(unittest.TestCase):
 
     def test_settings(self):
         settings = get_settings('t', create=False)
-        settings.description = 'changed'
+        settings.hiteffdbconfig.extra_columns = ['changed']
         with self.assertRaises(ReadOnlyVersionError):
             settings.save()
-        settings = get_settings('t', create=False)
-        settings.editable = True
+        record = get_record('t')
+        record.editable = True
         with self.assertRaises(ReadOnlyVersionError):
-            settings.save()
-        self.assertFalse(get_settings('t', create=False).editable)
+            record.save()
+        self.assertFalse(get_record('t').editable)
         # the branch's settings can change
         settings = get_settings('b', create=False)
-        settings.description = 'changed'
+        settings.hiteffdbconfig.extra_columns = ['changed']
         settings.save()
+        self.assertEqual(get_settings('t', create=False)
+                         .hiteffdbconfig.extra_columns, [])
 
     def test_delete_tag(self):
         delete_version('t')
