@@ -14,9 +14,10 @@
 {% block pagecontent %}
 {% set headers = ['Source', 'Location', 'Nprimaries', 'Primary',
                   'Multiplier'] + settings.hiteffdbconfig.extra_columns %}
-{% call datatable.render(headers) %}
+{% call datatable.render(headers, bulk=true) %}
     {% for hiteff in data %}
     <tr class="hiteff" data-id="{{ hiteff.id }}" data-original_id="{{ hiteff.original_id }}">
+        <td><input type="checkbox" class="row-select" value="{{ hiteff.original_id }}"></td>
         <td><a href="{{ url_for('.view', object=hiteff) }}">{{ hiteff.source }}</a> </td>
         <td>{{ hiteff.location }}</td>
         <td>{{ hiteff.nprimaries or 'N/A' }}{% if hiteff.biasweight and hiteff.biasweight != 1 %} biasweight={{ "{:.2g}".format(hiteff.biasweight) }}{% endif %}</td>
