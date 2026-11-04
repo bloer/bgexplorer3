@@ -6,9 +6,10 @@ from .cosmogenic import ActivatedMaterial, CosmogenicActivation
 from .hiteff import HitEfficiency
 from .sourceterm import (SourceTerm, find_sourceterms, sync_sourceterms,
                          placed_sourceterms, check_version_units)
-from ..versioning import hooks
+from ..versioning import hooks, archive
 from ..versioning.verdoc import ref_id, check_writable
 from . import settings
+import importlib.metadata
 import logging
 log = logging.getLogger(__name__)
 
@@ -346,3 +347,7 @@ def after_import(version_tag, manifest=None, counts=None, **kwargs):
 
 
 hooks.version_imported.connect(after_import)
+
+
+archive.configure('bgexplorer-version', 'bgexplorer',
+                  importlib.metadata.version('bgexplorer'))

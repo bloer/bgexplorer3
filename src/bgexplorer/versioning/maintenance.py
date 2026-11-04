@@ -3,10 +3,6 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Iterable
 import datetime
 import logging
-from ..models.component import Component
-from ..models.emissionspec import EmissionSpec
-from ..models.hiteff import HitEfficiency
-from ..models.sourceterm import SourceTerm, clear_results_cache
 from .record import VersionRecord
 from .locks import release_lock
 from .verdoc import (versioned_classes, parse_staging_tag, STAGING_PREFIX,
@@ -42,26 +38,17 @@ class Orphans:
     """ Inconsistent documents found by `find_orphans` """
     # class name: ids of documents with no version tags
     untagged: Dict[str, List] = field(default_factory=dict)
-    # version: ids of SourceTerms whose component or spec is missing there
-    sourceterms: Dict[str, List] = field(default_factory=dict)
+    # version: {class name: ids} of copies that refer to items missing from
+    # the version, see `VersionedDocument.find_dangling`
+    dangling: Dict[str, Dict[str, List]] = field(default_factory=dict)
     # tags used by documents that have no VersionRecord
     unknown_tags: List[str] = field(default_factory=list)
     # class name: ids of copies left by an edit that didn't finish
     interrupted: Dict[str, List] = field(default_factory=dict)
 
     def __bool__(self):
-        return bool(self.untagged or self.sourceterms or self.unknown_tags
+        return bool(self.untagged or self.dangling or self.unknown_tags
                     or self.interrupted)
-
-
-def _ids_in_version(doc_cls, version: str) -> set:
-    return set(doc_cls._get_collection().distinct(
-        'original_id', {'version_tags': version}))
-
-
-def _ref_id(ref):
-    """ The id stored by a reference field, as a DBRef or a bare id """
-    return getattr(ref, 'id', ref)
 
 
 def _interrupted_copies(coll, grace: datetime.timedelta):
@@ -128,26 +115,17 @@ def find_orphans() -> Orphans:
     result.unknown_tags = sorted(
         t for t in used - known - {None} if not t.startswith(STAGING_PREFIX))
 
-    stcoll = SourceTerm._get_collection()
     for version in sorted(known):
-        components = _ids_in_version(Component, version)
-        specs = _ids_in_version(EmissionSpec, version)
-        bad = []
-        for st in stcoll.find({'version_tags': version},
-                              {'assemblyRoot': 1, 'spec': 1}):
-            root, spec = _ref_id(st.get('assemblyRoot')), _ref_id(st.get('spec'))
-            if (root is None or root not in components
-                    or (spec is not None and spec not in specs)):
-                bad.append(st['_id'])
-        if bad:
-            result.sourceterms[version] = bad
+        for cls in versioned_classes():
+            if bad := cls.find_dangling(version):
+                result.dangling.setdefault(version, {})[cls.__name__] = bad
     return result
 
 
 def delete_orphans(orphans: Orphans = None) -> int:
     """ Remove the documents found by `find_orphans`: untagged documents are
-    deleted, unknown tags are removed from all documents, orphaned
-    SourceTerms are removed from their version, and interrupted edits are
+    deleted, unknown tags are removed from all documents, dangling copies are
+    removed from their version, and interrupted edits are
     recovered. Returns the number of documents changed or deleted
     """
     orphans = orphans if orphans is not None else find_orphans()
@@ -155,11 +133,12 @@ def delete_orphans(orphans: Orphans = None) -> int:
     if orphans.interrupted:
         done = recover_interrupted_edits()
         changed += done['restored'] + done['discarded']
-    for version, ids in orphans.sourceterms.items():
-        coll = SourceTerm._get_collection()
-        changed += coll.update_many({'_id': {'$in': ids}},
-                                    {'$pull': {'version_tags': version}}
-                                    ).modified_count
+    classes = {cls.__name__: cls for cls in versioned_classes()}
+    for version, found in orphans.dangling.items():
+        for name, ids in found.items():
+            changed += classes[name]._get_collection().update_many(
+                {'_id': {'$in': ids}}, {'$pull': {'version_tags': version}}
+                ).modified_count
     for cls in versioned_classes():
         coll = cls._get_collection()
         if orphans.unknown_tags:
@@ -170,16 +149,7 @@ def delete_orphans(orphans: Orphans = None) -> int:
         # anything left without tags, including what was just untagged
         changed += coll.delete_many(
             {'version_tags': {'$in': [None, []]}}).deleted_count
-    clear_calculation_cache()
     return changed
-
-
-def clear_calculation_cache() -> None:
-    """ Empty the in-memory calculation caches, and drop the collection of
-    results that older versions stored in the database
-    """
-    SourceTerm._get_db().drop_collection('calculated_results')
-    clear_results_cache()
 
 
 @dataclass

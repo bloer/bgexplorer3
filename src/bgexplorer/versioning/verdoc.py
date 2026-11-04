@@ -524,6 +524,14 @@ class VersionedDocument(Document):
         return ' @ '.join(str(son[k]) for k in cls.VERSION_LABEL_FIELDS
                           if son.get(k)) or str(son['original_id'])
 
+    @classmethod
+    def find_dangling(cls, version_tag: str) -> list:
+        """ The `_id`s of copies in `version_tag` that refer to items that
+        aren't in it. Subclasses with references that need checking override
+        this, see `maintenance.find_orphans`
+        """
+        return []
+
     def delete(self, *args, **kwargs):
         # documents with a single tag are deleted by pk, so the queryset
         # doesn't know the version

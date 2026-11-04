@@ -1,16 +1,16 @@
 """ The versioning package depends on nothing else in bgexplorer """
 import ast
 import pathlib
+import re
+import subprocess
 import sys
 import unittest
 
 PACKAGE = pathlib.Path(__file__).parent.parent / 'src/bgexplorer/versioning'
 ALLOWED_EXTERNAL = {'mongoengine', 'bson', 'pymongo', 'blinker'}
 
-# modules outside the package that it still imports, to be emptied
-LEAKS = {
-    'bgexplorer.models.component', 'bgexplorer.models.emissionspec',
-    'bgexplorer.models.hiteff', 'bgexplorer.models.sourceterm'}
+DOMAIN_WORDS = ('component', 'sourceterm', 'hiteff', 'calc_token',
+                'attachments', 'rois', 'emissionspec', 'bgexplorer_')
 
 
 def imported_modules(path: pathlib.Path):
@@ -49,9 +49,25 @@ def outside_imports():
 class TestIsolation(unittest.TestCase):
     def test_no_unexpected_imports(self):
         found = outside_imports()
-        unexpected = {k: v for k, v in found.items() if k not in LEAKS}
-        self.assertEqual(unexpected, {})
+        self.assertEqual(found, {})
 
-    def test_leaks_are_current(self):
-        # a leak that was fixed must be removed from the list
-        self.assertEqual(sorted(LEAKS - set(outside_imports())), [])
+    def test_clean_interpreter(self):
+        """ importing the package loads none of the application """
+        code = ("import sys, bgexplorer.versioning; "
+                "bad = [m for m in sys.modules if m.split('.')[0] in "
+                "('flask', 'pint') or m.startswith(('bgexplorer.models', "
+                "'bgexplorer.application'))]; "
+                "print(bad); sys.exit(bool(bad))")
+        done = subprocess.run([sys.executable, '-c', code],
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+
+    def test_no_domain_words(self):
+        """ the package doesn't know about what it versions """
+        pattern = re.compile('|'.join(DOMAIN_WORDS), re.IGNORECASE)
+        found = {}
+        for path in sorted(PACKAGE.glob('*.py')):
+            for n, line in enumerate(path.read_text().splitlines(), 1):
+                if pattern.search(line):
+                    found.setdefault(path.name, []).append(n)
+        self.assertEqual(found, {})

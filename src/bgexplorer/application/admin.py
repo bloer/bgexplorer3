@@ -7,6 +7,7 @@ from werkzeug.datastructures import MultiDict
 from ..versioning import control as vc
 from ..versioning import maintenance
 from ..models import signals
+from ..models.sourceterm import clear_calculation_cache
 from ..models.settings import ApplicationSettings, get_application_settings
 from ..models.users import User, is_last_site_admin
 from .api import validation_fields
@@ -85,7 +86,7 @@ def create_admin_blueprint() -> flask.Blueprint:
 
     @bp.post('/maintenance/clear-cache')
     def clear_cache():
-        maintenance.clear_calculation_cache()
+        clear_calculation_cache()
         flask.flash("Cleared the calculation cache", 'success')
         return flask.redirect(flask.url_for('.maintenance_page'))
 
@@ -110,6 +111,7 @@ def create_admin_blueprint() -> flask.Blueprint:
     @bp.post('/maintenance/delete-orphans')
     def delete_orphans():
         count = maintenance.delete_orphans()
+        clear_calculation_cache()
         flask.flash(f"Removed or fixed {count} orphaned documents", 'success')
         return flask.redirect(flask.url_for('.maintenance_page'))
 

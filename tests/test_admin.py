@@ -183,7 +183,7 @@ class TestAdmin(AppTestCase):
         orphans = maintenance.find_orphans()
         self.assertEqual(orphans.untagged, {'Component': [untagged]})
         self.assertEqual(orphans.unknown_tags, ['ghost'])
-        self.assertEqual(orphans.sourceterms, {'main': [st['_id']]})
+        self.assertEqual(orphans.dangling, {'main': {'SourceTerm': [st['_id']]}})
         page = self.html(self.client.get(self.url('admin.maintenance_page')))
         self.assertIn('id="deleteorphans"', page)
         self.assertIn('ghost', page)

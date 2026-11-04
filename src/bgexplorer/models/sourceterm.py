@@ -40,6 +40,22 @@ NO_CATEGORY = '(uncategorized)'
 
 class SourceTerm(VersionedDocument):
     VERSION_DERIVED = True
+
+    @classmethod
+    def find_dangling(cls, version_tag):
+        """ SourceTerms whose component or spec is missing from the version """
+        def ids(doc_cls):
+            return set(doc_cls._get_collection().distinct(
+                'original_id', {'version_tags': version_tag}))
+        components, specs = ids(Component), ids(EmissionSpec)
+        bad = []
+        for st in cls._get_collection().find({'version_tags': version_tag},
+                                             {'assemblyRoot': 1, 'spec': 1}):
+            root, spec = _ref_id(st.get('assemblyRoot')), _ref_id(st.get('spec'))
+            if (root is None or root not in components
+                    or (spec is not None and spec not in specs)):
+                bad.append(st['_id'])
+        return bad
     VERSION_TOUCH_TERMS_ONLY = True
 
     # these fields are keys used for finding SourceTerms in the db
@@ -350,6 +366,14 @@ def clear_results_cache():
     """ Empty every ResultsCache """
     for cache in ResultsCache.instances:
         cache.clear()
+
+
+def clear_calculation_cache() -> None:
+    """ Empty the in-memory calculation caches, and drop the collection of
+    results that older versions stored in the database
+    """
+    SourceTerm._get_db().drop_collection('calculated_results')
+    clear_results_cache()
 
 
 def load_hiteffs(sourceterms: Iterable[SourceTerm], spectra: bool = True

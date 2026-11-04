@@ -1,7 +1,7 @@
 """ Export a whole version to a file, and import it as a new version
 
 The file is a gzipped tar archive of:
-    manifest.json: what the file holds, see `MANIFEST_FORMAT`
+    manifest.json: what the file holds, see `configure`
     <collection>.jsonl: one MongoDB Extended JSON document per line, for each
         versioned class except those whose documents are derived from the
         others, which receivers of `hooks.version_imported` rebuild
@@ -11,7 +11,6 @@ same items as the exported ones, and references between them still work.
 Each copy gets a new `_id`, and belongs only to the imported version.
 """
 import datetime
-import importlib.metadata
 import io
 import json
 import logging
@@ -33,8 +32,9 @@ from .verdoc import current_user_name, primary_classes
 from .diff import find_refs
 log = logging.getLogger(__name__)
 
-MANIFEST_FORMAT = 'bgexplorer-version'
 FORMAT_VERSION = 1
+# the manifest's 'format', and who wrote the file, see `configure`
+_format = dict(name='version-archive', producer=None, producer_version=None)
 MANIFEST_NAME = 'manifest.json'
 # fields that identify a copy in its database
 COPY_FIELDS = ('_id', 'version_tags')
@@ -42,6 +42,15 @@ JSON_OPTIONS = json_util.RELAXED_JSON_OPTIONS
 INSERT_BATCH = 500
 # report at most this many problems with a file
 MAX_PROBLEMS = 20
+
+
+def configure(format_name: str, producer: Optional[str] = None,
+              producer_version: Optional[str] = None) -> None:
+    """ Name the file format, so that only files written by applications that
+    use the same name are read, and record who wrote them in the manifest
+    """
+    _format.update(name=format_name, producer=producer,
+                   producer_version=producer_version)
 
 
 class VersionFileError(ValueError):
@@ -89,9 +98,10 @@ def export_version(version_tag: str, fileobj: IO[bytes]) -> dict:
                     count += 1
                 _add_member(tar, name, tmp, tmp.tell())
             counts[cls.__name__] = count
-        manifest = dict(format=MANIFEST_FORMAT, format_version=FORMAT_VERSION,
-                        bgexplorer_version=importlib.metadata.version(
-                            'bgexplorer'),
+        manifest = dict(format=_format['name'],
+                        format_version=FORMAT_VERSION,
+                        producer=_format['producer'],
+                        producer_version=_format['producer_version'],
                         version_tag=version_tag, description=description,
                         exported=datetime.datetime.now().isoformat(
                             timespec='seconds'),
@@ -129,7 +139,7 @@ def read_version_file(fileobj: IO[bytes]) -> tuple:
     except (ValueError, UnicodeDecodeError) as e:
         raise VersionFileError(f"Not a version file: {e}") from e
     if not isinstance(manifest, dict) \
-            or manifest.get('format') != MANIFEST_FORMAT:
+            or manifest.get('format') != _format['name']:
         raise VersionFileError("Not a version file: unknown format")
     fileversion = manifest.get('format_version')
     if not isinstance(fileversion, int) or fileversion > FORMAT_VERSION:

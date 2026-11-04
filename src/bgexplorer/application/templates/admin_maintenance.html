@@ -82,8 +82,10 @@
     {% for name, ids in orphans.untagged.items() %}
     <li>{{ ids | length }} {{ name }} document(s) belong to no version</li>
     {% endfor %}
-    {% for version, ids in orphans.sourceterms.items() %}
-    <li>{{ ids | length }} source term(s) in {{ version }} refer to a missing component or emission spec</li>
+    {% for version, found in orphans.dangling.items() %}
+    {% for name, ids in found.items() %}
+    <li>{{ ids | length }} {{ name }} document(s) in {{ version }} refer to documents that are missing from it</li>
+    {% endfor %}
     {% endfor %}
     {% for name, ids in orphans.interrupted.items() %}
     <li>{{ ids | length }} {{ name }} cop{{ 'y' if ids | length == 1 else 'ies' }} left by an edit that didn't finish</li>
