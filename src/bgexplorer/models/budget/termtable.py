@@ -119,6 +119,11 @@ class TermTable:
                     coefficients.append(term.coefficient)
                     blocks.append(b)
             ptr.append(len(rows))
+        # the blocks are shared by many terms, with the spectra if any
+        self._block_bytes = sum(
+            sum(np.asarray(a).nbytes for a in hit.moments)
+            for block in self._blocks
+            for hit in block.values.values())
         self._ptr = np.array(ptr, dtype=np.int64)
         self._rows = np.array(rows, dtype=np.int64)
         self._coefficients = np.array(coefficients)
@@ -139,7 +144,8 @@ class TermTable:
         arrays = (self._ptr, self._rows, self._coefficients, self._block_of,
                   self._term_of, *self._rate)
         extra = list(self._columns.values())
-        return (len(self) * _TERM_BYTES + sum(a.nbytes for a in arrays) +
+        return (len(self) * _TERM_BYTES + self._block_bytes +
+                sum(a.nbytes for a in arrays) +
                 sum(c.nbytes for c in extra) +
                 sum(a.nbytes for a in list(self._sizes.values())))
 

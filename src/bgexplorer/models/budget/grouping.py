@@ -7,7 +7,7 @@ import json
 from collections import defaultdict
 from typing import List, Optional, Tuple
 from ..component import Component, Assembly
-from ..sourceterm import ResultsCache, _cache_key, _ref_id
+from ..sourceterm import ResultsCache, cache_bytes, _cache_key, _ref_id
 from ..common import units as unitreg
 from ..termcalc import conversion_factor
 from .filters import GROUPBY, BudgetFilter
@@ -18,7 +18,7 @@ from .termtable import TermTable
 COMPONENT_DEPTH = 2
 # filtered breakdowns, kept apart from the per-term values they are summed
 # from, which are slower to calculate
-_filtered_cache = ResultsCache(256)
+_filtered_cache = ResultsCache(256, cache_bytes(.1), name='filtered')
 
 
 def _cache_arg(arg):

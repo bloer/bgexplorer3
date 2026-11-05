@@ -763,6 +763,55 @@ class TestResultsCache(unittest.TestCase):
         cache.get(None, lambda: calls.append('none'))
         self.assertEqual(calls[-2:], ['none', 'none'])
 
+    def test_byte_budget(self):
+        cache = ResultsCache(10, max_bytes=100, sizeof=len)
+        for key in 'abc':
+            cache.get((key,), lambda: 'x' * 40)
+        # the least recently used went to make room
+        self.assertEqual(len(cache), 2)
+        self.assertEqual(cache.nbytes, 80)
+        calls = []
+        cache.get(('a',), lambda: calls.append('a') or 'x' * 40)
+        self.assertEqual(calls, ['a'])
+        # one too big for the cache is returned but not kept
+        self.assertEqual(cache.get(('big',), lambda: 'x' * 101), 'x' * 101)
+        self.assertEqual(cache.nbytes, 80)
+        cache.put_many({('d',): 'x' * 60, ('e',): 'x' * 50})
+        self.assertLessEqual(cache.nbytes, 100)
+        cache.clear()
+        self.assertEqual((len(cache), cache.nbytes), (0, 0))
+
+    def test_growing_value_measured_again(self):
+        class Growing:
+            nbytes = 10
+        cache = ResultsCache(10, max_bytes=100)
+        grows, other = Growing(), Growing()
+        cache.get(('a',), lambda: grows)
+        cache.get(('b',), lambda: other)
+        self.assertEqual(cache.nbytes, 20)
+        grows.nbytes = 95
+        self.assertIs(cache.get(('a',), lambda: None), grows)
+        # 'b' was evicted to make room
+        self.assertEqual((len(cache), cache.nbytes), (1, 95))
+
+    def test_purge_token(self):
+        cache = ResultsCache(10, max_bytes=1000, sizeof=len)
+        cache.put_many({(1, 'a'): 'xx', (1, 'b'): 'xx', (2, 'a'): 'xxx'})
+        self.assertEqual(cache.purge_token(1), 2)
+        self.assertEqual((len(cache), cache.nbytes), (1, 3))
+        self.assertEqual(cache.purge_token(1), 0)
+        # replacing an entry doesn't count it twice
+        cache.put_many({(2, 'a'): 'x'})
+        self.assertEqual((len(cache), cache.nbytes), (1, 1))
+        self.assertEqual(cache.purge_token(2), 1)
+        self.assertEqual(cache.nbytes, 0)
+
+    def test_not_by_token(self):
+        cache = ResultsCache(10, sizeof=len, by_token=False)
+        cache.put_many({'ab': 'xx'})
+        self.assertEqual(cache.purge_token('a'), 0)
+        self.assertEqual(len(cache), 1)
+
     def test_single_flight(self):
         """ concurrent requests for a key share one calculation """
         from concurrent.futures import ThreadPoolExecutor

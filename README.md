@@ -220,6 +220,16 @@ per process and lost on restart:
 - SourceTerms saved before stamps existed get theirs the first time they are
   used.
 
+Every cache is bounded by memory as well as by entry count. Each process
+(gunicorn runs several) may use `BGEXPLORER_CACHE_MB` megabytes (default 512)
+for its caches, divided between results (20%), tables of scalar values (20%),
+tables of spectra (30%), filtered tables (10%) and SourceTerm records (20%);
+the least recently used entries go first. Entries of replaced cache tokens are
+purged as soon as a newer token is seen, and a SourceTerm has only one record
+whatever number of times it is edited. A cold load calculates SourceTerms in
+chunks, so it never holds more than a chunk's HitEfficiencies at once. Sizes are
+estimates, not exact.
+
 Each SourceTerm is reduced to its weights on the independent emission rates
 and hit efficiencies it uses, with the hit efficiencies' scalars, ROIs and
 spectra converted to the display units once, by `TermCalculator`

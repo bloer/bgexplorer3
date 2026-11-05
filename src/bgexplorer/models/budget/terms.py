@@ -5,18 +5,25 @@ by, as a `TermTable` to sum over. Values are in the version's display units
 from typing import List, Optional, Tuple
 from ..component import Component, Assembly
 from ..hiteff import HitEfficiency
-from ..sourceterm import (ResultsCache, SourceTerm, find_sourceterms,
-                          load_hiteffs, _cache_key, _cached, _ref_id)
+from ..sourceterm import (ResultsCache, SourceTerm, cache_bytes,
+                          find_sourceterms, load_hiteffs, _cache_key, _ref_id)
 from ..settings import get_settings, get_calc_token
 from ..termcalc import TermCalculator
 from .termtable import TermRecord, TermTable
 
-# the records of single SourceTerms, by (id, stamp, calc token). The stamp
-# changes when the SourceTerm does, and the version's calc token when
-# anything else that the values depend on does (such as display units), so
-# entries are never stale and the terms that didn't change are reused after an
-# edit. Their component keys are the full placement paths.
-_term_cache = ResultsCache(60000)
+# the records of single SourceTerms, by (id, version), each with the stamp and
+# the version's calc token it was calculated with. The stamp changes when the
+# SourceTerm does, and the calc token when anything else that the values
+# depend on does (such as display units), so a record that doesn't match is
+# replaced and the terms that didn't change are reused after an edit. Their
+# component keys are the full placement paths.
+_RECORD_BYTES = 1500
+_term_cache = ResultsCache(1000000, cache_bytes(.2), lambda value: _RECORD_BYTES,
+                           by_token=False, name='terms')
+# the tables of scalars, and of spectra, which are much bigger, of whole
+# components
+_table_cache = ResultsCache(64, cache_bytes(.2), name='tables')
+_spectra_cache = ResultsCache(16, cache_bytes(.3), name='spectra')
 # loading and calculating this many SourceTerms at once
 _LOAD_CHUNK = 2000
 
@@ -60,16 +67,19 @@ def _chunks(ids: list):
         yield ids[i:i + _LOAD_CHUNK]
 
 
-def _scalar_records(query, config, token) -> List[TermRecord]:
+def _scalar_records(query, config, version, token) -> List[TermRecord]:
     """ The record of each SourceTerm in `query`, in order, loading and
     calculating only those that aren't in the cache, a chunk at a time
     """
     stored = [(doc['_id'], doc.get('stamp')) for doc in
               query.only('stamp').as_pymongo()]
-    cached = _term_cache.get_many((_id, stamp, token)
-                                  for _id, stamp in stored if stamp)
-    missing = [_id for _id, stamp in stored
-               if not stamp or (_id, stamp, token) not in cached]
+    found = _term_cache.get_many((_id, version) for _id, _ in stored)
+    cached = {}
+    for _id, stamp in stored:
+        entry = found.get((_id, version))
+        if entry and stamp and entry[:2] == (stamp, token):
+            cached[_id] = entry[2]
+    missing = [_id for _id, _ in stored if _id not in cached]
     query = _exclude_large(query)
     records = {}
     for ids in _chunks(missing):
@@ -85,11 +95,11 @@ def _scalar_records(query, config, token) -> List[TermRecord]:
                 SourceTerm.objects(id=st.id).update(set__stamp=stamp)
             record = _record(st, calculator, False)
             records[st.id] = record
-            new[st.id, stamp, token] = record
+            new[st.id, version] = (stamp, token, record)
         _term_cache.put_many(new)
     result = []
-    for _id, stamp in stored:
-        record = cached.get((_id, stamp, token)) or records.get(_id)
+    for _id, _ in stored:
+        record = cached.get(_id) or records.get(_id)
         # a SourceTerm deleted since the ids were read is left out
         if record is not None:
             result.append(record)
@@ -125,10 +135,11 @@ def term_table(obj: Component, relativeto: Optional[Assembly] = None,
         if spectra:
             records = _spectrum_records(query, config)
         else:
-            records = _scalar_records(query, config, get_calc_token(version))
+            records = _scalar_records(query, config, version,
+                                      get_calc_token(version))
         child_ids = {str(p.id) for p in getattr(obj, 'children', None) or []}
         return TermTable(records,
                          lambda path: _component_path(path, child_ids))
     key = _cache_key(obj, 'spectra' if spectra else 'terms', _ref_id(obj),
                      relativeto and _ref_id(relativeto))
-    return _cached(key, calculate)
+    return (_spectra_cache if spectra else _table_cache).get(key, calculate)

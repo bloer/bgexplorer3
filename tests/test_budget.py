@@ -362,9 +362,11 @@ class TestDashboard(AppTestCase):
             return term_table(self.a2, **kwargs), calculate.call_count
 
     def test_unchanged_terms_reused(self):
+        from bgexplorer.models.budget import terms as budget_terms
         terms, count = self.recalculated()
         self.assertEqual(count, 5)
         self.assertEqual(self.recalculated()[1], 0)
+        records = len(budget_terms._term_cache)
         # editing one component only recalculates its own SourceTerms
         self.c3.confidence_rating = 2
         self.c3.save()
@@ -376,6 +378,11 @@ class TestDashboard(AppTestCase):
         self.e2.sources[0].rate = '2 +- 0.5 mBq/kg'
         self.e2.save()
         self.assertEqual(self.recalculated()[1], 1)
+        # the tables of the old data are gone, and each SourceTerm has one
+        # record however many times it changed
+        self.assertEqual(len(budget_terms._table_cache), 1)
+        self.assertEqual(len(budget_terms._term_cache), records)
+        self.assertGreater(budget_terms._table_cache.nbytes, 0)
         # the result is the same as calculating everything
         reused = dashboard(self.a2, 'v1')
         clear_results_cache()
@@ -389,6 +396,34 @@ class TestDashboard(AppTestCase):
         term_table(self.a2)
         self.replace_hiteff('c3', v1='0.7 +- 0.05 dru/mBq')
         self.assertEqual(self.recalculated()[1], 5)
+
+    def test_cold_load_in_chunks(self):
+        from bgexplorer.models.budget import terms as budget_terms
+        clear_results_cache()
+        expected = dashboard(self.a2, 'v1')
+        ids = term_table(self.a2).ids
+        for spectra in (False, True):
+            clear_results_cache()
+            with mock.patch.object(budget_terms, '_LOAD_CHUNK', 2), \
+                    mock.patch.object(budget_terms, 'load_hiteffs',
+                                      side_effect=budget_terms.load_hiteffs
+                                      ) as load:
+                chunked = term_table(self.a2, spectra=spectra)
+            # 5 SourceTerms, 2 at a time
+            self.assertEqual(load.call_count, 3)
+            if not spectra:
+                self.assertEqual(chunked.ids, ids)
+        clear_results_cache()
+        with mock.patch.object(budget_terms, '_LOAD_CHUNK', 2):
+            self.assertSame(dashboard(self.a2, 'v1')['total'],
+                            expected['total'])
+
+    def test_cache_budget_from_environment(self):
+        from bgexplorer.models.sourceterm import cache_bytes
+        with mock.patch.dict('os.environ', {'BGEXPLORER_CACHE_MB': '100'}):
+            self.assertEqual(cache_bytes(.5), 50 * 2**20)
+        with mock.patch.dict('os.environ', {'BGEXPLORER_CACHE_MB': 'junk'}):
+            self.assertEqual(cache_bytes(.5), 256 * 2**20)
 
     def test_unstamped_terms(self):
         """ SourceTerms from before there were stamps are stamped when used """

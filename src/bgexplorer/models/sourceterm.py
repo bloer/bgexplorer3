@@ -32,7 +32,10 @@ from typing import (List, Optional, Union, Dict, Tuple, Iterable,
 from collections import defaultdict, OrderedDict
 from bson import ObjectId
 import logging
+import os
+import sys
 import threading
+import numpy as np
 log = logging.getLogger(__name__)
 NO_MATERIAL = '(no material)'
 NO_CATEGORY = '(uncategorized)'
@@ -262,23 +265,119 @@ class _Flight:
         self.thread = threading.get_ident()
 
 
+def estimate_bytes(value) -> int:
+    """ A rough estimate of the memory used by a cached result: the arrays it
+    holds and the containers around them. Objects with their own `nbytes`
+    report it
+    """
+    if isinstance(value, np.ndarray):
+        return value.nbytes + 100
+    nbytes = getattr(value, 'nbytes', None)
+    if isinstance(nbytes, int):
+        return nbytes
+    if isinstance(value, dict):
+        return sys.getsizeof(value) + sum(
+            estimate_bytes(k) + estimate_bytes(v) for k, v in value.items())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return sys.getsizeof(value) + sum(estimate_bytes(v) for v in value)
+    if isinstance(value, AsymmetricUncertainty):
+        return 200 + sum(estimate_bytes(a) for a in
+                         (value._mode, value._s0, value._s1))
+    if isinstance(value, Histogram):
+        return 200 + estimate_bytes(value.hist) + estimate_bytes(
+            value.bin_edges)
+    if hasattr(value, 'magnitude'):
+        return 100 + estimate_bytes(value.magnitude)
+    return sys.getsizeof(value)
+
+
+def cache_bytes(share: float) -> int:
+    """ This share of the memory that each process may use for caches, which
+    is `BGEXPLORER_CACHE_MB` (default 512) megabytes
+    """
+    try:
+        megabytes = float(os.environ.get('BGEXPLORER_CACHE_MB', 512))
+    except ValueError:
+        megabytes = 512.
+    return int(share * megabytes * 2**20)
+
+
 class ResultsCache:
-    """ In-memory LRU cache of calculated results. Keys start with the
-    version's cache token, which changes whenever any data in the version
-    changes, so entries never need invalidating and it is safe with multiple
-    processes. Results are shared, so must not be modified.
+    """ In-memory LRU cache of calculated results, bounded by the number of
+    entries and optionally by their size in bytes (as `sizeof` estimates).
+    Keys start with the version's cache token, which changes whenever any data
+    in the version changes, so entries never need invalidating and it is safe
+    with multiple processes. Those of old tokens can never be used again, and
+    are removed by `purge_token`. Results are shared, so must not be modified.
+
+    Results that grow after they are cached (that have `nbytes`) are measured
+    again whenever they are used. One that is bigger than all of `max_bytes`
+    isn't kept.
 
     If several threads want the same missing key at once, one calculates it
     and the others wait for it, rather than all repeating a slow calculation.
     """
     instances = []
 
-    def __init__(self, size: int):
+    def __init__(self, size: int, max_bytes: Optional[int] = None,
+                 sizeof=estimate_bytes, by_token: bool = True,
+                 name: str = ''):
+        """ Keep at most `size` results, and `max_bytes` if that is given.
+        If not `by_token`, keys don't start with a token
+        """
         self.size = size
+        self.max_bytes = max_bytes
+        self.name = name
+        self._sizeof = sizeof
+        self._by_token = by_token
         self._entries = OrderedDict()
+        self._sizes = {}
+        self._nbytes = 0
+        self._tokens = defaultdict(set)
         self._flights = {}
         self._lock = threading.Lock()
         ResultsCache.instances.append(self)
+
+    def _store(self, key, result) -> None:
+        """ Add or replace an entry. The lock must be held """
+        self._remove(key)
+        nbytes = self._sizeof(result)
+        if self.max_bytes is not None and nbytes > self.max_bytes:
+            return
+        self._entries[key] = result
+        self._sizes[key] = nbytes
+        self._nbytes += nbytes
+        if self._by_token:
+            self._tokens[key[0]].add(key)
+
+    def _remove(self, key) -> None:
+        """ Drop an entry if there is one. The lock must be held """
+        if self._entries.pop(key, _MISSING) is _MISSING:
+            return
+        self._nbytes -= self._sizes.pop(key)
+        if self._by_token:
+            keys = self._tokens.get(key[0])
+            if keys is not None:
+                keys.discard(key)
+                if not keys:
+                    del self._tokens[key[0]]
+
+    def _evict(self) -> None:
+        """ Drop the least recently used entries until it fits. The lock must
+        be held
+        """
+        while self._entries and (
+                len(self._entries) > self.size or
+                (self.max_bytes is not None and self._nbytes > self.max_bytes)):
+            self._remove(next(iter(self._entries)))
+
+    def _hit(self, key, result) -> None:
+        """ Note that an entry was used. The lock must be held """
+        self._entries.move_to_end(key)
+        if isinstance(getattr(result, 'nbytes', None), int):
+            self._nbytes += result.nbytes - self._sizes[key]
+            self._sizes[key] = result.nbytes
+            self._evict()
 
     def get(self, key: Optional[tuple], calculate):
         """ Return the cached result for `key`, or else calculate and cache
@@ -290,7 +389,7 @@ class ResultsCache:
             with self._lock:
                 result = self._entries.get(key, _MISSING)
                 if result is not _MISSING:
-                    self._entries.move_to_end(key)
+                    self._hit(key, result)
                     return result
                 flight = self._flights.get(key)
                 if flight is None:
@@ -306,9 +405,8 @@ class ResultsCache:
         try:
             result = calculate()
             with self._lock:
-                self._entries[key] = result
-                while len(self._entries) > self.size:
-                    self._entries.popitem(last=False)
+                self._store(key, result)
+                self._evict()
             return result
         finally:
             with self._lock:
@@ -324,37 +422,72 @@ class ResultsCache:
             for key in keys:
                 result = self._entries.get(key, _MISSING)
                 if result is not _MISSING:
-                    self._entries.move_to_end(key)
+                    self._hit(key, result)
                     found[key] = result
         return found
 
     def put_many(self, items: Dict) -> None:
         """ Cache several results at once """
         with self._lock:
-            self._entries.update(items)
-            for key in items:
-                self._entries.move_to_end(key)
-            while len(self._entries) > self.size:
-                self._entries.popitem(last=False)
+            for key, result in items.items():
+                self._store(key, result)
+            self._evict()
+
+    def purge_token(self, token) -> int:
+        """ Drop the entries of an old cache `token`. Returns how many """
+        with self._lock:
+            keys = list(self._tokens.get(token, ()))
+            for key in keys:
+                self._remove(key)
+        return len(keys)
 
     def clear(self):
         with self._lock:
             self._entries.clear()
+            self._sizes.clear()
+            self._tokens.clear()
+            self._nbytes = 0
 
     def __len__(self):
         return len(self._entries)
 
+    @property
+    def nbytes(self) -> int:
+        """ The estimated size of the results in the cache """
+        return self._nbytes
+
 
 RESULTS_CACHE_SIZE = 128
 _MISSING = object()
-_results_cache = ResultsCache(RESULTS_CACHE_SIZE)
+_results_cache = ResultsCache(RESULTS_CACHE_SIZE, cache_bytes(.2),
+                              name='results')
+# the latest cache token seen for each version
+_current_tokens = {}
+_tokens_lock = threading.Lock()
+
+
+def _note_token(version: str, token) -> None:
+    """ When a version's cache token has changed, drop the results of the
+    old one from every cache
+    """
+    with _tokens_lock:
+        old = _current_tokens.get(version)
+        if old == token:
+            return
+        _current_tokens[version] = token
+    if old is not None:
+        for cache in ResultsCache.instances:
+            cache.purge_token(old)
 
 
 def _cache_key(obj, *args) -> Optional[tuple]:
     """ Cache key for results of `obj`, or None if they can't be cached """
     version = getattr(obj, 'active_version', None)
     token = version and record.get_cache_token(version)
-    return (token,) + args if token is not None else None
+    if token is None:
+        return None
+    _note_token(version, token)
+    return (token,) + args
 
 
 def _cached(key: Optional[tuple], calculate):
