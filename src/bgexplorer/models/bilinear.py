@@ -67,6 +67,48 @@ def bilinear_sum(rows, cols, weights, rate: Moments, hit: Moments
     return tuple(result)
 
 
+def bilinear_each(terms, nterms: int, rows, cols, weights, rate: Moments,
+                  hit: Moments) -> Moments:
+    """ `bilinear_sum` for each of `nterms` separate sums at once, with the
+    entries (rows, cols, weights) of the sum `terms[i]` (from 0 to
+    `nterms`-1). The rates and efficiencies are shared by the sums, but
+    within each they are independent of those in the other sums, so the sums
+    are not added. The result has the shape (nterms,) + one row of `hit`
+    """
+    hit = tuple(np.asarray(a, dtype=float) for a in hit)
+    shape = hit[0].shape[1:]
+    if not len(terms):
+        return tuple(np.zeros((nterms,) + shape) for _ in range(3))
+    terms = np.asarray(terms, dtype=np.int64)
+    nrates, nhits = len(rate[0]), len(hit[0])
+    r_key, r_index = np.unique(terms * nrates + np.asarray(rows),
+                               return_inverse=True)
+    c_key, c_index = np.unique(terms * nhits + np.asarray(cols),
+                               return_inverse=True)
+    w = sparse.coo_matrix(
+        (np.asarray(weights, dtype=float), (r_index, c_index)),
+        shape=(len(r_key), len(c_key))).tocsr()
+    rmode, rv0, rv1 = (np.asarray(a, dtype=float)[r_key % nrates]
+                       for a in rate)
+    hmode, hv0, hv1 = (a[c_key % nhits].reshape(len(c_key), -1) for a in hit)
+    # adds the entries of each sum
+    by_hit = sparse.csr_matrix(
+        (np.ones(len(c_key)), (c_key // nhits, np.arange(len(c_key)))),
+        shape=(nterms, len(c_key)))
+    by_rate = sparse.csr_matrix(
+        (np.ones(len(r_key)), (r_key // nrates, np.arange(len(r_key)))),
+        shape=(nterms, len(r_key)))
+    b = w.T @ rmode
+    u = w @ hmode
+    w2 = w.multiply(w).T.tocsr()
+    result = [(by_hit @ (b[:, None] * hmode)).reshape((nterms,) + shape)]
+    for rvar, hvar in ((rv0, hv0), (rv1, hv1)):
+        c = b * b + w2 @ rvar
+        var = by_hit @ (c[:, None] * hvar) + by_rate @ (rvar[:, None] * u * u)
+        result.append(np.sqrt(var).reshape((nterms,) + shape))
+    return tuple(result)
+
+
 class LazyExpression(LinearExpression):
     """ A `LinearExpression` whose terms are only made when they are needed,
     by `build`, which returns the `coefficients`. Sums of many terms are

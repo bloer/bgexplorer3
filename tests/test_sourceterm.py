@@ -431,8 +431,9 @@ class TestSourceTerm(unittest.TestCase):
 
         def calculations():
             """ the totals, and how many SourceTerms had to be calculated """
-            with mock.patch.object(TermCalculator, 'scalars', autospec=True,
-                                   side_effect=TermCalculator.scalars
+            with mock.patch.object(TermCalculator, 'hit_blocks',
+                                   autospec=True,
+                                   side_effect=TermCalculator.hit_blocks
                                    ) as calculate:
                 return totals(), calculate.call_count
 

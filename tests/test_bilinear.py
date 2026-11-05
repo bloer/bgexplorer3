@@ -2,8 +2,8 @@ import unittest
 import numpy as np
 from bgexplorer.models.asymmetric import (AsymmetricUncertainty as AU,
                                           LinearExpression)
-from bgexplorer.models.bilinear import (bilinear_sum, bilinear_value,
-                                        LazyExpression)
+from bgexplorer.models.bilinear import (bilinear_each, bilinear_sum,
+                                        bilinear_value, LazyExpression)
 
 
 def moments(leaves):
@@ -93,6 +93,36 @@ class TestBilinearSum(unittest.TestCase):
         rates = [AU(2., 0., 0.), AU(1., 0.3, 0.3)]
         hits = [AU(0., 0., 0.5), AU(4., 0., 0.)]
         self.check(([0, 1, 1], [0, 0, 1], [1., 0., 2.], rates, hits))
+
+
+class TestBilinearEach(unittest.TestCase):
+    def check(self, shape):
+        rng = np.random.default_rng(8)
+        rows, cols, weights, rates, hits = random_case(rng, entries=60,
+                                                       shape=shape)
+        terms = rng.integers(0, 7, len(rows))
+        # term 5 has no entries
+        terms[terms == 5] = 4
+        each = bilinear_each(terms, 7, rows, cols, weights, moments(rates),
+                             moments(hits))
+        for i in range(7):
+            sel = terms == i
+            one = bilinear_sum(rows[sel], cols[sel], weights[sel],
+                               moments(rates), moments(hits))
+            for got, expected in zip(each, one):
+                np.testing.assert_allclose(got[i], expected, rtol=1e-10)
+
+    def test_scalars(self):
+        self.check(())
+
+    def test_arrays(self):
+        self.check((3,))
+
+    def test_empty(self):
+        mode, s0, s1 = bilinear_each([], 4, [], [], [], moments([AU(1, 0)]),
+                                     moments([AU(1, 0)]))
+        self.assertEqual(mode.shape, (4,))
+        self.assertFalse(mode.any())
 
 
 class TestBilinearValue(unittest.TestCase):

@@ -1,36 +1,23 @@
 """ The results of each SourceTerm of a component, with the keys to group them
-by. Values are already in the version's display units (see `termcalc`).
+by, as a `TermTable` to sum over. Values are in the version's display units
+(see `termcalc`).
 """
-from typing import List, NamedTuple, Optional, Tuple
-from bson import ObjectId
+from typing import List, Optional, Tuple
 from ..component import Component, Assembly
 from ..hiteff import HitEfficiency
 from ..sourceterm import (ResultsCache, SourceTerm, find_sourceterms,
                           load_hiteffs, _cache_key, _cached, _ref_id)
 from ..settings import get_settings, get_calc_token
 from ..termcalc import TermCalculator
+from .termtable import TermRecord, TermTable
 
-
-class Term(NamedTuple):
-    """ One SourceTerm's value of each scalar (an AsymmetricUncertainty) or
-    spectrum (a Histogram) it has, in display units, and its key for each
-    groupby (see `SourceTerm.group_keys`). The component key is the path of
-    placement ids (as strings) from the object being broken down
-    """
-    sourceterm_id: ObjectId
-    values: dict
-    keys: dict
-    # the confidence rating of the component the SourceTerm belongs to
-    rating: Optional[int] = None
-
-
-# the Terms of single SourceTerms, by (id, stamp, calc token). The stamp
+# the records of single SourceTerms, by (id, stamp, calc token). The stamp
 # changes when the SourceTerm does, and the version's calc token when
 # anything else that the values depend on does (such as display units), so
 # entries are never stale and the terms that didn't change are reused after an
 # edit. Their component keys are the full placement paths.
 _term_cache = ResultsCache(60000)
-# loading this many SourceTerms at once by id
+# loading and calculating this many SourceTerms at once
 _LOAD_CHUNK = 2000
 
 
@@ -61,9 +48,21 @@ def _exclude_large(query):
     return query.exclude('assemblyPath', 'livetimes', 'assemblyPathStr')
 
 
-def _scalar_terms(query, config, token) -> List[Term]:
-    """ The Term of each SourceTerm in `query`, in order, loading and
-    calculating only those that aren't in the cache
+def _record(sourceterm, calculator, spectra: bool) -> TermRecord:
+    rate, blocks = calculator.hit_blocks(sourceterm, spectra)
+    return TermRecord(sourceterm.id, sourceterm.group_keys(),
+                      sourceterm.confidence_rating, tuple(rate),
+                      tuple(block for block in blocks if block.values))
+
+
+def _chunks(ids: list):
+    for i in range(0, len(ids), _LOAD_CHUNK):
+        yield ids[i:i + _LOAD_CHUNK]
+
+
+def _scalar_records(query, config, token) -> List[TermRecord]:
+    """ The record of each SourceTerm in `query`, in order, loading and
+    calculating only those that aren't in the cache, a chunk at a time
     """
     stored = [(doc['_id'], doc.get('stamp')) for doc in
               query.only('stamp').as_pymongo()]
@@ -72,13 +71,9 @@ def _scalar_terms(query, config, token) -> List[Term]:
     missing = [_id for _id, stamp in stored
                if not stamp or (_id, stamp, token) not in cached]
     query = _exclude_large(query)
-    if len(missing) == len(stored):
-        batches = [list(query)]
-    else:
-        batches = (list(query(id__in=missing[i:i + _LOAD_CHUNK]))
-                   for i in range(0, len(missing), _LOAD_CHUNK))
-    terms = {}
-    for sourceterms in batches:
+    records = {}
+    for ids in _chunks(missing):
+        sourceterms = list(query(id__in=ids))
         calculator = TermCalculator(config,
                                     load_hiteffs(sourceterms, spectra=False))
         new = {}
@@ -88,34 +83,38 @@ def _scalar_terms(query, config, token) -> List[Term]:
                 # saved before SourceTerms had stamps
                 stamp = st.content_stamp()
                 SourceTerm.objects(id=st.id).update(set__stamp=stamp)
-            term = Term(st.id, calculator.scalars(st), st.group_keys(),
-                        st.confidence_rating)
-            terms[st.id] = term
-            new[st.id, stamp, token] = term
+            record = _record(st, calculator, False)
+            records[st.id] = record
+            new[st.id, stamp, token] = record
         _term_cache.put_many(new)
     result = []
     for _id, stamp in stored:
-        term = cached.get((_id, stamp, token)) or terms.get(_id)
+        record = cached.get((_id, stamp, token)) or records.get(_id)
         # a SourceTerm deleted since the ids were read is left out
-        if term is not None:
-            result.append(term)
+        if record is not None:
+            result.append(record)
     return result
 
 
-def _spectrum_terms(query, config) -> List[Term]:
-    sourceterms = list(_exclude_large(query))
-    calculator = TermCalculator(config, load_hiteffs(sourceterms, spectra=True))
-    return [Term(st.id, calculator.spectra(st), st.group_keys(),
-                 st.confidence_rating) for st in sourceterms]
+def _spectrum_records(query, config):
+    """ The records of the SourceTerms in `query`, a chunk at a time """
+    ids = [doc['_id'] for doc in query.only('id').as_pymongo()]
+    query = _exclude_large(query)
+    for chunk in _chunks(ids):
+        sourceterms = list(query(id__in=chunk))
+        calculator = TermCalculator(config,
+                                    load_hiteffs(sourceterms, spectra=True))
+        for st in sourceterms:
+            yield _record(st, calculator, True)
 
 
-def term_values(obj: Component, relativeto: Optional[Assembly] = None,
-                spectra: bool = False) -> List[Term]:
+def term_table(obj: Component, relativeto: Optional[Assembly] = None,
+               spectra: bool = False) -> TermTable:
     """ The scalar values (or if `spectra`, the spectra) of each SourceTerm
     of `obj` (optionally only as placed in `relativeto`) that has any, in the
     version's display units. Kept in memory until any data in the version
-    changes, and shared, so must not be modified. When it does, the scalars of
-    the SourceTerms that didn't change are reused. Raises UnitMismatchError if
+    changes, and shared, so must not be modified. When it does, the
+    SourceTerms that didn't change are reused. Raises UnitMismatchError if
     saved data has units that don't fit together.
     """
     version = obj.active_version
@@ -124,14 +123,12 @@ def term_values(obj: Component, relativeto: Optional[Assembly] = None,
         config = get_settings(version).hiteffdbconfig
         query = find_sourceterms(obj, relativeto)
         if spectra:
-            terms = _spectrum_terms(query, config)
+            records = _spectrum_records(query, config)
         else:
-            terms = _scalar_terms(query, config, get_calc_token(version))
+            records = _scalar_records(query, config, get_calc_token(version))
         child_ids = {str(p.id) for p in getattr(obj, 'children', None) or []}
-        return [term._replace(keys=dict(
-                    term.keys, component=_component_path(
-                        term.keys['component'], child_ids)))
-                for term in terms if term.values]
+        return TermTable(records,
+                         lambda path: _component_path(path, child_ids))
     key = _cache_key(obj, 'spectra' if spectra else 'terms', _ref_id(obj),
                      relativeto and _ref_id(relativeto))
     return _cached(key, calculate)

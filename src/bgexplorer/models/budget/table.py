@@ -1,13 +1,13 @@
 """ The contributions table: every displayed scalar for each placement """
 from collections import defaultdict
 from typing import List, Optional, Tuple
+import numpy as np
 from ..component import Component, Assembly
 from ..settings import get_settings
-from ..asymmetric import sum_values
 from .filters import BudgetFilter
 from .grouping import (COMPONENT_DEPTH, Output, filtered_cached,
                        levels, placement_names, resolve_root)
-from .terms import term_values
+from .terms import term_table
 
 
 def table_columns(version: str) -> List[Tuple[str, str]]:
@@ -38,7 +38,7 @@ def table(obj: Component, filters: Optional[BudgetFilter] = None,
     and UnitMismatchError if saved data has units that don't fit together.
     """
     chart_root, breadcrumb = resolve_root(obj, filters.root)
-    terms = term_values(obj, relativeto)
+    tt = term_table(obj, relativeto)
     version = obj.active_version
     config = get_settings(version).hiteffdbconfig
     outs = {key: Output(config.scalar_unit(key))
@@ -46,24 +46,24 @@ def table(obj: Component, filters: Optional[BudgetFilter] = None,
     columns = [dict(key=key, name=name, units=outs[key].unit)
                for key, name in table_columns(version)]
     root = filters.root
-    sums = defaultdict(lambda: defaultdict(list))
+    sums = defaultdict(list)
     count = 0
-    for term in terms:
-        if not filters.matches(term.keys):
+    for i, keys in enumerate(tt.keys):
+        if not filters.matches(keys):
             continue
         count += 1
-        path = term.keys['component'][len(root):]
+        path = keys['component'][len(root):]
         for level in levels(path, depth, total=True):
-            group = sums[path[:level]]
-            for name, value in term.values.items():
-                group[name].append(value)
+            sums[path[:level]].append(i)
+    having = {key: tt.having(key) for key in outs}
 
     def values(path):
-        group = sums.get(path, {})
-        return {key: out.quantity(sum_values(group.get(key, ())))
+        terms = np.array(sums.get(path, ()), dtype=np.int64)
+        return {key: out.quantity(out.total(tt, key,
+                                            terms[having[key][terms]]))
                 for key, out in outs.items()}
     result = [dict(label=breadcrumb[-1][1], depth=0, values=values(()))]
     result += [dict(label=name, depth=len(path), values=values(path))
                for path, (name, children)
                in placement_names(chart_root, depth).items()]
-    return dict(columns=columns, rows=result, count=count, ntotal=len(terms))
+    return dict(columns=columns, rows=result, count=count, ntotal=len(tt))

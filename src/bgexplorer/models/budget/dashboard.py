@@ -1,12 +1,13 @@
 """ The dashboard: a scalar broken down by every groupby at once """
 from collections import defaultdict
 from typing import Optional
+import numpy as np
 from ..component import Component, Assembly
 from ..settings import get_settings
 from .filters import GROUPBY, BudgetFilter
 from .grouping import (COMPONENT_DEPTH, Group, Output, check_args,
                        component_rows, filtered_cached, resolve_root, rows)
-from .terms import term_values
+from .terms import term_table
 
 
 @filtered_cached
@@ -42,37 +43,33 @@ def dashboard(obj: Component, scalar: str,
     """
     check_args(obj, scalar, groupbys)
     chart_root, breadcrumb = resolve_root(obj, filters.root)
-    terms = [t for t in term_values(obj, relativeto) if scalar in t.values]
+    table = term_table(obj, relativeto)
     out = Output(get_settings(obj.active_version).hiteffdbconfig
                  .scalar_unit(scalar), unit)
+    terms = np.flatnonzero(table.having(scalar))
 
-    below = [t for t in terms if filters.below_root(t.keys)]
+    below = [i for i in terms if filters.below_root(table.keys[i])]
     # where each term is drawn, which is also its weight in the confidence
-    sizes = {id(t): out.size(t.values[scalar]) for t in below}
+    sizes = table.sizes(scalar) * out.factor
     charts = {}
     for groupby in groupbys:
         if groupby == 'component':
-            charts[groupby] = component_rows(below, scalar, filters,
+            charts[groupby] = component_rows(table, below, scalar, filters,
                                              chart_root, depth, out, sizes)
             continue
         groups = defaultdict(Group)
-        for term in below:
-            key = term.keys[groupby]
-            groups[key].include(term.values[scalar],
-                                filters.passes(groupby, key),
-                                filters.matches(term.keys, skip=groupby),
-                                sizes[id(term)], term.rating)
-        charts[groupby] = rows(groups, {}, out)
+        for i in below:
+            keys = table.keys[i]
+            groups[keys[groupby]].include(
+                i, filters.passes(groupby, keys[groupby]),
+                filters.matches(keys, skip=groupby), sizes[i],
+                table.ratings[i])
+        charts[groupby] = rows(groups, {}, out, table, scalar)
 
-    total = Group()
-    unfiltered = Group()
-    count = 0
-    for term in terms:
-        unfiltered.add(term.values[scalar])
-        if filters.matches(term.keys):
-            total.add(term.values[scalar])
-            count += 1
-    return dict(scalar=scalar, units=out.unit, count=count, ntotal=len(terms),
-                total=out.quantity(total.value),
-                unfiltered=out.quantity(unfiltered.value),
+    counted = [i for i in terms if filters.matches(table.keys[i])]
+    total = out.total(table, scalar, counted)
+    unfiltered = out.total(table, scalar, terms)
+    return dict(scalar=scalar, units=out.unit, count=len(counted),
+                ntotal=len(terms), total=out.quantity(total),
+                unfiltered=out.quantity(unfiltered),
                 breadcrumb=breadcrumb, charts=charts)

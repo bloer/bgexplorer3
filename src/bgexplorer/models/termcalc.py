@@ -9,10 +9,13 @@ efficiency and rate unit, to work out the conversion factor, which is
 folded into the hit efficiency's values.
 """
 import logging
-from typing import Dict, Optional, Tuple
+import numpy as np
+from numbers import Real
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from pint.errors import PintError
 from .common import units as unitreg, Quantity, UnitMismatchError
-from .asymmetric import sum_values
+from .asymmetric import (AsymmetricUncertainty, CorrelationsNotLoaded,
+                         sum_values)
 from .histogram import Histogram
 from .hiteff import HitEfficiency
 from ..versioning.verdoc import ref_id as _ref_id
@@ -38,6 +41,52 @@ def _split(q):
     if isinstance(q, Quantity):
         return q.m, q.u
     return q, _DIMENSIONLESS
+
+
+# the modes, lower and upper variances of an independent variable
+Moments = Tuple[Any, Any, Any]
+
+
+def _variable(value, fallback) -> Tuple[Any, Moments]:
+    """ The identity and moments of `value`, an AsymmetricUncertainty or a
+    constant. Only leaves, which are independent variables, have an identity
+    of their own, otherwise it is `fallback`
+    """
+    if isinstance(value, AsymmetricUncertainty):
+        return (value.id if value.isleaf else fallback,
+                (value.mode, value.v0, value.v1))
+    mode = np.asarray(value, dtype=float)
+    return fallback, (mode, np.zeros_like(mode), np.zeros_like(mode))
+
+
+class HitValue(NamedTuple):
+    """ A scalar, ROI or spectrum of a hit efficiency: the identity and
+    moments of its variable, and the `scale` to multiply it by to get
+    display units once multiplied by a rate in the block's rate unit
+    """
+    key: Any
+    moments: Moments
+    scale: float
+    # spectra only
+    display: Any = None
+    bin_edges: Any = None
+
+
+class HitBlock(NamedTuple):
+    """ What one hit efficiency gives the SourceTerms whose rate has `unit`,
+    by name. Shared by all of them
+    """
+    key: Tuple
+    values: Dict[str, HitValue]
+
+
+class RateTerm(NamedTuple):
+    """ Part of an emission rate: `coefficient` times the independent variable
+    identified by `key` that has `moments`, or a constant if `moments` is None
+    """
+    key: Any
+    moments: Optional[Moments]
+    coefficient: float
 
 
 class TermCalculator:
@@ -170,3 +219,85 @@ class TermCalculator:
                     hist.bin_edges))
         return {key: Histogram.sum_all(values)
                 for key, values in parts.items()}
+
+    def rate_terms(self, sourceterm) -> Tuple[List[RateTerm], Any]:
+        """ The sourceterm's emission rate, including its weight and
+        multiplier, as a sum of `RateTerm`s of independent variables, and the
+        rate's unit. Rates calculated from several variables, other than
+        by adding and scaling, are a single variable of their own
+        """
+        rate = sourceterm.source.standardized_rate
+        unit = rate.u
+        scale = sourceterm.weight
+        multiplier = sourceterm.rate_multiplier
+        if isinstance(multiplier, Quantity):
+            unit = unit * multiplier.u
+            multiplier = multiplier.m
+        if not isinstance(multiplier, Real):
+            raise UnitMismatchError(
+                f"Rate multiplier {multiplier!r} of SourceTerm "
+                f"{sourceterm.id} is not a number")
+        scale = float(scale * multiplier)
+        m = rate.m
+        if not isinstance(m, AsymmetricUncertainty):
+            return [RateTerm(None, None, float(m) * scale)], unit
+        key, moments = _variable(m, ('source', str(sourceterm.source.id)))
+        if m.isleaf:
+            return [RateTerm(key, moments, scale)], unit
+        try:
+            coefficients = m.expression.coefficients
+        except CorrelationsNotLoaded:
+            coefficients = None
+        if coefficients is not None and all(
+                len(key) < 2 for key in coefficients):
+            terms = []
+            for key, coefficient in coefficients.items():
+                if key:
+                    leaf_key, leaf_moments = _variable(next(iter(key)), None)
+                else:
+                    leaf_key = leaf_moments = None
+                terms.append(RateTerm(leaf_key, leaf_moments,
+                                      float(coefficient) * scale))
+            return terms, unit
+        return [RateTerm(key, moments, scale)], unit
+
+    def hit_blocks(self, sourceterm, spectra: bool = False
+                   ) -> Tuple[List[RateTerm], List[HitBlock]]:
+        """ The pieces of the sourceterm's results: the terms of its rate,
+        and the scalars, ROIs (or if `spectra`, the spectra) of each of its
+        hit efficiencies. The result for a name is the sum over the blocks
+        of the rate times the block's `HitValue`
+        """
+        terms, rate_unit = self.rate_terms(sourceterm)
+        blocks = [self._block(hiteff, rate_unit, spectra)
+                  for hiteff in self._hiteffs(sourceterm)]
+        return terms, blocks
+
+    def _block(self, hiteff, rate_unit, spectra: bool) -> HitBlock:
+        cache_key = 'block', spectra, id(hiteff), rate_unit
+        try:
+            return self._scaled[cache_key][1]
+        except KeyError:
+            pass
+        values = {}
+        if spectra:
+            for key, val in hiteff.spectra.items():
+                if not isinstance(val, Histogram):
+                    continue
+                m, unit = _split(val.hist)
+                display = self.config.spectrum_unit(key)
+                factor = self._factor(hiteff, key, unit * rate_unit, display)
+                values[key] = HitValue(
+                    *_variable(m, (hiteff.id, key)), factor, display,
+                    val.bin_edges)
+        else:
+            for key, val in hiteff.all_scalars.items():
+                if val is None:
+                    continue
+                m, unit = _split(val)
+                display = self.config.scalar_unit(key)
+                factor = self._factor(hiteff, key, unit * rate_unit, display)
+                values[key] = HitValue(*_variable(m, (hiteff.id, key)), factor)
+        block = HitBlock((hiteff.id, rate_unit), values)
+        self._scaled[cache_key] = (hiteff, block)
+        return block

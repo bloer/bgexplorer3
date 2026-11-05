@@ -2,7 +2,7 @@
 import unittest
 from unittest import mock
 from bgexplorer.models.budget import (BudgetFilter, dashboard, table,
-                                      term_values)
+                                      term_table)
 from bgexplorer.models.component import Component, Assembly, Placement
 from bgexplorer.models.emissionspec import (EmissionSpec, EmissionSource,
                                             SourceCategory)
@@ -299,11 +299,47 @@ class TestDashboard(AppTestCase):
         rows = dashboard(self.a1, 'v1')['charts']['component']
         self.assertEqual(self.labels(rows), [('c1', 0), ('c2 label', 0)])
 
+    def test_table_matches_per_term_sums(self):
+        """ Sums from the table equal adding each term's own values """
+        from bgexplorer.models.asymmetric import sum_values
+        from bgexplorer.models.sourceterm import load_hiteffs
+        table_ = term_table(self.a2)
+        config = get_settings('main').hiteffdbconfig
+        sourceterms = {st.id: st for st in find_sourceterms(self.a2)}
+        ordered = [sourceterms[_id] for _id in table_.ids]
+        calculator = TermCalculator(config, load_hiteffs(ordered))
+        legacy = [calculator.scalars(st)['v1'] for st in ordered]
+        for idx in ([0], [1, 2], [0, 1, 2, 3], [3, 1], []):
+            with self.subTest(idx=idx):
+                expected = sum_values([legacy[i] for i in idx])
+                got = table_.total('v1', idx)
+                if expected is None:
+                    self.assertIsNone(got)
+                    continue
+                self.assertAlmostEqual(got.mode, expected.mode)
+                self.assertAlmostEqual(got.s0, expected.s0)
+                self.assertAlmostEqual(got.s1, expected.s1)
+                self.assertAlmostEqual(table_.total('v1', idx, 2.).mode,
+                                       2 * expected.mode)
+        mode, s0, s1 = table_.each('v1', range(len(table_)))
+        for i, value in enumerate(legacy):
+            self.assertAlmostEqual(mode[i], value.mode)
+            self.assertAlmostEqual(s0[i], value.s0)
+            self.assertAlmostEqual(s1[i], value.s1)
+        # the size of a limit is its upper limit, otherwise the central value
+        sizes = table_.sizes('v1')
+        for i, value in enumerate(legacy):
+            self.assertAlmostEqual(
+                sizes[i], float(value.get_upper_limit(0.9)
+                                if value.isupperlimit()
+                                else value.nominal_value))
+
     def test_cache(self):
-        terms = term_values(self.a2)
-        self.assertIs(term_values(self.a2), terms)
+        terms = term_table(self.a2)
+        self.assertIs(term_table(self.a2), terms)
         # every scalar of each term at once
-        self.assertEqual({tuple(t.values) for t in terms}, {('v1',)})
+        self.assertEqual(len(terms), 4)
+        self.assertTrue(terms.having('v1').all())
         # and each filtered result
         text = '{"material": [{"key": "copper"}]}'
         result = dashboard(self.a2, 'v1', BudgetFilter.from_json(text))
@@ -313,16 +349,17 @@ class TestDashboard(AppTestCase):
         self.assertIs(table(self.a2), table(self.a2))
         self.c3.mass = '2 kg'
         self.c3.save()
-        self.assertIsNot(term_values(self.a2), terms)
+        self.assertIsNot(term_table(self.a2), terms)
         self.assertIsNot(dashboard(self.a2, 'v1', BudgetFilter.from_json(text)),
                          result)
 
     def recalculated(self, **kwargs):
-        """ The Terms of a2 and how many SourceTerms had to be calculated """
-        with mock.patch.object(TermCalculator, 'scalars', autospec=True,
-                               side_effect=TermCalculator.scalars
+        """ The TermTable of a2 and how many SourceTerms had to be calculated """
+        with mock.patch.object(TermCalculator, 'hit_blocks',
+                               autospec=True,
+                               side_effect=TermCalculator.hit_blocks
                                ) as calculate:
-            return term_values(self.a2, **kwargs), calculate.call_count
+            return term_table(self.a2, **kwargs), calculate.call_count
 
     def test_unchanged_terms_reused(self):
         terms, count = self.recalculated()
@@ -349,7 +386,7 @@ class TestDashboard(AppTestCase):
                          fresh['charts']['component'][-1]['key'])
         # HitEfficiencies could change any of them
         clear_results_cache()
-        term_values(self.a2)
+        term_table(self.a2)
         self.replace_hiteff('c3', v1='0.7 +- 0.05 dru/mBq')
         self.assertEqual(self.recalculated()[1], 5)
 

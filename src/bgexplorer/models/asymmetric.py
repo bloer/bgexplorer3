@@ -601,7 +601,9 @@ class AsymmetricUncertainty:
     def qlow(self):
         """ Fraction of probability in lower half, equivalent to the cdf
         at mode """
-        return np.where(self.s0 > 0, self.s0 / (self.s0 + self.s1), 0)
+        s0, s1 = np.asarray(self.s0), np.asarray(self.s1)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return np.where(s0 > 0, s0 / (s0 + s1), 0)
 
     def alpha(self, q):
         """ Effective alpha parameter for a given quantile """

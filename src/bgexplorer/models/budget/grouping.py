@@ -8,11 +8,11 @@ from collections import defaultdict
 from typing import List, Optional, Tuple
 from ..component import Component, Assembly
 from ..sourceterm import ResultsCache, _cache_key, _ref_id
-from ..asymmetric import sum_values
 from ..common import units as unitreg
 from ..termcalc import conversion_factor
 from .filters import GROUPBY, BudgetFilter
-from .terms import Term, available_scalars
+from .terms import available_scalars
+from .termtable import TermTable
 
 # levels of children shown in the dashboard's component breakdown
 COMPONENT_DEPTH = 2
@@ -124,44 +124,31 @@ def levels(path: Tuple[str, ...], depth: int, total: bool = False) -> set:
 
 
 class Group:
-    """ The sum of some SourceTerms' values passing the filters, and of all
-    of them. Measurements and upper limits are summed together, as
-    AsymmetricUncertainties.
+    """ Some SourceTerms (numbered in a `TermTable`): those passing the
+    filters, and all of them, to be summed by `Output.total`.
 
     Also the mean confidence rating of those passing, weighted by their
-    sizes (see `Output.size`), and the fraction of the size that is unrated
+    sizes (see `TermTable.sizes`), and the fraction of the size that is
+    unrated
     """
     def __init__(self):
-        self._passing = []
-        self._all = []
+        self.passing = []
+        self.unfiltered = []
         self.selected = False
         self.rated_sum = 0.
         self.rated_size = 0.
         self.unrated_size = 0.
 
-    def add(self, value):
-        self._passing.append(value)
-
-    @property
-    def value(self):
-        """ The sum of the values passing, or None """
-        return sum_values(self._passing)
-
-    @property
-    def unfiltered(self):
-        """ The sum of all values, or None """
-        return sum_values(self._all)
-
-    def include(self, value, selected: bool, passing: bool,
+    def include(self, term: int, selected: bool, passing: bool,
                 size: float = 0., rating: Optional[int] = None):
-        """ Add `value` to the unfiltered sum, and to the sum and the
-        confidence if `passing`. `size` is the `Output.size` of `value`,
-        `rating` the term's confidence rating
+        """ Add term number `term` to the unfiltered terms, and to those
+        passing and the confidence if `passing`. `size` is its size,
+        `rating` its confidence rating
         """
-        self._all.append(value)
+        self.unfiltered.append(term)
         self.selected |= selected
         if passing:
-            self.add(value)
+            self.passing.append(term)
             if rating is None:
                 self.unrated_size += size
             else:
@@ -192,43 +179,55 @@ class Output:
         self.factor = (conversion_factor(display, unit)
                        if unit and display else 1.)
 
+    def total(self, table: TermTable, scalar: str, terms):
+        """ The sum of `scalar` of the terms numbered `terms`, in the unit
+        (an AsymmetricUncertainty, or None if there are none). Measurements
+        and upper limits are summed together
+        """
+        return table.total(scalar, terms, self.factor)
+
     def quantity(self, value):
-        """ `value` (an AsymmetricUncertainty or None) as a Quantity """
+        """ `value` (from `total`, or None) as a Quantity """
         if value is None:
             return None
-        return unitreg.Quantity(value * self.factor, self.unit)
+        return unitreg.Quantity(value, self.unit)
 
-    def size(self, value) -> float:
-        """ Where a value is drawn: its upper limit, or else its central
-        value, in the unit
+    @staticmethod
+    def size(value) -> float:
+        """ Where a value from `total` is drawn: its upper limit, or else its
+        central value
         """
         if value is None:
             return 0.
         return float(value.get_upper_limit(0.9) if value.isupperlimit()
-                     else value.nominal_value) * self.factor
+                     else value.nominal_value)
 
 
-def rows(groups: dict, labels: dict, out: Output) -> List[dict]:
-    """ Rows of output sums from `groups` keyed by group key, largest
-    unfiltered size first, so filtering doesn't reorder them. Rows with
-    nothing passing the filters have value None
+def rows(groups: dict, labels: dict, out: Output, table: TermTable,
+         scalar: str) -> List[dict]:
+    """ Rows of output sums of `scalar` from `groups` keyed by group key,
+    largest unfiltered size first, so filtering doesn't reorder them. Rows
+    with nothing passing the filters have value None
     """
-    result = [dict(key=key, label=labels.get(key, key), depth=0,
-                   selected=group.selected,
-                   size=out.size(group.unfiltered),
-                   value=out.quantity(group.value),
-                   confidence=group.confidence)
-              for key, group in groups.items()]
+    result = []
+    for key, group in groups.items():
+        unfiltered = out.total(table, scalar, group.unfiltered)
+        result.append(dict(
+            key=key, label=labels.get(key, key), depth=0,
+            selected=group.selected, size=out.size(unfiltered),
+            value=out.quantity(out.total(table, scalar, group.passing)),
+            confidence=group.confidence))
     result.sort(key=lambda row: row['size'], reverse=True)
     return result
 
 
-def component_rows(terms: List[Term], scalar: str, filters: BudgetFilter,
-                   chart_root: Component, depth: int, out: Output,
-                   sizes: dict) -> List[dict]:
+def component_rows(table: TermTable, terms: List[int], scalar: str,
+                   filters: BudgetFilter, chart_root: Component, depth: int,
+                   out: Output, sizes) -> List[dict]:
     """ Rows for each child of `chart_root` (at path `filters.root`), each
     followed by rows for its own children down to `depth` levels, from
-    `terms` below the root. Only plain Components have sources of their own
+    the numbers of the `terms` of `table` below the root, with their `sizes`
+    (an array by term number). Only plain Components have sources of their own
     (Assemblies' sources are all from their children), so if `chart_root`
     is one, its single row has key None, which can't be filtered on. Rows
     also have `children`, whether they are Assemblies that can be drilled
@@ -238,17 +237,17 @@ def component_rows(terms: List[Term], scalar: str, filters: BudgetFilter,
     names = placement_names(chart_root, depth)
     groups = defaultdict(Group)
     for term in terms:
-        path = term.keys['component'][len(root):]
-        selected = filters.passes('component', term.keys['component'])
-        passing = filters.matches(term.keys, skip='component')
+        keys = table.keys[term]
+        path = keys['component'][len(root):]
+        selected = filters.passes('component', keys['component'])
+        passing = filters.matches(keys, skip='component')
         for level in levels(path, depth):
-            groups[path[:level]].include(term.values[scalar], selected,
-                                         passing, sizes[id(term)],
-                                         term.rating)
+            groups[path[:level]].include(term, selected, passing,
+                                         sizes[term], table.ratings[term])
     labels = {path: names[path][0] if path in names
               else path[-1] if path else chart_root.name
               for path in groups}
-    result = rows(groups, labels, out)
+    result = rows(groups, labels, out, table, scalar)
     for row in result:
         row['children'] = row['key'] in names and names[row['key']][1]
     # children after their parent, and full paths from obj as keys

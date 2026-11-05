@@ -4,13 +4,9 @@ from typing import List, Optional, Tuple
 import numpy as np
 from ..component import Component, Assembly
 from ..settings import get_settings
-from ..histogram import Histogram
-from ..common import units as unitreg
-from ..asymmetric import sum_values
-from ..sourceterm import _cache_key, _cached, _ref_id
 from .filters import GROUPBY, BudgetFilter
 from .grouping import filtered_cached, placement_names, resolve_root
-from .terms import term_values
+from .terms import term_table
 
 
 def spectrum_names(version: str) -> List[Tuple[str, str]]:
@@ -25,36 +21,6 @@ def spectrum_names(version: str) -> List[Tuple[str, str]]:
              or name)
             for name in dict.fromkeys(names)
             if not (name in config and config[name].hide)]
-
-
-def _spectrum_size(hist: Histogram) -> float:
-    """ The integral of `hist`'s approximate mean, treating each bin as a
-    split normal, to rank spectra by. Unlike the most likely value, it adds
-    up, and is positive for upper limits
-    """
-    widths = np.diff(np.asarray(getattr(hist.bin_edges, 'm', hist.bin_edges),
-                                dtype=float))
-    m = hist.hist.m
-    if hasattr(m, 'mode'):
-        mean = (np.asarray(m.mode, dtype=float) + np.sqrt(2 / np.pi)
-                * (np.asarray(m.s1, dtype=float) - np.asarray(m.s0, dtype=float)))
-    else:
-        mean = np.asarray(m, dtype=float)
-    reduced = unitreg.Quantity(1., hist.hist.u).to_reduced_units()
-    return float(np.nansum(mean * widths)) * reduced.m
-
-
-def _spectrum_sizes(obj, relativeto, name: str) -> dict:
-    """ `_spectrum_size` of each SourceTerm's spectrum `name`, by its id.
-    Cached like term_values
-    """
-    def calculate():
-        return {t.sourceterm_id: _spectrum_size(t.values[name])
-                for t in term_values(obj, relativeto, spectra=True)
-                if name in t.values}
-    return _cached(_cache_key(obj, 'spectrum sizes', _ref_id(obj),
-                              relativeto and _ref_id(relativeto), name),
-                   calculate)
 
 
 @filtered_cached
@@ -84,30 +50,30 @@ def spectrum_breakdown(obj: Component, name: str,
         raise ValueError(f"groupby must be one of {', '.join(GROUPBY)}")
     chart_root, breadcrumb = resolve_root(obj, filters.root)
     root = filters.root
-    terms = [t for t in term_values(obj, relativeto, spectra=True)
-             if name in t.values]
+    tt = term_table(obj, relativeto, spectra=True)
+    terms = np.flatnonzero(tt.having(name))
 
-    def group_key(term):
+    def group_key(keys):
         if groupby == 'component':
-            return term.keys['component'][len(root):][:1]
-        return term.keys[groupby]
-    term_sizes = _spectrum_sizes(obj, relativeto, name) if groupby else {}
-    totals = []
+            return keys['component'][len(root):][:1]
+        return keys[groupby]
+    term_sizes = tt.sizes(name) if groupby else None
+    passing = []
     groups = defaultdict(list)
     sizes = defaultdict(float)
     filtered_sizes = defaultdict(float)
-    count = 0
-    for term in terms:
-        size = term_sizes.get(term.sourceterm_id, 0.)
-        if groupby and filters.below_root(term.keys):
-            sizes[group_key(term)] += size
-        if not filters.matches(term.keys):
-            continue
-        count += 1
-        totals.append(term.values[name])
+    for i in terms:
+        keys = tt.keys[i]
         if groupby:
-            groups[group_key(term)].append(term.values[name])
-            filtered_sizes[group_key(term)] += size
+            key = group_key(keys)
+            if filters.below_root(keys):
+                sizes[key] += term_sizes[i]
+        if not filters.matches(keys):
+            continue
+        passing.append(i)
+        if groupby:
+            groups[key].append(i)
+            filtered_sizes[key] += term_sizes[i]
 
     rank = {key: i for i, key in enumerate(
         sorted(sizes, key=sizes.get, reverse=True))}
@@ -116,11 +82,11 @@ def spectrum_breakdown(obj: Component, name: str,
     # an "other" of a single group would just be that group
     shown = ordered if len(ordered) <= top + 1 else ordered[:top]
     curves = [dict(key=key, rank=rank[key],
-                   value=sum_values(groups[key]),
+                   value=tt.total_spectrum(name, groups[key]),
                    label=(names[key][0] if key in names
                           else chart_root.name if key == () else key))
               for key in shown]
-    other = sum_values(v for key in ordered[len(shown):]
-                       for v in groups[key])
-    return dict(total=sum_values(totals), curves=curves, other=other,
-                count=count, ntotal=len(terms))
+    rest = [i for key in ordered[len(shown):] for i in groups[key]]
+    return dict(total=tt.total_spectrum(name, passing), curves=curves,
+                other=tt.total_spectrum(name, rest) if rest else None,
+                count=len(passing), ntotal=len(terms))

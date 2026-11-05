@@ -220,11 +220,18 @@ per process and lost on restart:
 - SourceTerms saved before stamps existed get theirs the first time they are
   used.
 
-Each SourceTerm's scalars, ROIs and spectra are converted to the display
-units once, by `TermCalculator` (`models/termcalc.py`), and summed as plain
-magnitudes from then on. Every scalar, spectrum and ROI therefore has a display
-unit in the version settings, meaning the unit of the hit efficiency value
-times its norm.
+Each SourceTerm is reduced to its weights on the independent emission rates
+and hit efficiencies it uses, with the hit efficiencies' scalars, ROIs and
+spectra converted to the display units once, by `TermCalculator`
+(`models/termcalc.py`). A component's `TermTable`
+(`models/budget/termtable.py`) keeps these as flat arrays, and any group of
+SourceTerms is summed in a few sparse matrix products (`models/bilinear.py`),
+with the correlations from shared rates and hit efficiencies accounted for.
+The one approximation: a rate that is calculated from several variables
+other than by adding and scaling, or whose correlations aren't loaded, is a
+single independent variable per EmissionSource. Every scalar, spectrum and ROI
+has a display unit in the version settings, meaning the unit of the hit
+efficiency value times its norm.
 
 Unit mismatches are caught when data is saved, rather than when results are
 calculated: `SourceTerm.clean` and `HitEfficiency.clean` dry-run the
