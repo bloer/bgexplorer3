@@ -137,6 +137,17 @@ class CollectionViews(flask.Blueprint):
     # them with `loads`
     DEFERRED_FIELDS = ('attachments__data', 'spectra')
 
+    # fields excluded from the overview queryset because the overview table
+    # doesn't display them (defined once here, applied in overview())
+    OVERVIEW_EXCLUDE = {
+        'component': (
+            'spec_entries', 'history', 'extra_metadata',
+            'material_purchaseinfo', 'inner_surface_area',
+            'outer_surface_area', 'volume', 'length', 'width',
+            'height', 'location', 'comment',
+        ),
+    }
+
     def __init__(self, doc_cls, **kwargs):
         self.doc_cls = doc_cls
         self.clsname = doc_cls.__name__.lower()
@@ -270,6 +281,9 @@ class CollectionViews(flask.Blueprint):
             if (self.clsname == 'emissionspec' and
                     not flask.request.args.get('owned')):
                 data = data(owner=None)
+            skip = self.OVERVIEW_EXCLUDE.get(self.clsname)
+            if skip:
+                data = data.exclude(*skip)
             return flask.render_template(f'overview_{self.clsname}.html',
                                          cls=self.doc_cls, data=data)
 
@@ -422,6 +436,33 @@ class CollectionViews(flask.Blueprint):
             copy.save()
             flask.flash(f"Created {copy} as a copy of {original}", 'success')
             return flask.redirect(flask.url_for('.edit', object=copy))
+
+        @self.post('/bulk/delete')
+        def bulk_delete():
+            check_writable(flask.g.active_version)
+            ids = flask.request.json.get('ids', [])
+            for objid in ids:
+                try:
+                    self.queryset.get_or_404(objid).delete()
+                except Exception:
+                    pass
+            return flask.jsonify(deleted=len(ids))
+
+        @self.post('/bulk/clone')
+        @self.loads(*self.deferred_fields)
+        def bulk_clone():
+            check_writable(flask.g.active_version)
+            ids = flask.request.json.get('ids', [])
+            for objid in ids:
+                try:
+                    obj = self.queryset.get_or_404(objid)
+                    copy = obj.clone()
+                    if hasattr(copy, 'name'):
+                        copy.name = f"{obj.name} (copy)"
+                    copy.save()
+                except Exception:
+                    pass
+            return flask.jsonify(cloned=len(ids))
 
         @self.route('/import', methods=['GET', 'POST'])
         def import_():
