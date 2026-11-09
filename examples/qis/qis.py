@@ -4,7 +4,7 @@ from bgexplorer.models.assay import Assay, PublicationInfo, SampleInfo, Measurem
 from bgexplorer.models.settings import get_settings, HitEffConfig
 from bgexplorer.models.versioncontrol import create_version, delete_version
 from bgexplorer.models.hiteff import HitEfficiency
-from bgexplorer.models.sourceterm import CalculatedResults, find_sourceterms
+from bgexplorer.models.sourceterm import find_sourceterms
 from pathlib import Path
 import importlib.resources
 import os
@@ -232,29 +232,6 @@ def populate_example(version_tag='examples-qis', clean: bool = False,
     total = Assembly(name='total', version_tag=version_tag,
                      components=[internals, shield]+list(Component.objects(name='Environment')),
                      ).save()
-    log.debug("Calculating results")
-    result = CalculatedResults.for_component(total, save=True)
-
-    if print_results:
-        # everything is relative to 'total'
-        total = Assembly.select_version(version_tag).get(name='total')
-        # print header
-        scalars_cfg = settings.hiteffdbconfig.display_scalars
-        print('#'*70)
-        print('Component', end='')
-        for name, cfg in scalars_cfg.items():
-            print('\t', name, ' (',cfg.display_unit, ')', sep='', end='')
-        print('\n', '-'*70, sep='')
-        for component in Component.select_version(version_tag):
-            sourceterms = find_sourceterms(component, relativeto=total)
-            result = CalculatedResults.for_component(component, relativeto=total)
-            if result is not None:
-                vals = ['{:.3g}'.format(result.scalars[k].to(cfg.display_unit).m)
-                        for k, cfg in scalars_cfg.items()]
-            else:
-                vals = ['' for _ in scalars_cfg]
-            print('\t'.join([component.name] + vals))
-
 
 
 
