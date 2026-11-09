@@ -57,7 +57,8 @@
             // update all the first-child links to set the value
             var cell = caller.parentNode;
             var input = cell.querySelector("input");
-            var links = table.querySelectorAll("tbody tr td:first-child a");
+            // the name link is the first link in each row; a leading checkbox column may precede it
+            var links = Array.from(table.querySelectorAll("tbody tr")).map(row => row.querySelector("td a")).filter(Boolean);
             links.forEach(link => {
                 link.onclick = function(){
                     event.preventDefault();
