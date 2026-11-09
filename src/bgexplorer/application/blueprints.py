@@ -137,14 +137,13 @@ class CollectionViews(flask.Blueprint):
     # them with `loads`
     DEFERRED_FIELDS = ('attachments__data', 'spectra')
 
-    # fields excluded from the overview queryset because the overview table
-    # doesn't display them (defined once here, applied in overview())
-    OVERVIEW_EXCLUDE = {
+    # fields to load for the overview table — only what the template renders
+    # (defined once here; new model fields are excluded automatically)
+    OVERVIEW_FIELDS = {
         'component': (
-            'spec_entries', 'history', 'extra_metadata',
-            'material_purchaseinfo', 'inner_surface_area',
-            'outer_surface_area', 'volume', 'length', 'width',
-            'height', 'location', 'comment',
+            'name', 'hierarchy_level', 'description', 'material',
+            'mass', 'confidence_rating', 'purchaseinfo', 'modified',
+            'original_id', 'version_tags',
         ),
     }
 
@@ -281,9 +280,9 @@ class CollectionViews(flask.Blueprint):
             if (self.clsname == 'emissionspec' and
                     not flask.request.args.get('owned')):
                 data = data(owner=None)
-            skip = self.OVERVIEW_EXCLUDE.get(self.clsname)
-            if skip:
-                data = data.exclude(*skip)
+            fields = self.OVERVIEW_FIELDS.get(self.clsname)
+            if fields:
+                data = data.only(*fields)
             return flask.render_template(f'overview_{self.clsname}.html',
                                          cls=self.doc_cls, data=data)
 
