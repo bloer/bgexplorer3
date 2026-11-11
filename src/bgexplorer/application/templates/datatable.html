@@ -66,11 +66,13 @@
             location.reload();
         });
         document.getElementById('bulk-export').addEventListener('click', function() {
+            var table = document.querySelector('table.datatable');
+            var headers = Array.from(table.querySelectorAll('thead th')).slice(1).map(function(th) { return '"' + th.textContent.trim().replace(/"/g, '""') + '"'; }).join(',');
             var rows = Array.from(document.querySelectorAll('.row-select')).filter(function(cb) { return _selected.has(cb.value); }).map(function(cb) {
                 return Array.from(cb.closest('tr').querySelectorAll('td')).slice(1).map(function(td) { return '"' + td.textContent.trim().replace(/"/g, '""') + '"'; }).join(',');
             });
             var a = document.createElement('a');
-            a.href = URL.createObjectURL(new Blob([rows.join('\n')], {type: 'text/csv'}));
+            a.href = URL.createObjectURL(new Blob([[headers].concat(rows).join('\n')], {type: 'text/csv'}));
             a.download = 'export.csv';
             a.click();
         });
