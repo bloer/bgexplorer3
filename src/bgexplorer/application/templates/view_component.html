@@ -16,12 +16,19 @@
         </a>
         <a class="nav-link" href="{{ url_for('.get_json', object=g.object) }}">Export</a>
         {% if can_edit %}
-        <form method="POST" action="{{ url_for('.clone', object=g.object) }}" id="cloneform" class="d-inline">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-outline-success me-1" title="Create a copy of this {{ clsname }}, sharing its references">Clone</button>
-        </form>
-        <a class="btn btn-outline-danger me-1" id="deletelink" href="{{ url_for('.delete', object=g.object) }}">Delete</a>
-        <a class="btn btn-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a>
+        <div class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 9 9" fill="currentColor"><circle cx="1.5" cy="1.5" r="1"/><circle cx="4.5" cy="1.5" r="1"/><circle cx="7.5" cy="1.5" r="1"/><circle cx="1.5" cy="4.5" r="1"/><circle cx="4.5" cy="4.5" r="1"/><circle cx="7.5" cy="4.5" r="1"/><circle cx="1.5" cy="7.5" r="1"/><circle cx="4.5" cy="7.5" r="1"/><circle cx="7.5" cy="7.5" r="1"/></svg></a>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ url_for('.edit', object=g.object) }}">Edit</a></li>
+                <li>
+                    <form method="POST" action="{{ url_for('.clone', object=g.object) }}" id="cloneform">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="dropdown-item">Clone</button>
+                    </form>
+                </li>
+                <li><a class="dropdown-item text-danger" id="deletelink" href="{{ url_for('.delete', object=g.object) }}">Delete</a></li>
+            </ul>
+        </div>
         {% endif %}
     </div>
 </div>
