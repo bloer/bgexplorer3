@@ -17,6 +17,7 @@
 
 {%- macro print_sourceterm(sourceterm, activecomponent=none) -%}
     <tr class="sourceterm" data-id="{{ sourceterm.id }}" data-original_id="{{ sourceterm.original_id }}">
+        <td><input type="checkbox" class="row-select" value="{{ sourceterm.original_id }}"></td>
         <td>{{ print_assemblypath(sourceterm, activecomponent=activecomponent) }}</td>
         <td>{% if sourceterm.spec %}<a href="{{ url_for('emissionspec.view', object=sourceterm.spec) }}">{{ sourceterm.spec.name }}</a>{%- endif -%}</td>
         <td>{{ sourceterm.source.name }}: {{ sourceterm.source.rate | printquantity }}</td>
@@ -32,7 +33,7 @@
 {%- macro print_sourceterms(sourceterms, activecomponent=none) -%}
 {% set headers = ['Assembly Path', 'Emission spec', 'Source', 'Emission rate',
                   'Location', 'Hit Efficiencies'] %}
-{% call datatable.render(headers) %}
+{% call datatable.render(headers, bulk=true) %}
     {% for sourceterm in sourceterms %}
     {{ print_sourceterm(sourceterm, activecomponent=activecomponent) }}
     {% endfor %}

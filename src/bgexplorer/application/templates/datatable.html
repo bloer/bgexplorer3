@@ -34,7 +34,7 @@
         var _base = window.location.pathname.replace(/\/$/, '');
         var _selected = new Set();
         function _updateBar() {
-            _bar.classList.toggle('d-none', !_selected.size);
+            _bar.style.visibility = _selected.size ? 'visible' : 'hidden';
             document.getElementById('bulk-count').textContent = _selected.size + ' selected';
         }
         document.addEventListener('change', function(e) {
@@ -98,7 +98,7 @@
         </div>
     </div>
 </div>
-<div id="bulk-bar" class="mb-2 d-none">
+<div id="bulk-bar" class="mb-2" style="visibility: hidden">
     <button id="bulk-clone" class="btn btn-secondary btn-sm">Clone selected</button>
     <button id="bulk-delete" class="btn btn-danger btn-sm">Delete selected</button>
     <button id="bulk-export" class="btn btn-outline-secondary btn-sm">Export CSV</button>

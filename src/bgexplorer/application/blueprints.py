@@ -3,7 +3,7 @@ import mongoengine as me
 from bson import ObjectId
 from bson.errors import InvalidId
 from io import BytesIO
-from ..models.sourceterm import find_sourceterms
+from ..models.sourceterm import find_sourceterms, SourceTerm
 from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
                              spectrum_breakdown, spectrum_names,
                              cached_filtered,
@@ -576,6 +576,31 @@ class CollectionViews(flask.Blueprint):
             sourceterms = find_sourceterms(flask.g.object)
             return flask.render_template('view_sourceterms.html',
                                          sourceterms=sourceterms)
+
+        @self.post('/<objid>/sourceterms/bulk/delete')
+        def sourceterms_bulk_delete():
+            check_writable(flask.g.active_version)
+            ids = flask.request.json.get('ids', [])
+            qs = SourceTerm.select_version(flask.g.active_version)
+            for stid in ids:
+                try:
+                    get_or_404(qs, stid).delete()
+                except Exception:
+                    pass
+            return flask.jsonify(deleted=len(ids))
+
+        @self.post('/<objid>/sourceterms/bulk/clone')
+        def sourceterms_bulk_clone():
+            check_writable(flask.g.active_version)
+            ids = flask.request.json.get('ids', [])
+            qs = SourceTerm.select_version(flask.g.active_version)
+            for stid in ids:
+                try:
+                    copy = get_or_404(qs, stid).clone()
+                    copy.save()
+                except Exception:
+                    pass
+            return flask.jsonify(cloned=len(ids))
 
     def _create_plot_endpoints(self):
         """ Data for the spectra and budget plots of a Component """
