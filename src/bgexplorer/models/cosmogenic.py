@@ -31,7 +31,7 @@ class CosmogenicIsotope(EmbeddedDocument):
         """ Mean lifetime of the isotope """
         return get_tau(self.isotope)
 
-    def activity(self, periods) -> units.Quantity:
+    def activity(self, periods, count_time=None) -> units.Quantity:
         """ Specific activity at the end of the ActivationPeriods `periods`,
         starting from none
         """
@@ -41,6 +41,9 @@ class CosmogenicIsotope(EmbeddedDocument):
             # what was there decays, and builds up towards the rate
             activity = (activity * (1 - decayed) +
                         self.activationrate * period.factor * decayed)
+        if count_time is not None and count_time > 0:
+            activity = (activity * decayed_fraction(count_time, self.tau) *
+                        self.tau / count_time)
         return activity.to('Bq/kg')
 
     def __str__(self):
@@ -92,6 +95,8 @@ class CosmogenicActivation(EmissionSpec):
     material = VersionedReferenceField(ActivatedMaterial, required=True,
                                        endpoint='activatedmaterial')
     periods = EmbeddedDocumentListField(ActivationPeriod)
+    count_time = QuantityField(required=False, units='year',
+                               help_text="Over what duration to average the rate")
 
     def __init__(self, *args, **kwargs):
         kwargs.setdefault('category', SourceCategory.activation)
@@ -110,7 +115,7 @@ class CosmogenicActivation(EmissionSpec):
             sources = [EmissionSource(name=iso.isotope,
                                       category=SourceCategory.activation,
                                       multiplier=self.multiplier,
-                                      rate=iso.activity(self.periods),
+                                      rate=iso.activity(self.periods, self.count_time),
                                       comment=comment)
                        for iso in self.material.isotopes]
         self._set_computed_sources(sources)
