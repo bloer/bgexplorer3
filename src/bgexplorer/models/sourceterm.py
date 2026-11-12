@@ -83,7 +83,7 @@ class SourceTerm(VersionedDocument):
     @cached_property
     def emissionrate(self):
         return (self.source.standardized_rate * self.weight
-                * self.rate_multiplier)
+                * self.rate_multiplier).to(self.source.multiplier.norm.units)
 
 
     def group_keys(self) -> dict:

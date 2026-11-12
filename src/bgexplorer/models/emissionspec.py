@@ -99,15 +99,15 @@ class Multiplier(Enum):
 
 
 _VALID_UNITS = {
-    Multiplier.mass: units.Unit('Bq/kg'),
+    Multiplier.mass: units.Unit('mBq/kg'),
     Multiplier.volume: units.Unit('Bq/m**3'),
-    Multiplier.surface: units.Unit('Bq/m**2'),
-    Multiplier.inner_surface: units.Unit('Bq/m**2'),
-    Multiplier.outer_surface: units.Unit('Bq/m**2'),
+    Multiplier.surface: units.Unit('mBq/cm**2'),
+    Multiplier.inner_surface: units.Unit('mBq/cm**2'),
+    Multiplier.outer_surface: units.Unit('mBq/cm**2'),
     Multiplier.length: units.Unit('Bq/m'),
     Multiplier.flux: units.Unit('1/cm**2/s'),
     Multiplier.flux_per_sr: units.Unit('1/cm**2/s/sr'),
-    Multiplier.per_piece: units.Unit('Bq'),
+    Multiplier.per_piece: units.Unit('mBq'),
     # a scale factor for an absolutely normalized hit efficiency
     Multiplier.absolute: units.Unit(''),
 }
@@ -147,6 +147,13 @@ class EmissionSource(EmbeddedDocument):
         are a radioactive isotope
         """
         return is_radioactive(self.name)
+
+    @property
+    def is_mass(self) -> bool:
+        """ Is the rate entered as a mass or concentration of 
+        radioactive isotopes?
+        """
+        return not self.multiplier.accepts(self.rate, allow_mass_to_rate=False)
 
     @property
     def standardized_rate(self) -> units.Quantity:
@@ -261,18 +268,15 @@ class EmissionSpec(VersionedDocument):
         matchout.category = matchin.category
         matchout.multiplier = matchin.multiplier
         rate = matchin.rate * newsource.ratio
-        rate_is_concentration = (units('ppb').check(matchin.rate) or
-                                 units('g').check(matchin.rate))
-        if (rate_is_concentration and
+        if (matchin.is_mass and
                 newsource.ratiotype is settings.RatioType.rate):
             rate = concentration_to_rate(matchin.name, matchin.rate)
-            rate = rate_to_concentration(matchout.name,
-                                         rate * newsource.ratio)
-        elif (not rate_is_concentration and
+            rate = (rate * newsource.ratio).to(matchout.multiplier.valid_units)
+        elif (not matchin.is_mass and
               newsource.ratiotype is settings.RatioType.abundance):
             rate = rate_to_concentration(matchin.name, matchin.rate)
             rate = concentration_to_rate(matchout.name, rate * newsource.ratio)
-        matchout.rate = rate.to(matchin.rate.u)
+        matchout.rate = rate
 
         if doinsert:
             self.sources.append(matchout)
