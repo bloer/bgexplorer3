@@ -172,6 +172,36 @@ class TestDashboard(AppTestCase):
         self.assertAlmostEqual(
             categories[NO_CATEGORY]['value'].m.nominal_value, 0.5)
 
+    def test_spec_and_hiteff_relative_to_component(self):
+        # an EmissionSpec's terms below a2 are drawn by a2's placements
+        result = dashboard(self.e1, 'v1', relativeto=self.a2)
+        self.assertEqual(result['count'], 3)
+        self.assertEqual(result['breadcrumb'], [((), 'a2')])
+        self.assertSame(result['total'], self.total(self.e1, self.a2))
+        rows = result['charts']['component']
+        self.assertEqual(self.labels(rows), [('a1', 0), ('c1', 1),
+                                             ('c2 label', 1)])
+        # the root can be a placement below a2
+        result = dashboard(self.e1, 'v1',
+                           BudgetFilter(root=[self.p_a1]), self.a2)
+        self.assertEqual(result['breadcrumb'],
+                         [((), 'a2'), ((self.p_a1,), 'a1')])
+        self.assertEqual(self.labels(result['charts']['component']),
+                         [('c1', 0), ('c2 label', 0)])
+        # a HitEfficiency's, with the same scalars, and in the table
+        he = HitEfficiency.objects(source='Th232', location='c3').first()
+        result = dashboard(he, 'v1', relativeto=self.a2)
+        self.assertEqual(result['count'], 1)
+        self.assertEqual(self.labels(result['charts']['component']),
+                         [('c3', 0)])
+        self.assertEqual(table(he, relativeto=self.a2)['ntotal'], 1)
+        # cached results are kept apart by object and component
+        self.assertEqual(dashboard(self.e1, 'v1', relativeto=self.a1)['count'], 3)
+        self.assertEqual(dashboard(self.e2, 'v1', relativeto=self.a2)['count'], 1)
+        # with nothing to be relative to, there is nothing to draw
+        with self.assertRaises(ValueError):
+            dashboard(self.e1, 'v1')
+
     def test_filtered(self):
         f = BudgetFilter(dict(material=[('copper', False)]))
         result = dashboard(self.a2, 'v1', f)

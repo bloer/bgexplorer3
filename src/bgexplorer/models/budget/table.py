@@ -45,7 +45,7 @@ def table(obj: Component, filters: Optional[BudgetFilter] = None,
     shared, so must not be modified. Raises ValueError for an unknown root,
     and UnitMismatchError if saved data has units that don't fit together.
     """
-    chart_root, breadcrumb = resolve_root(obj, filters.root)
+    chart_root, breadcrumb = resolve_root(obj, filters.root, relativeto)
     tt = term_table(obj, relativeto)
     version = obj.active_version
     config = get_settings(version).hiteffdbconfig

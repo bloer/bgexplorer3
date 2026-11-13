@@ -39,6 +39,19 @@ def available_scalars(version: str) -> List[str]:
     return [n for n in dict.fromkeys(names) if n not in hidden]
 
 
+def budget_root(obj, relativeto: Optional[Assembly] = None) -> Component:
+    """ The component whose placements a breakdown of `obj` is drawn from: a
+    Component's own, or for other objects (EmissionSpecs, HitEfficiencies), the
+    component their SourceTerms are `relativeto`
+    """
+    if isinstance(obj, Component):
+        return obj
+    if relativeto is None:
+        raise ValueError(f"Results for a {type(obj).__name__} need a "
+                         "component to be relative to")
+    return relativeto
+
+
 def _component_path(placement_ids, child_ids: set) -> Tuple[str, ...]:
     """ The placement ids (as strings) in a SourceTerm's path below the object
     whose children's placement ids are `child_ids`. Empty for the object's own
@@ -137,7 +150,8 @@ def term_table(obj: Component, relativeto: Optional[Assembly] = None,
         else:
             records = _scalar_records(query, config, version,
                                       get_calc_token(version))
-        child_ids = {str(p.id) for p in getattr(obj, 'children', None) or []}
+        root = budget_root(obj, relativeto)
+        child_ids = {str(p.id) for p in getattr(root, 'children', None) or []}
         return TermTable(records,
                          lambda path: _component_path(path, child_ids))
     key = _cache_key(obj, 'spectra' if spectra else 'terms', _ref_id(obj),
