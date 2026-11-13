@@ -2,9 +2,11 @@
 for every object without errors
 """
 import os
+import re
 import unittest
 import flask
 import mongoengine
+from bson import ObjectId
 from io import BytesIO
 from html import unescape
 from bgexplorer.application.app import create_app
@@ -190,6 +192,83 @@ class TestAppSmall(AppSmokeTest, unittest.TestCase):
             flask.g.active_version = self.version
             url = flask.url_for('hitefficiency.get_json', object=hiteff)
         self.assertIn('s1', self.client.get(url).get_json()['spectra'])
+
+    def relativeto_url(self, endpoint, obj, **values):
+        with self.app.test_request_context():
+            flask.g.active_version = self.version
+            return flask.url_for(endpoint, object=obj, **values)
+
+    def test5_relativeto(self):
+        """ the component that results are relative to is chosen, shown and
+        kept in links
+        """
+        get = lambda name: Component.select_version(self.version).get(name=name)
+        e1 = EmissionSpec.select_version(self.version).get(name='e1')
+        hiteff = HitEfficiency.select_version(self.version).get(source='Th232')
+        a1, a2, c1 = get('a1'), get('a2'), get('c1')
+
+        # the picker lists every level that has the spec, roots first
+        url = self.relativeto_url('emissionspec.choose_relativeto', e1)
+        html = self.client.get(url).get_data(as_text=True)
+        rows = re.findall(r'<td><a href="[^"]*relativeto=(\w+)[^"]*">([^<]*)</a>',
+                          html)
+        self.assertEqual([name for _, name in rows], ['a2', 'a1', 'c1', 'c2'])
+        self.assertEqual(rows[0][0], str(a2.original_id))
+        # layers with no hit efficiencies are marked, and can be hidden
+        self.assertEqual(html.count('no hit efficiencies</span>'),
+                         html.count('<tr class="text-secondary">'))
+        self.assertGreater(html.count('<tr class="text-secondary">'), 0)
+        url = self.relativeto_url('emissionspec.choose_relativeto', e1,
+                                  hide_empty=1)
+        shown = self.client.get(url).get_data(as_text=True)
+        self.assertNotIn('<tr class="text-secondary">', shown)
+        self.assertIn('>a1</a>', shown)
+        self.assertNotIn('>c2</a>', shown)
+        # only those with hit efficiencies for the hit efficiency
+        url = self.relativeto_url('hitefficiency.choose_relativeto', hiteff,
+                                  next='sourceterms')
+        html = self.client.get(url).get_data(as_text=True)
+        self.assertIn(self.relativeto_url('hitefficiency.sourceterms', hiteff,
+                                          relativeto=a1), unescape(html))
+        # the page the picker goes on to is limited
+        self.assertEqual(self.client.get(self.relativeto_url(
+            'emissionspec.choose_relativeto', e1, next='edit')).status_code,
+            400)
+
+        # results need a component to be relative to
+        url = self.relativeto_url('emissionspec.results', e1)
+        html = self.client.get(url).get_data(as_text=True)
+        self.assertIn('relativeto-choices', html)
+        self.assertNotIn('Showing results relative to', html)
+        self.assertEqual(self.client.get(self.relativeto_url(
+            'emissionspec.dashboard_json', e1)).status_code, 400)
+
+        # and show them when chosen, in links that keep it
+        url = self.relativeto_url('emissionspec.results', e1, relativeto=a1)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        html = unescape(response.get_data(as_text=True))
+        self.assertIn('Showing results relative to', html)
+        self.assertIn(self.relativeto_url('emissionspec.sourceterms', e1,
+                                          relativeto=a1), html)
+        self.assertNotIn(self.relativeto_url('emissionspec.sourceterms', e1)
+                         + '"', html)
+        url = self.relativeto_url('emissionspec.dashboard_json', e1,
+                                  relativeto=a1)
+        self.assertEqual(self.client.get(url).get_json()['ntotal'], 2)
+        # the clear link doesn't keep it
+        self.assertIn(self.relativeto_url('emissionspec.results', e1,
+                                          relativeto=None), html)
+        # it follows to the spec's component pages too
+        html = unescape(self.client.get(self.relativeto_url(
+            'component.sourceterms', c1, relativeto=a2)).get_data(as_text=True))
+        self.assertIn(self.relativeto_url('component.results', c1,
+                                          relativeto=a2), html)
+        # but not to other versions, which may not have it
+        self.assertEqual(self.client.get(self.relativeto_url(
+            'component.view', c1, relativeto='nonsense')).status_code, 404)
+        self.assertEqual(self.client.get(self.relativeto_url(
+            'component.view', c1, relativeto=str(ObjectId()))).status_code, 404)
 
     @classmethod
     def populate(cls):

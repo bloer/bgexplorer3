@@ -46,7 +46,7 @@
     <span>
     {%- if relativeto -%}
         Showing results relative to
-        <a href="{{ url_for('component.view', object=relativeto) }}"><strong>{{ relativeto.name }}</strong></a>.
+        <a href="{{ url_for('component.view', object=relativeto, relativeto=none) }}"><strong>{{ relativeto.name }}</strong></a>.
     {%- else -%}
         Showing results for all components.
     {%- endif %}
