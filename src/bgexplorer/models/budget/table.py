@@ -1,4 +1,4 @@
-""" The contributions table: every displayed scalar for each placement """
+""" The contributions table: every displayed scalar and ROI for each placement """
 from collections import defaultdict
 from typing import List, Optional, Tuple
 import numpy as np
@@ -11,12 +11,20 @@ from .terms import term_table
 
 
 def table_columns(version: str) -> List[Tuple[str, str]]:
-    """ (scalar, display name) for each scalar configured to be displayed
-    in `version`'s contributions table
+    """ (key, display name) for each scalar, then each ROI, configured to be
+    displayed in `version`'s contributions table. A scalar replaces an ROI
+    with the same key.
     """
-    config = get_settings(version).hiteffdbconfig.display_scalars
-    return [(key, entry.display_name or key)
-            for key, entry in config.items() if not entry.hide]
+    config = get_settings(version).hiteffdbconfig
+    columns = {key: entry.display_name or key
+               for key, entry in config.display_scalars.items()
+               if not entry.hide}
+    hidden = {key for key, entry in config.display_scalars.items()
+              if entry.hide}
+    for roi in config.rois:
+        if not roi.hide and roi.key not in hidden:
+            columns.setdefault(roi.key, roi.key)
+    return list(columns.items())
 
 
 @filtered_cached
@@ -24,7 +32,7 @@ def table(obj: Component, filters: Optional[BudgetFilter] = None,
           relativeto: Optional[Assembly] = None,
           depth: int = COMPONENT_DEPTH) -> dict:
     """ The contributions table of `obj` (optionally only as placed in
-    `relativeto`): the sums of each displayed scalar for the SourceTerms
+    `relativeto`): the sums of each displayed scalar and ROI for the SourceTerms
     passing all of `filters`, for the component at `filters.root` and its
     placements down to `depth` levels below it.
 

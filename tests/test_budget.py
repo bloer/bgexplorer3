@@ -1,6 +1,9 @@
 """ Filtered budget breakdowns for the results dashboard """
 import unittest
 from unittest import mock
+import numpy as np
+from bgexplorer.models.asymmetric import AsymmetricUncertainty
+from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.budget import (BudgetFilter, dashboard, table,
                                       term_table)
 from bgexplorer.models.component import Component, Assembly, Placement
@@ -12,7 +15,8 @@ from bgexplorer.models.sourceterm import (SourceTerm, clear_results_cache,
 from bgexplorer.models.common import (DimensionalityError, UnitMismatchError,
                                       units as unitreg)
 from bgexplorer.models.hiteff import HitEfficiency
-from bgexplorer.models.settings import get_settings, HitEffConfig
+from bgexplorer.models.settings import (get_settings, HitEffConfig,
+                                        SpectrumROI)
 from bgexplorer.models.sourceterm import find_sourceterms
 from bgexplorer.versioning import control as vc
 from tests import results
@@ -523,6 +527,48 @@ class TestDashboard(AppTestCase):
             table(self.a2, BudgetFilter(root=['nope']))
         # a plain component is a single row
         self.assertEqual(self.labels(table(self.c1)['rows']), [('c1', 0)])
+
+    def test_table_rois(self):
+        # a flat 1 dru/mBq/keV spectrum, so the 0-5 keV ROI is 5 dru/mBq
+        for hiteff in HitEfficiency.select_version('main'):
+            hiteff.spectra['s1'] = Histogram(
+                AsymmetricUncertainty(np.ones(10), np.zeros(10))
+                * unitreg('dru/mBq/keV'), np.arange(11) * unitreg.keV)
+            hiteff.save()
+        settings = get_settings('main')
+        settings.hiteffdbconfig.rois = [
+            SpectrumROI(spectrum='s1', start=0 * unitreg.keV,
+                        stop=5 * unitreg.keV, mode='integrate',
+                        display_name='low', display_unit='dru'),
+            SpectrumROI(spectrum='s1', start=5 * unitreg.keV,
+                        stop=10 * unitreg.keV, mode='integrate',
+                        display_name='high', display_unit='dru', hide=True),
+            SpectrumROI(spectrum='s1', start=0 * unitreg.keV,
+                        stop=10 * unitreg.keV, mode='integrate',
+                        display_name='v1', display_unit='dru')]
+        settings.save()
+        self.show_columns()
+        result = table(self.a2)
+        # ROIs follow the scalars; a hidden ROI is left out, and a scalar
+        # replaces an ROI with its key
+        self.assertEqual([(c['key'], c['name'], str(c['units']))
+                          for c in result['columns']],
+                         [('v1', 'Value', 'mdru'), ('low', 'low', 'dru')])
+        # c3: 1 mBq/kg x 1 kg x 5 dru/mBq
+        c3 = result['rows'][4]
+        self.assertEqual(c3['label'], 'c3')
+        self.assertAlmostEqual(c3['values']['low'].to('dru').m.nominal_value,
+                               5.)
+        # ROIs are filtered like scalars
+        result = table(self.a2, BudgetFilter(dict(
+            component=[((self.p_c3,), False)])))
+        self.assertEqual([row['values']['low'] is None
+                          for row in result['rows']],
+                         [False, True, True, True, False])
+        page = self.html(self.client.get(self.url('component.results',
+                                                  object=self.a2)))
+        self.assertIn('<th>low [dru]</th>', page)
+        self.assertNotIn('<th>high', page)
 
     def test_table_html(self):
         self.show_columns()
