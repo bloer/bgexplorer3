@@ -1,0 +1,40 @@
+{% extends "view_"~clsname~".html" %}
+{% set activepage = target %}
+{% import "utils.html" as utils %}
+
+{% block title %}Choose a component - Background Explorer{% endblock %}
+
+{% block pagecontent %}
+{{ utils.relativeto_banner(g.object, g.get('relativeto'), target) }}
+<div class="row mb-3">
+    <div class="col">
+        <h3>Show relative to</h3>
+        <p>The components that contain
+        {{ g.object.name if g.object.name is defined else g.object|string }},
+        at any level. Results are for the part of each that is inside it.</p>
+        {% if hide_empty %}
+        <a class="btn btn-sm btn-outline-secondary mb-2" href="{{ url_for('.choose_relativeto', object=g.object, next=target) }}">Show components without hit efficiencies</a>
+        {% else %}
+        <a class="btn btn-sm btn-outline-secondary mb-2" href="{{ url_for('.choose_relativeto', object=g.object, next=target, hide_empty=1) }}">Hide components without hit efficiencies</a>
+        {% endif %}
+        {% if choices %}
+        <table class="table table-sm table-hover w-auto" id="relativeto-choices">
+            <thead><tr><th>Component</th><th>Level</th><th>Source terms</th><th>With hit efficiencies</th></tr></thead>
+            <tbody>
+            {% for row in choices %}
+            <tr {% if not row.nhiteffs %}class="text-secondary"{% endif %}>
+                <td><a href="{{ url_for('.'~target, object=g.object, relativeto=row.component) }}">{{ row.component.name }}</a></td>
+                <td>{{ row.component.hierarchy_level }}</td>
+                <td>{{ row.nterms }}</td>
+                <td>{{ row.nhiteffs }}
+                    {%- if not row.nhiteffs %} <span class="badge text-bg-secondary">no hit efficiencies</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-secondary">No components in {{ g.active_version }} have source terms for this{% if hide_empty %} with hit efficiencies{% endif %}.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

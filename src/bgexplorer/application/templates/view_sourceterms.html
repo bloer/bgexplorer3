@@ -5,6 +5,9 @@
 {% import "datatable.html" as datatable %}
 
 {% block pagecontent %}
+{% if clsname in ('component', 'emissionspec', 'hitefficiency') %}
+{{ utils.relativeto_banner(g.object, g.get('relativeto'), 'sourceterms') }}
+{% endif %}
 {{ utils.print_sourceterms(sourceterms, activecomponent=g.object) }}
 {% endblock %}
 

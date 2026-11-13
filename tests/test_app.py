@@ -36,7 +36,11 @@ KNOWN_BROKEN = set()
 # endpoints whose GET doesn't return 200 with the test fixtures
 EXPECTED_STATUS = {'admin.logo': 404,  # no logo is set
                    'auth.setup': 404,  # logins are disabled
-                   'api.plan_merge': 400}  # needs a source version
+                   'api.plan_merge': 400,  # needs a source version
+                   # results of these need a component to be relative to
+                   **{f'{bp}.{ep}': 400 for bp in ('emissionspec', 'hitefficiency')
+                      for ep in ('results_table', 'dashboard_json',
+                                 'spectrum_json')}}
 
 
 def reset_database():

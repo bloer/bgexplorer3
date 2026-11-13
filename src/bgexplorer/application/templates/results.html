@@ -1,6 +1,8 @@
-{% extends "view_component.html" %}
+{% extends "view_"~clsname~".html" %}
 {% set activepage = "results" %}
-{% block title %}Results: {{ g.object.name }} - Background Explorer{% endblock %}
+{% set title = g.object.name if g.object.name is defined else g.object|string %}
+{% import "utils.html" as utils %}
+{% block title %}Results: {{ title }} - Background Explorer{% endblock %}
 {% block pagestyle %}
 <style>
 {% for depth in range(10) %}
@@ -11,6 +13,7 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 
 
 {% block pagecontent %}
+{{ utils.relativeto_banner(g.object, g.get('relativeto'), 'results') }}
 <div class="row mb-3">
     <div class="col">
         <h3>Background Contributions</h3>
@@ -23,8 +26,8 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 <div class="row mb-3">
     <div class="col">
         <h3>Budget</h3>
-        <p>Contributions to the background of {{ g.object.name }}
-        {%- if g.relativeto is defined %} as placed in {{ g.relativeto.name }}{% endif %},
+        <p>Contributions to the background of {{ title }}
+        {%- if g.relativeto is defined and g.relativeto != g.object %} as placed in {{ g.relativeto.name }}{% endif %},
         grouped by component, material, source isotope and source category. Values are
         shown as circles with 1&sigma; errors, and upper limits as triangles with a line
         ending at the 90% upper limit. The colour is the mean confidence rating of the
@@ -56,13 +59,13 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 {{ utils.plotscripts() }}
 <script>
 {%- if scalars %}
-const dashboard = bgplots.dashboard('budgetplot', {{ url_for('.dashboard_json', object=g.object, relativeto=g.get('relativeto')) | tojson }},
+const dashboard = bgplots.dashboard('budgetplot', {{ url_for('.dashboard_json', object=g.object) | tojson }},
     {{ ['component', 'material', 'isotope', 'category'] | tojson }}, {{ scalars | tojson }},
-    {table: {id: 'resultstable', url: {{ url_for('.results_table', object=g.object, relativeto=g.get('relativeto')) | tojson }}}});
+    {table: {id: 'resultstable', url: {{ url_for('.results_table', object=g.object) | tojson }}}});
 {%- else %}
 const dashboard = null;
 {%- endif %}
-bgplots.spectrumBreakdown('spectrumplot', {{ url_for('.spectrum_json', object=g.object, relativeto=g.get('relativeto')) | tojson }}, dashboard);
+bgplots.spectrumBreakdown('spectrumplot', {{ url_for('.spectrum_json', object=g.object) | tojson }}, dashboard);
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 {% endblock %}

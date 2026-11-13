@@ -41,6 +41,26 @@
 {%- endmacro -%}
 
 
+{%- macro relativeto_banner(obj, relativeto, target) -%}
+<div class="alert alert-info py-2 d-flex justify-content-between" id="relativeto-banner">
+    <span>
+    {%- if relativeto -%}
+        Showing results relative to
+        <a href="{{ url_for('component.view', object=relativeto) }}"><strong>{{ relativeto.name }}</strong></a>.
+    {%- else -%}
+        Showing results for all components.
+    {%- endif %}
+    </span>
+    <span>
+        <a href="{{ url_for('.choose_relativeto', object=obj, next=target, relativeto=none) }}">Change...</a>
+        {%- if relativeto %} &middot;
+        <a href="{{ url_for('.'~target, object=obj, relativeto=none) }}">Clear</a>
+        {%- endif %}
+    </span>
+</div>
+{%- endmacro -%}
+
+
 {# ~~~~~~~~~~~~~~~~~~~~~~~~~~ #}
 {%- macro descriptionlist(items, object=none) -%}
 <dl class="row">

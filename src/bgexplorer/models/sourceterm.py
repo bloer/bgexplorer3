@@ -9,7 +9,7 @@ from mongoengine import (ListField, EmbeddedDocumentField, FloatField,
                          StringField, BooleanField, MapField, Document,
                          SortedListField, CASCADE, PULL, ReferenceField,
                          EmbeddedDocumentListField, ObjectIdField,
-                         ValidationError, IntField)
+                         ValidationError, IntField, Q)
 from ..versioning.verdoc import (VersionedDocument, VersionedReferenceField,
                      VersionedQuerySet, VersionedListField,
                      VersionedEmbeddedDocumentListField)
@@ -261,6 +261,39 @@ def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource, HitEffi
     elif isinstance(obj, HitEfficiency):
         query = query(hiteffs=obj)
     return query
+
+
+def relativeto_choices(obj: Union[Component, EmissionSpec, HitEfficiency],
+                       active_version: Optional[str] = None) -> List[dict]:
+    """ The components that results for `obj` can be shown relative to: every
+    one that has SourceTerms for it, which are the component itself and each
+    assembly it is placed in at any depth (once however many times it is
+    placed), highest in the hierarchy first, then by name.
+
+    Each is dict(component, nterms, nhiteffs): the number of its SourceTerms
+    for `obj`, and of those the number that have any HitEfficiency, i.e. have
+    anything to show in results
+    """
+    active_version = active_version or obj.active_version
+    query = SourceTerm.select_version(active_version)
+    if isinstance(obj, Component):
+        query = query(Q(assemblyRoot=obj) | Q(assemblyPath__component=obj))
+    else:
+        query = find_sourceterms(obj, active_version=active_version)
+    counts = {doc['_id']: doc for doc in SourceTerm._get_collection().aggregate([
+        {'$match': query._query},
+        {'$group': {'_id': '$assemblyRoot', 'nterms': {'$sum': 1},
+                    'nhiteffs': {'$sum': {'$cond': [
+                        {'$gt': [{'$size': {'$ifNull': ['$hiteffs', []]}}, 0]},
+                        1, 0]}}}}])}
+    components = Component.select_version(active_version)(
+        original_id__in=list(counts)).exclude('attachments__data')
+    choices = [dict(component=component, nterms=counts[component.original_id]['nterms'],
+                    nhiteffs=counts[component.original_id]['nhiteffs'])
+               for component in components]
+    choices.sort(key=lambda c: (-c['component'].hierarchy_level,
+                                c['component'].name.lower()))
+    return choices
 
 
 class _Flight:
