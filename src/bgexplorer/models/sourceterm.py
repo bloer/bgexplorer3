@@ -93,8 +93,13 @@ class SourceTerm(VersionedDocument):
     # other than the HitEfficiencies' content, see `content_stamp`
     stamp = StringField()
 
-    meta = {'indexes': ['assemblyPath', 'source.id', 'hiteffs',
-                        'assemblyPath.component', 'placement_ids']}
+    # Terms are written constantly, so only index what is queried by value:
+    # assemblyRoot, spec and hiteffs by `find_sourceterms` and the reverse
+    # delete rules, assemblyPath.component by `find_sourceterms` and
+    # `delete_component`. The placement_ids are only matched by position
+    # (`placement_ids.N`), which an array index can't serve.
+    meta = {'indexes': ['assemblyRoot', 'spec', 'hiteffs',
+                        'assemblyPath.component']}
 
     @property
     def component(self):
