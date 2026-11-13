@@ -3,7 +3,7 @@ from bson.dbref import DBRef
 from .component import Component, Assembly
 from .emissionspec import EmissionSpec, Multiplier
 from .cosmogenic import ActivatedMaterial, CosmogenicActivation
-from .hiteff import HitEfficiency
+from .hiteff import HitEfficiency, store_rois
 from .sourceterm import (SourceTerm, find_sourceterms, sync_sourceterms,
                          placed_sourceterms, check_version_units)
 from ..versioning import hooks, archive
@@ -290,15 +290,8 @@ def _update_rois(version_tag: str) -> None:
     """ Evaluate the ROIs of the hit efficiencies in `version_tag` with its
     settings, and save those that changed
     """
-    rois = settings.get_settings(version_tag).hiteffdbconfig.rois
-    for hiteff in HitEfficiency.select_version(version_tag):
-        values = {roi.key: roi.evaluate(hiteff, store=False) for roi in rois}
-        try:
-            changed = values != dict(hiteff.rois)
-        except Exception:
-            changed = True
-        if changed:
-            hiteff.update(set__rois=values)
+    store_rois(version_tag, settings.get_settings(version_tag)
+               .hiteffdbconfig.rois)
 
 
 def _update_sourceterms(target: str, plan, rebuild_all: bool) -> None:

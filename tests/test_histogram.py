@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 import numpy as np
 from numpy.testing import assert_array_equal, assert_array_almost_equal
 from bgexplorer.models.histogram import Histogram
@@ -71,6 +72,50 @@ class TestHistogram(unittest.TestCase):
         self.assertAlmostEqual(h.integrate(0, 100), 60)
         self.assertAlmostEqual(h.average(), 2)
         self.assertAlmostEqual(h.average(20, 30), 2)
+
+    def test6b_integrate_plain_matches_generic(self):
+        """ The fast path for Quantities of AsymmetricUncertainty gives what
+        the generic code does, in values and units
+        """
+        rng = np.random.default_rng(3)
+        checked = 0
+        for trial in range(60):
+            n = int(rng.integers(3, 40))
+            edges = (np.sort(rng.uniform(0, 3000, n + 1)) if trial % 2
+                     else np.linspace(0, 3000, n + 1))
+            counts = (np.zeros(n) if trial % 5 == 0
+                      else rng.poisson(rng.uniform(0, 5), n).astype(float))
+            h = Histogram(AsymmetricUncertainty.fromcounts(counts)
+                          * units('dru/mBq'), edges * units.keV)
+            for i in range(8):
+                a, b = sorted(rng.uniform(-200, 3300, 2))
+                if i == 0:
+                    a = edges[int(rng.integers(0, n))]
+                if i == 1:
+                    b = edges[int(rng.integers(1, n + 1))]
+                if not a < b:
+                    continue
+                scale, unit = ((1, units.keV) if i % 2 else (1e-3, units.MeV))
+                a, b = a * scale * unit, b * scale * unit
+                for binwidth in (True, False):
+                    for method in ('integrate', 'average'):
+                        try:
+                            fast = getattr(h, method)(a, b, binwidth)
+                        except IndexError:
+                            # a range with nothing in the bins is an error
+                            # of the generic code too
+                            continue
+                        with mock.patch.object(
+                                Histogram, '_integrate_plain',
+                                return_value=None):
+                            generic = getattr(h, method)(a, b, binwidth)
+                        self.assertEqual(fast.u, generic.u)
+                        assert_array_almost_equal(
+                            [fast.m.mode, fast.m.s0, fast.m.s1],
+                            [generic.m.mode, generic.m.s0, generic.m.s1],
+                            decimal=9)
+                        checked += 1
+        self.assertGreater(checked, 1000)
 
     def test7_default_bins(self):
         h = Histogram(np.array([1., 2.]))

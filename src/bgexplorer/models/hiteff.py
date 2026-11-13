@@ -3,12 +3,14 @@ from mongoengine.fields import (StringField, MapField, UUIDField, ListField,
                                 EnumField, FloatField, DictField)
 from mongoengine.errors import ValidationError
 from mongoengine import signals
-from ..versioning.verdoc import DynamicVersionedDocument
+from pymongo import UpdateOne
+from ..versioning.verdoc import DynamicVersionedDocument, check_writable
 from .fields import QuantityField, UncertainQuantityField, HistogramField
 from .common import units as unitreg
 from .histogram import Histogram
 from . import settings
 from enum import Enum
+import datetime
 import logging
 log = logging.getLogger(__name__)
 
@@ -312,20 +314,25 @@ def _check_display_unit(version_tag: str, type_: str, key: str, cfg) -> None:
                 field_name=f"hiteffdbconfig.display_{type_}")
 
 
-def _check_roi_unit(version_tag: str, roi) -> None:
-    """ Raise ValidationError if `roi` can't be evaluated for, or has a
-    display unit that conflicts with, a HitEfficiency. If it has no display
-    unit, it is set from the HitEfficiencies
+def _check_rois(version_tag: str, rois) -> None:
+    """ Raise ValidationError if an ROI of `rois` can't be evaluated for, or
+    has a display unit that conflicts with, a HitEfficiency. If it has no
+    display unit, it is set from the HitEfficiencies. Each HitEfficiency is
+    loaded once, for all of the ROIs.
     """
+    if not rois:
+        return
+    spectra = [roi.link_spectrum for roi in rois]
     for he in HitEfficiency.select_version(version_tag)(
-            spectra_keys=roi.link_spectrum):
-        try:
-            result = roi.evaluate(he, store=False)
-        except ValidationError as e:
-            raise ValidationError(
-                str(e), field_name="hiteffdbconfig.rois") from e
-        if result is not None and roi.display_unit is None:
-            roi.display_unit = he.get_result_unit(result)
+            spectra_keys__in=spectra).no_cache():
+        for roi in rois:
+            try:
+                result = roi.evaluate(he, store=False)
+            except ValidationError as e:
+                raise ValidationError(
+                    str(e), field_name="hiteffdbconfig.rois") from e
+            if result is not None and roi.display_unit is None:
+                roi.display_unit = he.get_result_unit(result)
 
 
 def check_settings(version_settings) -> None:
@@ -337,18 +344,55 @@ def check_settings(version_settings) -> None:
         for type_ in ('scalars', 'spectra'):
             for key, cfg in getattr(config, f'display_{type_}').items():
                 _check_display_unit(tag, type_, key, cfg)
-        for roi in config.rois:
-            _check_roi_unit(tag, roi)
+        _check_rois(tag, config.rois)
+
+
+def _without_ids(rois: dict) -> dict:
+    """ The stored ROI results without the ids that every evaluation makes """
+    return {key: ({k: v for k, v in value.items() if k != 'id'}
+                  if isinstance(value, dict) else value)
+            for key, value in rois.items()}
+
+
+def store_rois(version_tag: str, rois) -> int:
+    """ Evaluate all of `rois` for the HitEfficiencies of `version_tag` and
+    store the results of those that changed, returning how many that was.
+    Every ROI is evaluated, whatever its key, so one that was redefined
+    without being renamed is updated too. Each HitEfficiency is loaded once and
+    the results are written in a single bulk operation, after the
+    HitEfficiencies shared with other versions were split off.
+    """
+    check_writable(version_tag)
+    field = HitEfficiency._fields['rois']
+    changes = []
+    shared = []
+    for he in HitEfficiency.select_version(version_tag).no_cache():
+        stored = field.to_mongo(he.rois)
+        values = field.to_mongo({roi.key: roi.evaluate(he, store=False)
+                                 for roi in rois})
+        if _without_ids(values) == _without_ids(stored):
+            continue
+        changes.append((he.original_id, values))
+        if len(he.version_tags) > 1:
+            shared.append(he.id)
+    if shared:
+        HitEfficiency.select_version(version_tag)(id__in=shared).prepare_edit()
+    now = datetime.datetime.now()
+    if changes:
+        # not save, or we'd get stuck in a loop
+        HitEfficiency._get_collection().bulk_write([
+            UpdateOne({'original_id': original_id,
+                       'version_tags': version_tag},
+                      {'$set': {'rois': values, 'modified': now},
+                       '$inc': {'revision': 1}})
+            for original_id, values in changes], ordered=False)
+    return len(changes)
 
 
 def update_rois(sender, document, **kwargs) -> None:
     """ Update the ROIs of all HitEfficiencies when the settings are saved """
     for tag in document.version_tags:
-        for he in HitEfficiency.select_version(tag):
-            rois = {roi.key: roi.evaluate(he, store=False)
-                    for roi in document.hiteffdbconfig.rois}
-            # use update rather than save or we'll get stuck in a loop
-            he.update(set__rois=rois)
+        store_rois(tag, document.hiteffdbconfig.rois)
 
 
 settings.VersionSettings.clean_hooks.append(check_settings)

@@ -1,5 +1,6 @@
 import operator
 import numpy as np
+from .asymmetric import AsymmetricUncertainty
 
 
 class Histogram(object):
@@ -125,6 +126,48 @@ class Histogram(object):
             b = bins[-1]
         return (a, b)
 
+    def _integrate_plain(self, a, b, binwidth):
+        """ `integrate` for the usual case, a Quantity of
+        AsymmetricUncertainty in bins that are a Quantity of an array, with
+        `a` and `b` already bounded Quantities. The weights are plain arrays in
+        the units of the edges and only the bins that overlap [a, b] are
+        summed, which is much faster than going through the units of every
+        bin. None if that doesn't apply.
+        """
+        try:
+            values, edges, unit = self.hist.m, self.bin_edges.m, self.bin_edges.u
+            low, high = a.to(unit).m, b.to(unit).m
+            hist_unit = self.hist.u
+        except AttributeError:
+            return None
+        if (not isinstance(values, AsymmetricUncertainty)
+                or not isinstance(edges, np.ndarray) or edges.ndim != 1
+                or np.ndim(values.mode) != 1):
+            return None
+        if not low < high:
+            return None
+        weights = np.zeros(len(values.mode))
+        first = int(np.searchsorted(edges, low, "right")) - 1
+        last = int(np.searchsorted(edges, high, "left")) - 1
+        weights[first:last] = 1
+        if first == last:
+            weights[first] = (high - low) / (edges[first+1] - edges[first])
+        else:
+            weights[first] = ((edges[first+1] - low)
+                              / (edges[first+1] - edges[first]))
+            weights[last] = ((high - edges[last])
+                             / (edges[last+1] - edges[last]))
+        if binwidth:
+            weights = weights * (edges[1:] - edges[:-1])
+        # the bins outside the range have no weight
+        support = np.flatnonzero(weights)
+        if len(support):
+            sl = slice(support[0], support[-1] + 1)
+            values, weights = values[sl], weights[sl]
+        result = values.integrate(weights)
+        return type(self.hist)(result, hist_unit * unit if binwidth
+                               else hist_unit)
+
     def integrate(self, a=None, b=None, binwidth=True):
         """Integrate the histogram from a to b. If a and b do not correspond to
         exact bin edges, the value in the bin will be interpolated.
@@ -140,6 +183,8 @@ class Histogram(object):
         bins = self.bin_edges
         spec = self.hist
         a, b = self._bound(a, b)
+        if (result := self._integrate_plain(a, b, binwidth)) is not None:
+            return result
         weights = np.zeros_like(spec)
         first = np.searchsorted(bins, a, "right") - 1
         last = np.searchsorted(bins, b, "left") - 1
