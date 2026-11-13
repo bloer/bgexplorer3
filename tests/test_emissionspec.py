@@ -133,7 +133,7 @@ class TestEmission(unittest.TestCase):
         self.assertEqual(set(rates), {'U238', 'U235', 'Ra226'})
         # secular equilibrium
         self.assertAlmostEqual(
-            concentration_to_rate('Ra226', rates['Ra226']).to('Bq/kg').mode,
+            rates['Ra226'].to('Bq/kg').mode,
             concentration_to_rate('U238', rates['U238']).to('Bq/kg').mode)
         # relative abundance
         self.assertAlmostEqual(rates['U235'].to('ppb').mode, 81 * 0.00725)

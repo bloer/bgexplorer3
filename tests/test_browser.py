@@ -760,6 +760,7 @@ class TestLoginInBrowser(BrowserTestCase):
         page.click('#loginform button[type=submit]')
         page.wait_for_url(self.base + view)
         self.assertEqual(page.locator('#profilelink').inner_text(), 'u1')
+        page.click('.nav-tabs .dropdown-toggle')
         page.click('a:text-is("Edit")')
         page.wait_for_url(self.base + self.url('component.edit',
                                                object=self.c1))

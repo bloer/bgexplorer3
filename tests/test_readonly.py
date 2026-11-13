@@ -119,6 +119,6 @@ class TestReadOnly(unittest.TestCase):
         c1.save()
         self.assertEqual(self.get(Component, 'c1').mass.m, 1)
         for st in SourceTerm.select_version('b2'):
-            self.assertEqual(st.emissionrate.mode, 3)
+            self.assertEqual(st.emissionrate.to('mBq').mode, 3)
         for st in SourceTerm.select_version('t'):
-            self.assertEqual(st.emissionrate.mode, 1)
+            self.assertEqual(st.emissionrate.to('mBq').mode, 1)

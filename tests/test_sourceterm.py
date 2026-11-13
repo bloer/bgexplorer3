@@ -55,33 +55,33 @@ class TestSourceTerm(unittest.TestCase):
         c1 = Component(name="c1", mass="2 kg",
                        specs=[e1, spec_of(EmissionSource(name="Co60", rate="20 +- 0.2 mBq/kg"))]).save()
         self.assertEqual(SourceTerm.objects.count(), 3)
-        emissionrates = dict(Th232=AsymmetricUncertainty(20, 2)*units('mBq/kg'),
-                             K40=AsymmetricUncertainty.fromlimit(50)*units('mBq/kg'),
-                             Co60=AsymmetricUncertainty(40, 0.4)*units('mBq/kg'))
+        emissionrates = dict(Th232=AsymmetricUncertainty(20, 2)*units('mBq'),
+                             K40=AsymmetricUncertainty.fromlimit(50)*units('mBq'),
+                             Co60=AsymmetricUncertainty(40, 0.4)*units('mBq'))
         for st in SourceTerm.objects:
-            self.assertAlmostEqual(st.emissionrate.mode, emissionrates[st.source.name].mode)
-            self.assertAlmostEqual(st.emissionrate.s0, emissionrates[st.source.name].s0)
+            self.assertAlmostEqual(st.emissionrate.to('mBq').mode, emissionrates[st.source.name].mode)
+            self.assertAlmostEqual(st.emissionrate.to('mBq').s0, emissionrates[st.source.name].s0)
 
         e1.reload() # without this, we get a weakref deleted error...
         e1.sources[0].rate = AsymmetricUncertainty(8, 2)*units('mBq/kg')
         e1.save()
         self.assertEqual(SourceTerm.objects.count(), 3)
-        emissionrates = dict(Th232=AsymmetricUncertainty(16, 4)*units('mBq/kg'),
-                             K40=AsymmetricUncertainty.fromlimit(50)*units('mBq/kg'),
-                             Co60=AsymmetricUncertainty(40, 0.4)*units('mBq/kg'))
+        emissionrates = dict(Th232=AsymmetricUncertainty(16, 4)*units('mBq'),
+                             K40=AsymmetricUncertainty.fromlimit(50)*units('mBq'),
+                             Co60=AsymmetricUncertainty(40, 0.4)*units('mBq'))
         for st in SourceTerm.objects:
-            self.assertAlmostEqual(st.emissionrate.mode, emissionrates[st.source.name].mode)
-            self.assertAlmostEqual(st.emissionrate.s0, emissionrates[st.source.name].s0)
+            self.assertAlmostEqual(st.emissionrate.to('mBq').mode, emissionrates[st.source.name].mode)
+            self.assertAlmostEqual(st.emissionrate.to('mBq').s0, emissionrates[st.source.name].s0)
 
         c1.mass = 4*units.kg
         c1.save()
         self.assertEqual(SourceTerm.objects.count(), 3)
-        emissionrates = dict(Th232=AsymmetricUncertainty(32, 8)*units('mBq/kg'),
-                             K40=AsymmetricUncertainty.fromlimit(100)*units('mBq/kg'),
-                             Co60=AsymmetricUncertainty(80, 0.8)*units('mBq/kg'))
+        emissionrates = dict(Th232=AsymmetricUncertainty(32, 8)*units('mBq'),
+                             K40=AsymmetricUncertainty.fromlimit(100)*units('mBq'),
+                             Co60=AsymmetricUncertainty(80, 0.8)*units('mBq'))
         for st in SourceTerm.objects:
-            self.assertAlmostEqual(st.emissionrate.mode, emissionrates[st.source.name].mode)
-            self.assertAlmostEqual(st.emissionrate.s0, emissionrates[st.source.name].s0)
+            self.assertAlmostEqual(st.emissionrate.to('mBq').mode, emissionrates[st.source.name].mode)
+            self.assertAlmostEqual(st.emissionrate.to('mBq').s0, emissionrates[st.source.name].s0)
 
         e1.delete()
         self.assertEqual(SourceTerm.objects.count(), 1)
