@@ -3,7 +3,8 @@ import mongoengine as me
 from bson import ObjectId
 from bson.errors import InvalidId
 from io import BytesIO
-from ..models.sourceterm import find_sourceterms, SourceTerm
+from ..models.sourceterm import (find_sourceterms, listed_sourceterms,
+                                 SourceTerm)
 from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
                              spectrum_breakdown, spectrum_names,
                              cached_filtered,
@@ -573,9 +574,15 @@ class CollectionViews(flask.Blueprint):
 
         @self.get('/<objid>/sourceterms')
         def sourceterms():
-            sourceterms = find_sourceterms(flask.g.object)
-            return flask.render_template('view_sourceterms.html',
-                                         sourceterms=sourceterms)
+            return flask.render_template('view_sourceterms.html')
+
+        @self.get('/<objid>/sourceterms/rows')
+        def sourceterm_rows():
+            """ The table rows of `sourceterms`, which the page loads """
+            rows = listed_sourceterms(find_sourceterms(flask.g.object))
+            return str(flask.get_template_attribute(
+                'utils.html', 'print_sourceterm_rows')(
+                    rows, activecomponent=flask.g.object))
 
         @self.post('/<objid>/sourceterms/bulk/delete')
         def sourceterms_bulk_delete():

@@ -24,7 +24,28 @@
 <script>
     if (typeof DataTable !== 'undefined') {
         document.querySelectorAll("table.datatable").forEach(function(table) {
-            new DataTable(table, {columnDefs: [{targets: 0, orderable: false, searchable: false}]});
+            var start = function() {
+                new DataTable(table, {columnDefs: [{targets: 0, orderable: false, searchable: false}]});
+            };
+            if (!table.dataset.rowsUrl) {
+                start();
+                return;
+            }
+            var status = document.createElement('div');
+            status.className = 'text-center my-3';
+            status.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
+            table.before(status);
+            fetch(table.dataset.rowsUrl).then(function(response) {
+                if (!response.ok) throw new Error(response.status + ' ' + response.statusText);
+                return response.text();
+            }).then(function(html) {
+                table.tBodies[0].innerHTML = html;
+                status.remove();
+                start();
+            }).catch(function(error) {
+                status.className = 'alert alert-danger';
+                status.textContent = 'Could not load the table: ' + error.message;
+            });
         });
     }
     var _bar = document.getElementById('bulk-bar');
@@ -81,7 +102,8 @@
 {% endif -%}
 {% endmacro %}
 
-{% macro render(headings, tableid="dtable", bulk=false) %}
+{#- with `rows_url`, the body is the html at that url, fetched on load -#}
+{% macro render(headings, tableid="dtable", bulk=false, rows_url=none) %}
 {%- if bulk %}
 <div class="modal fade" id="bulk-delete-modal" tabindex="-1">
     <div class="modal-dialog">
@@ -107,7 +129,8 @@
     <span id="bulk-count" class="ms-2 text-muted"></span>
 </div>
 {%- endif %}
-<table id="{{ tableid }}" class="table table-hover table-bordered table-sm  nowrap datatable" width="100%">
+<table id="{{ tableid }}" class="table table-hover table-bordered table-sm  nowrap datatable" width="100%"
+    {%- if rows_url %} data-rows-url="{{ rows_url }}"{% endif %}>
     <thead class="table-light">
         <tr>
             {%- if bulk %}<th style="width:1px"><input type="checkbox" class="select-all"></th>{% endif %}

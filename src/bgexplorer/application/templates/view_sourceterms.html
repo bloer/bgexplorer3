@@ -5,7 +5,7 @@
 {% import "datatable.html" as datatable %}
 
 {% block pagecontent %}
-{{ utils.print_sourceterms(sourceterms, activecomponent=g.object) }}
+{{ utils.print_sourceterms(url_for('.sourceterm_rows', object=g.object)) }}
 {% endblock %}
 
 {% block pagestyle %}

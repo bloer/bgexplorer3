@@ -35,6 +35,7 @@ import logging
 import os
 import sys
 import threading
+from types import SimpleNamespace
 import numpy as np
 log = logging.getLogger(__name__)
 NO_MATERIAL = '(no material)'
@@ -256,6 +257,60 @@ def find_sourceterms(obj: Union[Component, EmissionSpec, EmissionSource, HitEffi
     elif isinstance(obj, HitEfficiency):
         query = query(hiteffs=obj)
     return query
+
+
+_LISTED_FIELDS = ('original_id', 'version_tags', 'assemblyRoot',
+                  'assemblyPath', 'spec', 'source', 'weight',
+                  'rate_multiplier', 'location', 'location_auto',
+                  'location_origin', 'hiteffs', 'hiteffs_auto', 'livetimes')
+
+
+def listed_sourceterms(query: VersionedQuerySet) -> list:
+    """ The SourceTerms of `query` for a listing, as plain objects with the
+    components, specs and hit efficiencies they refer to already loaded:
+    one query for each kind, instead of several for each SourceTerm. Ones
+    with a reference that is missing from the version are skipped.
+    """
+    version = query.active_version
+    terms = list(query.only(*_LISTED_FIELDS))
+    # read the stored ids, which doesn't load what they refer to
+    paths = [list(st._data.get('assemblyPath') or []) for st in terms]
+    comp_ids = {_ref_id(st._data['assemblyRoot']) for st in terms}
+    comp_ids.update(_ref_id(p._data['component']) for path in paths
+                    for p in path)
+    spec_ids = {_ref_id(st._data['spec']) for st in terms}
+    hit_ids = {_ref_id(h) for st in terms
+               for h in st._data.get('hiteffs') or []}
+
+    def load(doc_cls, ids, *fields):
+        found = doc_cls.select_version(version)(original_id__in=list(ids))
+        return {doc.original_id: doc for doc in
+                found.only('original_id', 'version_tags', *fields)}
+    comps = load(Component, comp_ids, 'name')
+    specs = load(EmissionSpec, spec_ids, 'name')
+    hiteffs = load(HitEfficiency, hit_ids, 'source', 'location')
+
+    rows = []
+    for st, path in zip(terms, paths):
+        root = comps.get(_ref_id(st._data['assemblyRoot']))
+        spec = specs.get(_ref_id(st._data['spec']))
+        placed = [comps.get(_ref_id(p._data['component'])) for p in path]
+        hits = [hiteffs.get(_ref_id(h)) for h in st._data.get('hiteffs') or []]
+        if None in (root, spec, *placed, *hits):
+            log.warning("Skipping SourceTerm %s with a missing reference",
+                        st.id)
+            continue
+        rows.append(SimpleNamespace(
+            id=st.id, original_id=st.original_id, assemblyRoot=root,
+            assemblyPath=[SimpleNamespace(component=comp, weight=p.weight,
+                                          name=p.label or comp.name)
+                          for p, comp in zip(path, placed)],
+            spec=spec, source=st.source, emissionrate=st.emissionrate,
+            location=st.location, location_origin=st.location_origin,
+            location_overridden=st.location_overridden,
+            hiteffs_auto=st.hiteffs_auto, hiteffs=hits,
+            livetimes=st.livetimes))
+    return rows
 
 
 class _Flight:
