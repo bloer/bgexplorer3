@@ -241,8 +241,12 @@ class EmissionSpec(VersionedDocument):
             if compare_source_names(newsource.source, source.name):
                 matchin = source
 
-        # a missing rate is reported by field validation, after cleaning
-        if matchin is None or matchin.rate is None:
+        # a missing rate or one that doesn't fit its multiplier is reported by
+        # field validation, after cleaning
+        if (matchin is None or matchin.rate is None
+                or matchin.multiplier is None
+                or not matchin.multiplier.accepts(matchin.rate,
+                                                  matchin.converts_mass)):
             return
 
         generated = [s for s in self.sources if s.generated_from == matchin.id
@@ -322,6 +326,12 @@ class EmissionSpec(VersionedDocument):
             source.category = source.category or self.category
             if source.multiplier is None:
                 source.multiplier = self.multiplier
+            # generating sources needs the multiplier, which the source
+            # infers from its rate; invalid ones are reported by validation
+            try:
+                source.clean()
+            except ValidationError:
+                pass
         super().clean()
         validate_unique_ids(self.sources, 'sources')
         config = settings.get_settings(self.active_version)
