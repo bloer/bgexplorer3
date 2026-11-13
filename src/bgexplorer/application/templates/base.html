@@ -114,6 +114,17 @@
 <!-- page-specific JavaScript -->
 {% block pagescripts %}
 {% endblock pagescripts %}
+<div id="page-spinner" class="d-none position-fixed top-50 start-50 translate-middle" style="z-index:9999">
+    <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>
+</div>
+<script>
+    document.addEventListener('click', function(e) {
+        var link = e.target.closest('a[href]');
+        if (link && !link.dataset.bsToggle && !link.href.startsWith('#') && link.target !== '_blank') {
+            document.getElementById('page-spinner').classList.remove('d-none');
+        }
+    });
+</script>
 {% endblock scripts %}
 {% endblock body%}
 </body>
