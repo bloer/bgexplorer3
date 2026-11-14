@@ -1,0 +1,851 @@
+[
+ {
+  "op": "add_roi",
+  "step": "create branch",
+  "seconds": 6.132761349901557,
+  "rss_start_mb": 170.078125,
+  "rss_peak_mb": 170.10546875,
+  "rss_end_mb": 170.10546875,
+  "caches": {}
+ },
+ {
+  "op": "add_roi",
+  "step": "before term_table",
+  "seconds": 8.460612332448363,
+  "rss_start_mb": 170.10546875,
+  "rss_peak_mb": 630.86328125,
+  "rss_end_mb": 628.1640625,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ]
+  }
+ },
+ {
+  "op": "add_roi",
+  "step": "before table",
+  "seconds": 0.25868228264153004,
+  "rss_start_mb": 625.26171875,
+  "rss_peak_mb": 630.86328125,
+  "rss_end_mb": 625.515625,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ],
+   "filtered": [
+    1,
+    0.0925455093383789
+   ]
+  }
+ },
+ {
+  "op": "add_roi",
+  "step": "before dashboard",
+  "seconds": 0.24015154503285885,
+  "rss_start_mb": 625.515625,
+  "rss_peak_mb": 630.86328125,
+  "rss_end_mb": 625.515625,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "add_roi",
+  "step": "save settings",
+  "seconds": 167.43572418391705,
+  "rss_start_mb": 625.515625,
+  "rss_peak_mb": 630.86328125,
+  "rss_end_mb": 625.515625,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "add_roi",
+  "step": "after term_table",
+  "seconds": 9.160272344946861,
+  "rss_start_mb": 625.515625,
+  "rss_peak_mb": 630.86328125,
+  "rss_end_mb": 623.5546875,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.849891662597656
+   ]
+  }
+ },
+ {
+  "op": "add_roi",
+  "step": "after table",
+  "seconds": 0.3093186132609844,
+  "rss_start_mb": 622.5703125,
+  "rss_peak_mb": 630.86328125,
+  "rss_end_mb": 622.5703125,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.849891662597656
+   ],
+   "filtered": [
+    1,
+    0.10546875
+   ]
+  }
+ },
+ {
+  "op": "add_roi",
+  "step": "after dashboard",
+  "seconds": 0.21887768618762493,
+  "rss_start_mb": 622.5703125,
+  "rss_peak_mb": 622.5703125,
+  "rss_end_mb": 622.5703125,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.187950134277344
+   ],
+   "filtered": [
+    2,
+    0.2419443130493164
+   ]
+  }
+ },
+ {
+  "op": "root_weights",
+  "step": "create branch",
+  "seconds": 5.579612554982305,
+  "rss_start_mb": 622.5703125,
+  "rss_peak_mb": 622.5703125,
+  "rss_end_mb": 622.5703125,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.187950134277344
+   ],
+   "filtered": [
+    2,
+    0.2419443130493164
+   ]
+  }
+ },
+ {
+  "op": "root_weights",
+  "step": "before term_table",
+  "seconds": 7.61428901553154,
+  "rss_start_mb": 525.0078125,
+  "rss_peak_mb": 622.5703125,
+  "rss_end_mb": 543.671875,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ]
+  }
+ },
+ {
+  "op": "root_weights",
+  "step": "before table",
+  "seconds": 0.24839665368199348,
+  "rss_start_mb": 542.80859375,
+  "rss_peak_mb": 622.5703125,
+  "rss_end_mb": 542.80859375,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ],
+   "filtered": [
+    1,
+    0.0925455093383789
+   ]
+  }
+ },
+ {
+  "op": "root_weights",
+  "step": "before dashboard",
+  "seconds": 0.20730740949511528,
+  "rss_start_mb": 542.80859375,
+  "rss_peak_mb": 622.5703125,
+  "rss_end_mb": 542.80859375,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "root_weights",
+  "step": "save root (5 placements)",
+  "seconds": 34.920375887304544,
+  "rss_start_mb": 542.80859375,
+  "rss_peak_mb": 1146.83984375,
+  "rss_end_mb": 1146.83984375,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "root_weights",
+  "step": "after term_table",
+  "seconds": 7.985321927815676,
+  "rss_start_mb": 737.8203125,
+  "rss_peak_mb": 737.8203125,
+  "rss_end_mb": 733.95703125,
+  "caches": {
+   "terms": [
+    14962,
+    21.40331268310547
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ]
+  }
+ },
+ {
+  "op": "root_weights",
+  "step": "after table",
+  "seconds": 0.24794883280992508,
+  "rss_start_mb": 732.03515625,
+  "rss_peak_mb": 732.03515625,
+  "rss_end_mb": 732.03515625,
+  "caches": {
+   "terms": [
+    14962,
+    21.40331268310547
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ],
+   "filtered": [
+    1,
+    0.0925455093383789
+   ]
+  }
+ },
+ {
+  "op": "root_weights",
+  "step": "after dashboard",
+  "seconds": 0.23339719139039516,
+  "rss_start_mb": 732.03515625,
+  "rss_peak_mb": 732.03515625,
+  "rss_end_mb": 732.03515625,
+  "caches": {
+   "terms": [
+    14962,
+    21.40331268310547
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "add_leaf",
+  "step": "create branch",
+  "seconds": 6.228753952309489,
+  "rss_start_mb": 731.05078125,
+  "rss_peak_mb": 732.03515625,
+  "rss_end_mb": 731.05078125,
+  "caches": {
+   "terms": [
+    14962,
+    21.40331268310547
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "add_leaf",
+  "step": "before term_table",
+  "seconds": 7.513933410868049,
+  "rss_start_mb": 700.47265625,
+  "rss_peak_mb": 732.03515625,
+  "rss_end_mb": 699.48828125,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ]
+  }
+ },
+ {
+  "op": "add_leaf",
+  "step": "before table",
+  "seconds": 0.2699531000107527,
+  "rss_start_mb": 699.48828125,
+  "rss_peak_mb": 732.03515625,
+  "rss_end_mb": 699.48828125,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ],
+   "filtered": [
+    1,
+    0.0925455093383789
+   ]
+  }
+ },
+ {
+  "op": "add_leaf",
+  "step": "before dashboard",
+  "seconds": 0.22499406710267067,
+  "rss_start_mb": 699.48828125,
+  "rss_peak_mb": 732.03515625,
+  "rss_end_mb": 699.48828125,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "add_leaf",
+  "step": "save leaf",
+  "seconds": 0.014337949454784393,
+  "rss_start_mb": 699.48828125,
+  "rss_peak_mb": 732.03515625,
+  "rss_end_mb": 699.48828125,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "add_leaf",
+  "step": "place in Cavern",
+  "seconds": 0.18970388360321522,
+  "rss_start_mb": 699.48828125,
+  "rss_peak_mb": 732.03515625,
+  "rss_end_mb": 698.50390625,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "add_leaf",
+  "step": "after term_table",
+  "seconds": 0.2469126209616661,
+  "rss_start_mb": 698.50390625,
+  "rss_peak_mb": 698.50390625,
+  "rss_end_mb": 698.50390625,
+  "caches": {
+   "terms": [
+    7485,
+    10.707378387451172
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ]
+  }
+ },
+ {
+  "op": "add_leaf",
+  "step": "after table",
+  "seconds": 0.2556559704244137,
+  "rss_start_mb": 698.50390625,
+  "rss_peak_mb": 698.50390625,
+  "rss_end_mb": 697.51953125,
+  "caches": {
+   "terms": [
+    7485,
+    10.707378387451172
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ],
+   "filtered": [
+    1,
+    0.09363651275634766
+   ]
+  }
+ },
+ {
+  "op": "add_leaf",
+  "step": "after dashboard",
+  "seconds": 0.22976578958332539,
+  "rss_start_mb": 697.51953125,
+  "rss_peak_mb": 698.50390625,
+  "rss_end_mb": 697.51953125,
+  "caches": {
+   "terms": [
+    7485,
+    10.707378387451172
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.23011207580566406
+   ]
+  }
+ },
+ {
+  "op": "edit_assay",
+  "step": "create branch",
+  "seconds": 5.8201308604329824,
+  "rss_start_mb": 697.51953125,
+  "rss_peak_mb": 697.51953125,
+  "rss_end_mb": 697.51953125,
+  "caches": {
+   "terms": [
+    7485,
+    10.707378387451172
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.23011207580566406
+   ]
+  }
+ },
+ {
+  "op": "edit_assay",
+  "step": "before term_table",
+  "seconds": 7.739984732121229,
+  "rss_start_mb": 684.72265625,
+  "rss_peak_mb": 684.72265625,
+  "rss_end_mb": 684.72265625,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ]
+  }
+ },
+ {
+  "op": "edit_assay",
+  "step": "before table",
+  "seconds": 0.27491510659456253,
+  "rss_start_mb": 684.72265625,
+  "rss_peak_mb": 684.72265625,
+  "rss_end_mb": 684.72265625,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ],
+   "filtered": [
+    1,
+    0.0925455093383789
+   ]
+  }
+ },
+ {
+  "op": "edit_assay",
+  "step": "before dashboard",
+  "seconds": 0.26568406261503696,
+  "rss_start_mb": 684.72265625,
+  "rss_peak_mb": 684.72265625,
+  "rss_end_mb": 683.73828125,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "edit_assay",
+  "step": "save assay",
+  "seconds": 77.45375240407884,
+  "rss_start_mb": 682.75390625,
+  "rss_peak_mb": 684.72265625,
+  "rss_end_mb": 674.83203125,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "edit_assay",
+  "step": "after term_table",
+  "seconds": 0.6862585414201021,
+  "rss_start_mb": 674.83203125,
+  "rss_peak_mb": 684.72265625,
+  "rss_end_mb": 674.83203125,
+  "caches": {
+   "terms": [
+    8003,
+    11.448383331298828
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ]
+  }
+ },
+ {
+  "op": "edit_assay",
+  "step": "after table",
+  "seconds": 0.28654901683330536,
+  "rss_start_mb": 674.83203125,
+  "rss_peak_mb": 674.83203125,
+  "rss_end_mb": 674.83203125,
+  "caches": {
+   "terms": [
+    8003,
+    11.448383331298828
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ],
+   "filtered": [
+    1,
+    0.0925455093383789
+   ]
+  }
+ },
+ {
+  "op": "edit_assay",
+  "step": "after dashboard",
+  "seconds": 0.21903434582054615,
+  "rss_start_mb": 674.83203125,
+  "rss_peak_mb": 674.83203125,
+  "rss_end_mb": 674.83203125,
+  "caches": {
+   "terms": [
+    8003,
+    11.448383331298828
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "rebuild",
+  "step": "create branch",
+  "seconds": 6.05111082829535,
+  "rss_start_mb": 674.83203125,
+  "rss_peak_mb": 674.83203125,
+  "rss_end_mb": 674.83203125,
+  "caches": {
+   "terms": [
+    8003,
+    11.448383331298828
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "rebuild",
+  "step": "before term_table",
+  "seconds": 7.895514732226729,
+  "rss_start_mb": 661.0234375,
+  "rss_peak_mb": 674.83203125,
+  "rss_end_mb": 661.0234375,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ]
+  }
+ },
+ {
+  "op": "rebuild",
+  "step": "before table",
+  "seconds": 0.27841445431113243,
+  "rss_start_mb": 661.0234375,
+  "rss_peak_mb": 674.83203125,
+  "rss_end_mb": 661.0234375,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ],
+   "filtered": [
+    1,
+    0.0925455093383789
+   ]
+  }
+ },
+ {
+  "op": "rebuild",
+  "step": "before dashboard",
+  "seconds": 0.2488786894828081,
+  "rss_start_mb": 661.0234375,
+  "rss_peak_mb": 674.83203125,
+  "rss_end_mb": 661.0234375,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "rebuild",
+  "step": "rebuild_sourceterms",
+  "seconds": 136.99382398836315,
+  "rss_start_mb": 661.0234375,
+  "rss_peak_mb": 1201.578125,
+  "rss_end_mb": 1201.578125,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "rebuild",
+  "step": "after term_table",
+  "seconds": 7.982836788520217,
+  "rss_start_mb": 800.8046875,
+  "rss_peak_mb": 1201.578125,
+  "rss_end_mb": 792.02734375,
+  "caches": {
+   "terms": [
+    14962,
+    21.40331268310547
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ]
+  }
+ },
+ {
+  "op": "rebuild",
+  "step": "after table",
+  "seconds": 0.24651303887367249,
+  "rss_start_mb": 790.05859375,
+  "rss_peak_mb": 1201.578125,
+  "rss_end_mb": 790.05859375,
+  "caches": {
+   "terms": [
+    14962,
+    21.40331268310547
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ],
+   "filtered": [
+    1,
+    0.0925455093383789
+   ]
+  }
+ },
+ {
+  "op": "rebuild",
+  "step": "after dashboard",
+  "seconds": 0.22384602762758732,
+  "rss_start_mb": 790.05859375,
+  "rss_peak_mb": 1201.578125,
+  "rss_end_mb": 787.109375,
+  "caches": {
+   "terms": [
+    14962,
+    21.40331268310547
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ }
+]

@@ -1,0 +1,425 @@
+view / create branch                         5.58 s   peak +      0 MB   end     170 MB (+0)   traced peak +0 MB
+view / before term_table                   161.96 s   peak +   2250 MB   end    2130 MB (+1960)   traced peak +411 MB
+    caches: terms 7481 (11 MB), tables 1 (5 MB)
+  -- view/before term_table (snapshot at 368 MB above start): by line
+       226.0 MB   4645461 blocks  bson/__init__.py:1207
+        64.8 MB     96196 blocks  mongoengine/base/fields.py:446
+        12.3 MB         4 blocks  pymongo/network_layer.py:327
+         6.0 MB     97690 blocks  mongoengine/base/fields.py:432
+         4.8 MB      9514 blocks  mongoengine/base/fields.py:210
+         3.1 MB     19032 blocks  bson/son.py:69
+         3.1 MB     19022 blocks  mongoengine/base/document.py:209
+         2.7 MB     40528 blocks  mongoengine/base/document.py:1210
+         2.6 MB     16490 blocks  mongoengine/base/datastructures.py:119
+         2.5 MB     25650 blocks  mongoengine/base/fields.py:450
+         2.4 MB      6048 blocks  sqlalchemy/sql/schema.py:2394
+         2.0 MB     18216 blocks  sqlalchemy/sql/base.py:2364
+  -- view/before term_table (snapshot at 368 MB above start): by stack (top 6, innermost 5 frames)
+       226.0 MB   4645432 blocks
+      File "pymongo/synchronous/command_runner.py", line 198
+      docs = unpack_res(
+      File "pymongo/synchronous/cursor.py", line 858
+      return response.unpack_response(cursor_id, codec_options, user_fields, legacy_response)
+      File "pymongo/message.py", line 1134
+      return bson._decode_all_selective(self.payload_document, codec_options, user_fields)
+      File "bson/__init__.py", line 1298
+      return decode_all(data, codec_options)
+      File "bson/__init__.py", line 1207
+      return _decode_all(data, codec_options)
+        63.1 MB     91714 blocks
+      File "mongoengine/queryset/base.py", line 1651
+      doc = self._document._from_son(
+      File "mongoengine/base/document.py", line 822
+      value if value is None else field.to_python(value)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+        12.3 MB         2 blocks
+      File "pymongo/synchronous/command_runner.py", line 329
+      docs, reply, duration_s = _run_command(
+      File "pymongo/synchronous/command_runner.py", line 192
+      reply = conn.receive_message(request_id)
+      File "pymongo/synchronous/pool.py", line 446
+      return receive_message(self, request_id, self.max_message_size)
+      File "pymongo/network_layer.py", line 809
+      data = receive_data(conn, length - 16, deadline)
+      File "pymongo/network_layer.py", line 327
+      buf = bytearray(length)
+         5.6 MB     91713 blocks
+      File "mongoengine/queryset/base.py", line 1651
+      doc = self._document._from_son(
+      File "mongoengine/base/document.py", line 822
+      value if value is None else field.to_python(value)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 432
+      value_dict = {}
+         2.9 MB      4001 blocks
+      File "src/bgexplorer/versioning/verdoc.py", line 400
+      super().__init__(*args, **kwargs)
+      File "mongoengine/base/document.py", line 128
+      setattr(self, key, value)
+      File "mongoengine/base/document.py", line 209
+      super().__setattr__(name, value)
+      File "mongoengine/base/fields.py", line 343
+      return super().__set__(instance, value)
+      File "mongoengine/base/fields.py", line 210
+      instance._data[self.name] = value
+         2.4 MB      5976 blocks
+      File "sqlalchemy/sql/selectable.py", line 886
+      columns._populate_separate_keys(
+      File "sqlalchemy/sql/base.py", line 2261
+      (k, c, _ColumnMetrics(self, c)) for k, c in iter_
+      File "sqlalchemy/sql/selectable.py", line 887
+      col._make_proxy(
+      File "sqlalchemy/sql/schema.py", line 2950
+      c = self._constructor(
+      File "sqlalchemy/sql/schema.py", line 2394
+      self._proxies = _proxies
+view / before table                          4.37 s   peak +    871 MB   end    1549 MB (+0)   traced peak +7 MB
+    caches: terms 7481 (11 MB), tables 1 (5 MB), filtered 1 (0 MB)
+view / before dashboard                      5.11 s   peak +    871 MB   end    1549 MB (+0)   traced peak +3 MB
+    caches: terms 7481 (11 MB), tables 1 (5 MB), filtered 2 (0 MB)
+spectra / create branch                      6.57 s   peak +    871 MB   end    1549 MB (+0)   traced peak +0 MB
+    caches: terms 7481 (11 MB), tables 1 (5 MB), filtered 2 (0 MB)
+spectra / cold spectra                     174.02 s   peak +   2164 MB   end    3400 MB (+2164)   traced peak +1915 MB
+  -- spectra/cold spectra (snapshot at 1757 MB above start): by line
+       640.0 MB     61015 blocks  bgexplorer/models/asymmetric.py:177
+       302.9 MB     58040 blocks  bgexplorer/models/arrays.py:42
+       265.5 MB     37496 blocks  bgexplorer/models/asymmetric.py:384
+       265.5 MB     36759 blocks  bgexplorer/models/asymmetric.py:378
+       168.6 MB   3205254 blocks  bson/__init__.py:1207
+        46.5 MB     48375 blocks  mongoengine/base/fields.py:446
+        15.6 MB         4 blocks  pymongo/network_layer.py:327
+         6.0 MB     12204 blocks  mongoengine/base/fields.py:210
+         4.0 MB     41682 blocks  pint/util.py:981
+         4.0 MB     24450 blocks  bson/son.py:69
+         4.0 MB     24441 blocks  mongoengine/base/document.py:209
+         3.6 MB     22597 blocks  mongoengine/base/datastructures.py:119
+  -- spectra/cold spectra (snapshot at 1757 MB above start): by stack (top 6, innermost 5 frames)
+       302.9 MB     58040 blocks
+      File "mongoengine/base/document.py", line 822
+      value if value is None else field.to_python(value)
+      File "mongoengine/base/fields.py", line 428
+      key: self.field.to_python(item) for key, item in value.items()
+      File "src/bgexplorer/models/fields.py", line 349
+      value = decompress(value)
+      File "src/bgexplorer/models/fields.py", line 66
+      return {k: decode_array(v) if is_encoded_array(v) else v
+      File "src/bgexplorer/models/arrays.py", line 42
+      .reshape(value['shape']).copy())
+       302.3 MB     25464 blocks
+      File "src/bgexplorer/models/fields.py", line 356
+      hist = QuantityField.to_python(self, value)
+      File "src/bgexplorer/models/fields.py", line 271
+      value = AsymmetricUncertainty(**value)
+      File "src/bgexplorer/models/asymmetric.py", line 319
+      self._set_values(value, sigma, sigmaup)
+      File "src/bgexplorer/models/asymmetric.py", line 328
+      self._mode = _frozen(mode)
+      File "src/bgexplorer/models/asymmetric.py", line 177
+      value = np.array(value)
+       265.4 MB     33513 blocks
+      File "src/bgexplorer/models/budget/terms.py", line 59
+      rate, blocks = calculator.hit_blocks(sourceterm, spectra)
+      File "src/bgexplorer/models/termcalc.py", line 272
+      blocks = [self._block(hiteff, rate_unit, spectra)
+      File "src/bgexplorer/models/termcalc.py", line 291
+      *_variable(m, (hiteff.id, key)), factor, display,
+      File "src/bgexplorer/models/termcalc.py", line 57
+      (value.mode, value.v0, value.v1))
+      File "src/bgexplorer/models/asymmetric.py", line 384
+      self._v1 = self.s1**2
+       265.4 MB     33510 blocks
+      File "src/bgexplorer/models/budget/terms.py", line 59
+      rate, blocks = calculator.hit_blocks(sourceterm, spectra)
+      File "src/bgexplorer/models/termcalc.py", line 272
+      blocks = [self._block(hiteff, rate_unit, spectra)
+      File "src/bgexplorer/models/termcalc.py", line 291
+      *_variable(m, (hiteff.id, key)), factor, display,
+      File "src/bgexplorer/models/termcalc.py", line 57
+      (value.mode, value.v0, value.v1))
+      File "src/bgexplorer/models/asymmetric.py", line 378
+      self._v0 = self.s0**2
+       168.9 MB     21331 blocks
+      File "src/bgexplorer/models/fields.py", line 356
+      hist = QuantityField.to_python(self, value)
+      File "src/bgexplorer/models/fields.py", line 271
+      value = AsymmetricUncertainty(**value)
+      File "src/bgexplorer/models/asymmetric.py", line 319
+      self._set_values(value, sigma, sigmaup)
+      File "src/bgexplorer/models/asymmetric.py", line 330
+      self._s1 = _frozen(s1)
+      File "src/bgexplorer/models/asymmetric.py", line 177
+      value = np.array(value)
+       168.8 MB     14220 blocks
+      File "src/bgexplorer/models/fields.py", line 356
+      hist = QuantityField.to_python(self, value)
+      File "src/bgexplorer/models/fields.py", line 271
+      value = AsymmetricUncertainty(**value)
+      File "src/bgexplorer/models/asymmetric.py", line 319
+      self._set_values(value, sigma, sigmaup)
+      File "src/bgexplorer/models/asymmetric.py", line 329
+      self._s0 = _frozen(s0)
+      File "src/bgexplorer/models/asymmetric.py", line 177
+      value = np.array(value)
+root_weights / create branch                 7.64 s   peak +    590 MB   end    2793 MB (+-17)   traced peak +0 MB
+root_weights / before term_table           153.51 s   peak +    734 MB   end    3221 MB (+494)   traced peak +307 MB
+    caches: terms 7481 (11 MB), tables 1 (5 MB)
+  -- root_weights/before term_table (snapshot at 289 MB above start): by line
+       193.1 MB   3834793 blocks  bson/__init__.py:1207
+        46.3 MB     71924 blocks  mongoengine/base/fields.py:446
+        10.8 MB         4 blocks  pymongo/network_layer.py:327
+         4.5 MB      9069 blocks  mongoengine/base/fields.py:210
+         4.5 MB     72974 blocks  mongoengine/base/fields.py:432
+         3.0 MB     18138 blocks  bson/son.py:69
+         3.0 MB     18126 blocks  mongoengine/base/document.py:209
+         2.6 MB     39185 blocks  mongoengine/base/document.py:1210
+         2.4 MB     15151 blocks  mongoengine/base/datastructures.py:119
+         2.3 MB     25557 blocks  /home/agent/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/linecache.py:172
+         1.8 MB     18332 blocks  mongoengine/base/fields.py:450
+         1.5 MB     24906 blocks  mongoengine/fields.py:1252
+  -- root_weights/before term_table (snapshot at 289 MB above start): by stack (top 6, innermost 5 frames)
+       193.1 MB   3834767 blocks
+      File "pymongo/synchronous/command_runner.py", line 198
+      docs = unpack_res(
+      File "pymongo/synchronous/cursor.py", line 858
+      return response.unpack_response(cursor_id, codec_options, user_fields, legacy_response)
+      File "pymongo/message.py", line 1134
+      return bson._decode_all_selective(self.payload_document, codec_options, user_fields)
+      File "bson/__init__.py", line 1298
+      return decode_all(data, codec_options)
+      File "bson/__init__.py", line 1207
+      return _decode_all(data, codec_options)
+        45.1 MB     68777 blocks
+      File "mongoengine/queryset/base.py", line 1651
+      doc = self._document._from_son(
+      File "mongoengine/base/document.py", line 822
+      value if value is None else field.to_python(value)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+        10.8 MB         2 blocks
+      File "pymongo/synchronous/command_runner.py", line 329
+      docs, reply, duration_s = _run_command(
+      File "pymongo/synchronous/command_runner.py", line 192
+      reply = conn.receive_message(request_id)
+      File "pymongo/synchronous/pool.py", line 446
+      return receive_message(self, request_id, self.max_message_size)
+      File "pymongo/network_layer.py", line 809
+      data = receive_data(conn, length - 16, deadline)
+      File "pymongo/network_layer.py", line 327
+      buf = bytearray(length)
+         4.2 MB     68777 blocks
+      File "mongoengine/queryset/base.py", line 1651
+      doc = self._document._from_son(
+      File "mongoengine/base/document.py", line 822
+      value if value is None else field.to_python(value)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 432
+      value_dict = {}
+         2.9 MB      4000 blocks
+      File "src/bgexplorer/versioning/verdoc.py", line 400
+      super().__init__(*args, **kwargs)
+      File "mongoengine/base/document.py", line 128
+      setattr(self, key, value)
+      File "mongoengine/base/document.py", line 209
+      super().__setattr__(name, value)
+      File "mongoengine/base/fields.py", line 343
+      return super().__set__(instance, value)
+      File "mongoengine/base/fields.py", line 210
+      instance._data[self.name] = value
+         2.2 MB     23725 blocks
+      File "/home/agent/.claude/jobs/94ad634b/tmp/tm_cdms.py", line 33
+      for fr in s.traceback.format(limit=5)[-10:]:
+      File "/home/agent/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/tracemalloc.py", line 251
+      line = linecache.getline(frame.filename, frame.lineno).strip()
+      File "/home/agent/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/linecache.py", line 26
+      lines = getlines(filename, module_globals)
+      File "/home/agent/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/linecache.py", line 42
+      return updatecache(filename, module_globals)
+      File "/home/agent/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/linecache.py", line 172
+      lines = fp.readlines()
+root_weights / before table                  4.52 s   peak +      0 MB   end    2889 MB (+0)   traced peak +7 MB
+    caches: terms 7481 (11 MB), tables 1 (5 MB), filtered 1 (0 MB)
+root_weights / before dashboard              4.97 s   peak +      0 MB   end    2889 MB (+0)   traced peak +3 MB
+    caches: terms 7481 (11 MB), tables 1 (5 MB), filtered 2 (0 MB)
+root_weights / save root (5 placements)    593.72 s   peak +   3247 MB   end    5273 MB (+2384)   traced peak +857 MB
+    caches: terms 7481 (11 MB), tables 1 (5 MB), filtered 2 (0 MB)
+  -- root_weights/save root (5 placements) (snapshot at 813 MB above start): by line
+       487.3 MB  10270361 blocks  bson/__init__.py:1207
+       159.1 MB    163709 blocks  mongoengine/base/fields.py:446
+        26.3 MB    160634 blocks  bson/son.py:69
+        20.6 MB    125305 blocks  mongoengine/base/document.py:209
+        13.2 MB     30237 blocks  mongoengine/base/fields.py:210
+        10.6 MB     66774 blocks  mongoengine/base/datastructures.py:119
+        10.3 MB    169530 blocks  mongoengine/base/fields.py:432
+         9.9 MB    148927 blocks  mongoengine/base/document.py:1210
+         6.1 MB     80317 blocks  bson/son.py:68
+         5.9 MB     61035 blocks  pint/util.py:981
+         4.8 MB      2313 blocks  bgexplorer/models/budget/termtable.py:186
+         4.5 MB     39213 blocks  mongoengine/document.py:90
+  -- root_weights/save root (5 placements) (snapshot at 813 MB above start): by stack (top 6, innermost 5 frames)
+       487.3 MB  10270324 blocks
+      File "pymongo/synchronous/command_runner.py", line 198
+      docs = unpack_res(
+      File "pymongo/synchronous/cursor.py", line 858
+      return response.unpack_response(cursor_id, codec_options, user_fields, legacy_response)
+      File "pymongo/message.py", line 1134
+      return bson._decode_all_selective(self.payload_document, codec_options, user_fields)
+      File "bson/__init__.py", line 1298
+      return decode_all(data, codec_options)
+      File "bson/__init__.py", line 1207
+      return _decode_all(data, codec_options)
+       154.3 MB    151289 blocks
+      File "mongoengine/queryset/base.py", line 1651
+      doc = self._document._from_son(
+      File "mongoengine/base/document.py", line 822
+      value if value is None else field.to_python(value)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+         9.2 MB    151287 blocks
+      File "mongoengine/queryset/base.py", line 1651
+      doc = self._document._from_son(
+      File "mongoengine/base/document.py", line 822
+      value if value is None else field.to_python(value)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 432
+      value_dict = {}
+         9.0 MB     54650 blocks
+      File "src/bgexplorer/models/signals.py", line 105
+      version, placed_sourceterms(assembly, placements, child_scope),
+      File "src/bgexplorer/models/sourceterm.py", line 670
+      Placement(id=p['id'], component=comp, weight=p.get('weight', 1),
+      File "mongoengine/document.py", line 90
+      super().__init__(*args, **kwargs)
+      File "mongoengine/base/document.py", line 117
+      self._cls = self._class_name
+      File "mongoengine/base/document.py", line 209
+      super().__setattr__(name, value)
+         9.0 MB     54650 blocks
+      File "src/bgexplorer/models/signals.py", line 105
+      version, placed_sourceterms(assembly, placements, child_scope),
+      File "src/bgexplorer/models/sourceterm.py", line 670
+      Placement(id=p['id'], component=comp, weight=p.get('weight', 1),
+      File "mongoengine/document.py", line 90
+      super().__init__(*args, **kwargs)
+      File "mongoengine/base/document.py", line 106
+      self._dynamic_fields = SON()
+      File "bson/son.py", line 69
+      instance.__keys = []
+         5.5 MB      7481 blocks
+      File "src/bgexplorer/models/sourceterm.py", line 674
+      sourceterm = SourceTerm(
+      File "src/bgexplorer/versioning/verdoc.py", line 400
+      super().__init__(*args, **kwargs)
+      File "mongoengine/base/document.py", line 128
+      setattr(self, key, value)
+      File "mongoengine/base/document.py", line 209
+      super().__setattr__(name, value)
+      File "mongoengine/base/fields.py", line 210
+      instance._data[self.name] = value
+root_weights / after term_table            162.82 s   peak +   3017 MB   end    3634 MB (+515)   traced peak +377 MB
+    caches: terms 14962 (21 MB), tables 1 (5 MB)
+  -- root_weights/after term_table (snapshot at 366 MB above start): by line
+       253.6 MB   5119774 blocks  bson/__init__.py:1207
+        65.1 MB     83882 blocks  mongoengine/base/fields.py:446
+        11.6 MB         4 blocks  pymongo/network_layer.py:327
+         5.6 MB     70503 blocks  <string>:1
+         5.2 MB     85469 blocks  mongoengine/base/fields.py:432
+         4.4 MB      8568 blocks  mongoengine/base/fields.py:210
+         3.9 MB     63265 blocks  bson/objectid.py:221
+         3.1 MB     50801 blocks  bgexplorer/models/termcalc.py:57
+         2.8 MB     17140 blocks  bson/son.py:69
+         2.8 MB     17129 blocks  mongoengine/base/document.py:209
+         2.6 MB     28396 blocks  /home/agent/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/linecache.py:172
+         2.5 MB     23897 blocks  pint/util.py:421
+  -- root_weights/after term_table (snapshot at 366 MB above start): by stack (top 6, innermost 5 frames)
+       253.6 MB   5119745 blocks
+      File "pymongo/synchronous/command_runner.py", line 198
+      docs = unpack_res(
+      File "pymongo/synchronous/cursor.py", line 858
+      return response.unpack_response(cursor_id, codec_options, user_fields, legacy_response)
+      File "pymongo/message.py", line 1134
+      return bson._decode_all_selective(self.payload_document, codec_options, user_fields)
+      File "bson/__init__.py", line 1298
+      return decode_all(data, codec_options)
+      File "bson/__init__.py", line 1207
+      return _decode_all(data, codec_options)
+        63.3 MB     79124 blocks
+      File "mongoengine/queryset/base.py", line 1651
+      doc = self._document._from_son(
+      File "mongoengine/base/document.py", line 822
+      value if value is None else field.to_python(value)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+        11.6 MB         2 blocks
+      File "pymongo/synchronous/command_runner.py", line 329
+      docs, reply, duration_s = _run_command(
+      File "pymongo/synchronous/command_runner.py", line 192
+      reply = conn.receive_message(request_id)
+      File "pymongo/synchronous/pool.py", line 446
+      return receive_message(self, request_id, self.max_message_size)
+      File "pymongo/network_layer.py", line 809
+      data = receive_data(conn, length - 16, deadline)
+      File "pymongo/network_layer.py", line 327
+      buf = bytearray(length)
+         4.8 MB     79124 blocks
+      File "mongoengine/queryset/base.py", line 1651
+      doc = self._document._from_son(
+      File "mongoengine/base/document.py", line 822
+      value if value is None else field.to_python(value)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 446
+      value_dict[k] = self.to_python(v)
+      File "mongoengine/base/fields.py", line 432
+      value_dict = {}
+         2.6 MB      3482 blocks
+      File "src/bgexplorer/versioning/verdoc.py", line 400
+      super().__init__(*args, **kwargs)
+      File "mongoengine/base/document.py", line 128
+      setattr(self, key, value)
+      File "mongoengine/base/document.py", line 209
+      super().__setattr__(name, value)
+      File "mongoengine/base/fields.py", line 343
+      return super().__set__(instance, value)
+      File "mongoengine/base/fields.py", line 210
+      instance._data[self.name] = value
+         2.2 MB     24387 blocks
+      File "/home/agent/.claude/jobs/94ad634b/tmp/tm_cdms.py", line 33
+      for fr in s.traceback.format(limit=5)[-10:]:
+      File "/home/agent/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/tracemalloc.py", line 251
+      line = linecache.getline(frame.filename, frame.lineno).strip()
+      File "/home/agent/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/linecache.py", line 26
+      lines = getlines(filename, module_globals)
+      File "/home/agent/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/linecache.py", line 42
+      return updatecache(filename, module_globals)
+      File "/home/agent/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/linecache.py", line 172
+      lines = fp.readlines()
+root_weights / after table                   4.38 s   peak +      0 MB   end    3244 MB (+0)   traced peak +7 MB
+    caches: terms 14962 (21 MB), tables 1 (5 MB), filtered 1 (0 MB)
+root_weights / after dashboard               5.24 s   peak +      0 MB   end    3244 MB (+0)   traced peak +3 MB
+    caches: terms 14962 (21 MB), tables 1 (5 MB), filtered 2 (0 MB)
