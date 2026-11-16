@@ -6,11 +6,11 @@ from mongoengine.errors import ValidationError, NotUniqueError
 from werkzeug.datastructures import MultiDict
 from ..versioning import control as vc
 from ..versioning import maintenance
-from ..models import signals
 from ..models.sourceterm import clear_calculation_cache
 from ..models.settings import ApplicationSettings, get_application_settings
 from ..models.users import User, is_last_site_admin
-from .api import validation_fields
+from .api import validation_fields, check_editable
+from . import jobs as appjobs
 from .forms import update_object
 from .auth import require, Role
 
@@ -95,9 +95,10 @@ def create_admin_blueprint() -> flask.Blueprint:
         version = flask.request.form.get('version', '')
         if not vc.version_exists(version):
             flask.abort(404, f"No version '{version}'")
-        count = signals.rebuild_sourceterms(version)
-        flask.flash(f"Rebuilt {count} source terms in '{version}'", 'success')
-        return flask.redirect(flask.url_for('.maintenance_page'))
+        check_editable(version)
+        return appjobs.submit_and_redirect(
+            'rebuild', {'version': version}, version,
+            flask.url_for('.maintenance_page'))
 
     @bp.post('/maintenance/clear-locks')
     def clear_locks():

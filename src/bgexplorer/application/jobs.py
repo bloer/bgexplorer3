@@ -5,7 +5,10 @@ import atexit
 import logging
 import os
 import signal
+import tempfile
 import threading
+import time
+import uuid
 from typing import List, Optional
 import flask
 from flask_login import current_user
@@ -46,14 +49,52 @@ def safe_next(target: Optional[str]) -> Optional[str]:
     return target if auth.is_local_path(target) else None
 
 
-def worker_init(uri: str) -> None:
+def worker_init(uri: str, files_dir: Optional[str] = None) -> None:
     """ Initializer of the processes of a process pool: connect to the
     database and build an app, so that kinds are registered and can make
     urls and record who made a change """
     global _app
     from .app import create_app
     _app = create_app(config={'MONGODB_URI': uri, 'JOBS_MODE': 'eager',
-                              'LOGIN_DISABLED': True, 'SECRET_KEY': 'unused'})
+                              'LOGIN_DISABLED': True, 'SECRET_KEY': 'unused',
+                              'JOBS_FILES_DIR': files_dir})
+
+
+def files_dir() -> str:
+    """ The folder for the files that jobs take and make, which is created
+    if need be """
+    app = (flask.current_app._get_current_object()
+           if flask.has_app_context() else job_app())
+    path = app.config['JOBS_FILES_DIR']
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def new_upload_path() -> str:
+    """ A path in `files_dir` for a file to be uploaded for a job """
+    return os.path.join(files_dir(), f'upload-{uuid.uuid4().hex}.bgx')
+
+
+def export_path(job_id: str) -> str:
+    """ Where the job `job_id` leaves the file it exports """
+    return os.path.join(files_dir(), f'{job_id}.bgx')
+
+
+def _sweep_files(path: str, keep_days: float) -> None:
+    """ Remove the files that jobs left behind, which are any older than the
+    time jobs are kept for """
+    cutoff = time.time() - keep_days * 86400
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return
+    for name in names:
+        full = os.path.join(path, name)
+        try:
+            if name.endswith('.bgx') and os.path.getmtime(full) < cutoff:
+                os.remove(full)
+        except OSError:
+            pass
 
 
 def _resolve(config) -> None:
@@ -62,6 +103,9 @@ def _resolve(config) -> None:
     config['JOBS_MODE'] = mode
     if not config.get('JOBS_WORKERS'):
         config['JOBS_WORKERS'] = min(4, os.cpu_count() or 1)
+    if not config.get('JOBS_FILES_DIR'):
+        config['JOBS_FILES_DIR'] = os.path.join(tempfile.gettempdir(),
+                                                'bgexplorer-jobs')
 
 
 def _stop_on_sigterm(job_runner: core.JobRunner) -> None:
@@ -95,7 +139,8 @@ def init_app(app: flask.Flask) -> core.JobRunner:
         progress_interval=config['JOBS_PROGRESS_INTERVAL'],
         keep_days=config['JOBS_KEEP_DAYS'],
         initializer=worker_init if mode == 'process' else None,
-        initargs=(config['MONGODB_URI'],))
+        initargs=(config['MONGODB_URI'], config['JOBS_FILES_DIR']))
+    _sweep_files(config['JOBS_FILES_DIR'], config['JOBS_KEEP_DAYS'])
     app.extensions['jobs'] = job_runner
     _app = app
     app.register_blueprint(create_blueprint(), url_prefix='/jobs')
@@ -113,16 +158,18 @@ def init_app(app: flask.Flask) -> core.JobRunner:
 
 # ---- submitting jobs from requests
 
-def submit_and_wait(kind: str, params: dict, scope: Optional[str]
-                    ) -> models.Job:
-    """ Submit a job for the current user, and wait up to JOBS_GRACE_SECONDS
-    for it to end. Returns the job, whatever state it is in """
+def submit_and_wait(kind: str, params: dict, scope: Optional[str],
+                    wait: Optional[float] = None) -> models.Job:
+    """ Submit a job for the current user, and wait up to `wait` seconds, by
+    default JOBS_GRACE_SECONDS, for it to end. Returns the job, whatever
+    state it is in """
     job_runner = runner()
     job_id = job_runner.submit(kind, params, scope=scope,
                                user=current_user_name(),
                                origin=flask.request.path)
-    return (job_runner.wait(job_id, flask.current_app.config[
-        'JOBS_GRACE_SECONDS']) or models.get(job_id))
+    if wait is None:
+        wait = flask.current_app.config['JOBS_GRACE_SECONDS']
+    return job_runner.wait(job_id, wait) or models.get(job_id)
 
 
 def flash_result(job: models.Job) -> None:
@@ -144,13 +191,18 @@ def submit_and_redirect(kind: str, params: dict, scope: Optional[str],
         return flask.redirect(safe_next((job.result or {}).get('redirect'))
                               or target)
     if job.status in models.FINISHED:
-        flask.flash(_failure(job), 'danger')
+        flask.flash(failure_text(job), 'danger')
         return flask.redirect(target)
+    return waiting_page(job, target)
+
+
+def waiting_page(job: models.Job, target: str) -> flask.Response:
+    """ Send the user to watch `job`, and on to `target` when it is done """
     return flask.redirect(flask.url_for('jobs.status', job_id=job.id,
                                         next=target), 303)
 
 
-def _failure(job: models.Job) -> str:
+def failure_text(job: models.Job) -> str:
     if job.status == 'failed':
         return job.error or "The job failed"
     if job.status == 'cancelled':
@@ -199,6 +251,25 @@ def duration_text(seconds: float) -> str:
     return f"{hours} h {minutes:02d} min"
 
 
+def export_file(job: models.Job) -> Optional[str]:
+    """ The path of the file that the export job `job` made, if it did """
+    if job.kind != 'export_version' or job.status != 'succeeded':
+        return None
+    path = export_path(job.id)
+    return path if os.path.isfile(path) else None
+
+
+def send_export(job: models.Job) -> flask.Response:
+    """ The file made by the export job `job` as a download """
+    path = export_file(job)
+    if path is None:
+        flask.abort(404, "There is no such file")
+    return flask.send_file(path, mimetype='application/gzip',
+                           as_attachment=True,
+                           download_name=(job.result or {}).get(
+                               'filename', 'export.bgx.tar.gz'))
+
+
 def active_edit_jobs(tag: str) -> List[dict]:
     """ The jobs queued or running for version `tag`, looked up once per
     request """
@@ -210,14 +281,17 @@ def active_edit_jobs(tag: str) -> List[dict]:
     return cache[tag]
 
 
+def visible_job(job_id: str) -> models.Job:
+    """ The job `job_id`, or a 404 if there is none or it isn't the current
+    user's to see """
+    job = core.get(job_id)
+    if job is None or not may_see(job):
+        flask.abort(404, "There is no such job")
+    return job
+
+
 def create_blueprint() -> flask.Blueprint:
     bp = flask.Blueprint('jobs', __name__)
-
-    def visible_job(job_id: str) -> models.Job:
-        job = core.get(job_id)
-        if job is None or not may_see(job):
-            flask.abort(404, "There is no such job")
-        return job
 
     @bp.get('/<job_id>')
     def status(job_id):
@@ -239,6 +313,10 @@ def create_blueprint() -> flask.Blueprint:
     @bp.get('/<job_id>/status')
     def status_json(job_id):
         return flask.jsonify(job_json(visible_job(job_id)))
+
+    @bp.get('/<job_id>/download')
+    def download(job_id):
+        return send_export(visible_job(job_id))
 
     @bp.post('/<job_id>/cancel')
     def cancel(job_id):

@@ -90,7 +90,13 @@ def execute(job_id: str, owner: str) -> str:
             return _requeue(job_id, owner, 1.0, _first_line(error))
         log.info("Job %s (%s) failed: %s", job_id, job.kind,
                  _first_line(error))
+        data = getattr(error, 'job_data', None)
+        try:
+            models._check_json(data, 'result')
+        except (TypeError, ValueError):
+            data = None
         return _end(job_id, owner, 'failed', error=_first_line(error),
+                    result=data if isinstance(data, dict) else None,
                     error_type=type(error).__name__,
                     traceback=traceback.format_exc())
     return _end(job_id, owner, 'succeeded', result=result)

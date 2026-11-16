@@ -274,6 +274,15 @@ def _boom_job(params):
     raise ValueError('bad thing\nsecond line')
 
 
+class _Reported(Exception):
+    job_data = {'status': 409, 'why': ['a', 'b']}
+
+
+@jobs.job_kind('r_reported')
+def _reported_job(params):
+    raise _Reported('reported thing')
+
+
 @jobs.job_kind('r_retry')
 def _retry(params):
     CALLS.append('retry')
@@ -413,6 +422,14 @@ class TestExecute(RunnerCase):
         self.assertIn('Traceback', job.traceback)
         self.assertIn('_boom_job', job.traceback)
         self.assertIsNone(job.lease)
+
+    def test_a_failure_keeps_the_data_its_error_carries(self):
+        job_id, outcome = self.run_job('r_reported')
+        job = models.get(job_id)
+        self.assertEqual((outcome, job.status), ('failed', 'failed'))
+        self.assertEqual(job.result, {'status': 409, 'why': ['a', 'b']})
+        self.assertEqual(job.error, 'reported thing')
+        self.assertFalse(models.get(self.run_job('r_boom')[0]).result)
 
     def test_a_result_that_is_not_json_fails_the_job(self):
         job_id, _ = self.run_job('r_bad_result')

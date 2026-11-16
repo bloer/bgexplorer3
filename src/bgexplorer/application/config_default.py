@@ -33,3 +33,7 @@ JOBS_PROGRESS_INTERVAL = 0.5
 JOBS_KEEP_DAYS = 7
 # how long to let running jobs finish when the server stops
 JOBS_SHUTDOWN_SECONDS = 20
+# where uploaded and exported version files wait for the jobs that use them,
+# which must be a place that every server process and worker can reach. None
+# means 'bgexplorer-jobs' in the temporary directory
+JOBS_FILES_DIR = None

@@ -9,6 +9,7 @@ from .sourceterm import (SourceTerm, find_sourceterms, sync_sourceterms,
 from ..versioning import hooks, archive
 from ..versioning.verdoc import ref_id, check_writable
 from . import settings
+from .. import jobs
 import importlib.metadata
 import logging
 log = logging.getLogger(__name__)
@@ -238,13 +239,19 @@ def rebuild_sourceterms(version: str) -> int:
     log.warning(f"Rebuilding SourceTerms for version '{version}'")
     SourceTerm.select_version(version).delete()
     components = list(Component.select_version(version))
+    done = 0
+    jobs.progress(done, len(components), stage='source terms')
     for component in components:
         if not isinstance(component, Assembly):
             update_component(sender=None, document=component, propagate=False)
+            done += 1
+            jobs.progress(done)
     # each assembly once, after everything below it
     assemblies = [c for c in components if isinstance(c, Assembly)]
     for assembly in sorted(assemblies, key=lambda a: a.hierarchy_level):
         update_assembly(sender=None, document=assembly, propagate=False)
+        done += 1
+        jobs.progress(done)
     settings.touch(version)
     return SourceTerm.select_version(version).count()
 
