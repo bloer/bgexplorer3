@@ -1,12 +1,16 @@
 """ Running jobs: the context a job sees, executors and the runner """
+import os
+import threading
 import unittest
 from bgexplorer import jobs
-from bgexplorer.jobs import models, context
+from bgexplorer.jobs import models
 from bgexplorer.jobs.context import (JobContext, JobCancelled, JobLost, Retry,
                                      running)
+from bgexplorer.jobs.executors import make_executor
 from tests.jobs_support import JobTestCase, later
 
 LEASE = 60
+PROCESS_TESTS = os.environ.get('BGEXPLORER_TEST_PROCESS', '1') == '1'
 
 
 @jobs.job_kind('r_noop')
@@ -191,6 +195,65 @@ class TestContext(JobTestCase):
         retry = Retry(0, 'waiting')
         self.assertEqual((retry.delay, retry.message), (0, 'waiting'))
         self.assertIn('waiting', str(retry))
+
+
+def _thread_name():
+    return threading.current_thread().name
+
+
+def _boom():
+    raise KeyError('boom')
+
+
+class TestExecutors(unittest.TestCase):
+    def test_eager_runs_inline(self):
+        executor = make_executor('eager', 4)
+        future = executor.submit(_thread_name)
+        self.assertTrue(future.done())
+        self.assertEqual(future.result(), threading.current_thread().name)
+
+    def test_eager_captures_exceptions(self):
+        future = make_executor('eager', 1).submit(_boom)
+        self.assertTrue(future.done())
+        with self.assertRaises(KeyError):
+            future.result()
+
+    def test_eager_calls_done_callbacks(self):
+        seen = []
+        make_executor('eager', 1).submit(lambda: 7).add_done_callback(
+            lambda f: seen.append(f.result()))
+        self.assertEqual(seen, [7])
+
+    def test_thread_runs_elsewhere(self):
+        executor = make_executor('thread', 2)
+        try:
+            name = executor.submit(_thread_name).result(timeout=5)
+            self.assertNotEqual(name, threading.current_thread().name)
+        finally:
+            executor.shutdown()
+
+    def test_thread_initializer(self):
+        seen = []
+        executor = make_executor('thread', 1, initializer=seen.append,
+                                 initargs=('ready',))
+        try:
+            executor.submit(_thread_name).result(timeout=5)
+        finally:
+            executor.shutdown()
+        self.assertEqual(seen, ['ready'])
+
+    def test_unknown_mode(self):
+        with self.assertRaises(ValueError):
+            make_executor('bogus', 1)
+
+    @unittest.skipUnless(PROCESS_TESTS, 'BGEXPLORER_TEST_PROCESS is off')
+    def test_process_runs_in_another_process(self):
+        executor = make_executor('process', 1)
+        try:
+            self.assertNotEqual(executor.submit(os.getpid).result(timeout=60),
+                                os.getpid())
+        finally:
+            executor.shutdown()
 
 
 if __name__ == '__main__':
