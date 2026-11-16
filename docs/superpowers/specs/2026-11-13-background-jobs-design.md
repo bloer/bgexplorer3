@@ -1,6 +1,8 @@
 # Background jobs and an incremental derivation queue
 
-Status: draft for review. Branch `feature/background-jobs`, based on
+Status: Phase 1 (sections 5, 8, 9.1) is being implemented, following
+`docs/superpowers/plans/2026-11-16-background-jobs-phase1.md`; sections 6, 7 and
+9.2 are kept as the Phase 2 design. Branch `feature/background-jobs`, based on
 `worktree-standard-profile-scenario` (the standard scenario and
 `scripts/profile_standard.py`).
 
@@ -375,6 +377,31 @@ module-level mutable state is a Phase 1 task: `models/termcalc.py:_factors`,
 the `ResultsCache` instances, `sourceterm._current_tokens`,
 `models/users.py:_dummy`, and `verdoc._defined` (read-only after import).
 
+### 5.10 Stale views
+
+A version has an *edit in progress* while any job with `scope == tag` is
+`queued` or `running`. Reads never block on it: pages and API responses are
+built from what exists, and are flagged.
+
+- **Pages** show a warning banner (`#stale-banner`) with the job's label,
+  its percent when known, and a link to `/jobs/<id>`: "figures on this page
+  may not include the change yet".
+- **API** responses for the version (GET/HEAD) carry
+  `X-Bgexplorer-Stale: <job ids, comma separated>`, and `GET
+  /versions/<tag>` lists `pending_jobs` (`id`, `kind`, `status`,
+  `percent`).
+- The flag is derived from the job collection (one indexed query by
+  `(scope, status)`), so a job abandoned by the reaper or an administrator
+  stops flagging with no cleanup. The jobs pages themselves have no
+  banner.
+- Edits stay allowed while a job is pending; they queue behind it
+  (5.5).
+- Honest limit: a job saves documents one at a time and each save replaces
+  the version's cache token, so a view computed while the job runs may mix
+  old and new documents, and is computed cold. Pinning views to the token
+  from before the job (serving the previous consistent results from cache)
+  is future work (section 12).
+
 ## 6. Phase 2: the dirty queue
 
 ### 6.1 Why
@@ -631,7 +658,8 @@ src/bgexplorer/jobs/            # no domain imports (isolation-tested)
     models.py                   # Job document, transitions
     runner.py                   # dispatcher, claim, reaper, heartbeat
     executors.py                # eager/thread/process
-    context.py                  # current_job contextvar, user installation hook
+    kinds.py                    # @job_kind registry
+    context.py                  # current_job contextvar, progress, cancel, user hook
     maintenance.py              # find_jobs, clear_jobs
 src/bgexplorer/models/derive.py # DirtyEntry, mark_dirty, claim, derive_entry, run_inline
 src/bgexplorer/models/signals.py# handlers mark instead of recurse; rebuild stays
@@ -736,6 +764,14 @@ All use real MongoDB through `tests/dbutil.connect_test_db`, like
 - list filters by version, status and kind; users see their own only;
   cancel works and returns 202 for running, 200 for queued; unknown id 404.
 - authorisation matches the existing API rules.
+
+`tests/test_jobs_stale.py`
+
+- while a job for a version is queued or running its pages show the banner
+  (kind, percent, link), other versions' don't; API GETs carry
+  `X-Bgexplorer-Stale`; the version GET lists `pending_jobs`; the flag goes
+  away when the job finishes or is abandoned; the query uses the
+  `(scope, status)` index.
 
 `tests/test_jobs_admin.py`
 
@@ -890,6 +926,12 @@ section 2 and record the breakdown here.
   same image and Mongo. The web processes then run with `JOBS_WORKERS=0`.
   Only deployment config and the CLI command change.
 - **Cache pre-warming**, section 7.
+- **Pinned stale views**: while a job runs, serve views from the caches
+  keyed to the token from before it started, so they are consistent
+  (old) rather than a mix, and cold views don't recompute from half-written
+  data.
+- **Bulk delete/clone** (`/bulk/delete`, `/bulk/clone`) as jobs; they are
+  fetch calls returning JSON and need client-side handling of `202`.
 - **Splitting a single heavy operation across workers**: ROI evaluation per
   hit efficiency (the 75 s `add_roi`), bulk imports per document, once the
   pool exists. The entry mechanism isn't the right shape for these;
