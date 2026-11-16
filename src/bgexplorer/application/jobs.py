@@ -29,6 +29,13 @@ def job_app() -> flask.Flask:
     return _app
 
 
+def build_url(endpoint: str, **values) -> str:
+    """ `url_for` for code running in a job, which has no request. Give
+    `active_version` for the endpoints that need it """
+    with job_app().test_request_context():
+        return flask.url_for(endpoint, **values)
+
+
 def runner(app: Optional[flask.Flask] = None) -> core.JobRunner:
     """ The job runner of `app`, or of the current app """
     return (app or flask.current_app).extensions['jobs']
@@ -213,7 +220,7 @@ def create_blueprint() -> flask.Blueprint:
         if job.status == 'succeeded':
             flash_result(job)
             return flask.redirect(
-                target or safe_next((job.result or {}).get('redirect'))
+                safe_next((job.result or {}).get('redirect')) or target
                 or flask.url_for('index'))
         since = job.started or job.created
         return flask.render_template(

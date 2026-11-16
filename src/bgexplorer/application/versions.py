@@ -13,7 +13,8 @@ from ..models.hiteff import HitEfficiency
 from .api import (APIError, validate_new_version, validation_fields,
                   import_uploaded_version, send_version_file)
 from .forms import update_object, LISTFIELDS_KEY
-from .blueprints import format_raw_value
+from . import jobs as appjobs
+from .blueprints import format_raw_value, form_params
 from .auth import require, role_required, Role
 
 
@@ -168,14 +169,17 @@ def edit_settings():
         update_object(settings, form, errors=errors)
         update_object(record, form, errors=errors)
         if not errors:
+            # so that mistakes are shown with the form; the job saves them
             try:
-                settings.save()
-                record.save()
+                settings.validate()
+                record.validate()
             except ValidationError as e:
                 errors = validation_fields(e)
             else:
-                flask.flash("Settings saved", 'success')
-                return flask.redirect(flask.url_for('overview'))
+                return appjobs.submit_and_redirect(
+                    'save_settings',
+                    {'version': tag, 'form': form_params(form)},
+                    tag, flask.url_for('overview'))
     # show display settings for every key in the hit efficiencies
     config = settings.hiteffdbconfig
     hiteffs = HitEfficiency.select_version(tag)

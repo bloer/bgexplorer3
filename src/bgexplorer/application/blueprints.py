@@ -19,6 +19,7 @@ from ..versioning.verdoc import check_writable
 from ..versioning.diff import compare_document, find_refs
 from ..versioning.control import (version_exists, import_document,
                                      VersionControlError)
+from . import jobs as appjobs
 from .api import validation_fields
 from .auth import require_for_changes, Role
 from .forms import update_object, list_snapshot, edited_rows
@@ -41,6 +42,21 @@ REFERENCED_CLASSES = ((Component, 'component'),
                       (EmissionSpec, 'emissionspec'),
                       (HitEfficiency, 'hitefficiency'),
                       (ActivatedMaterial, 'activatedmaterial'))
+
+
+def subclass_named(cls, name: str):
+    """ The subclass of `cls` (or `cls`) with the lowercase class `name`,
+    e.g. 'assembly' """
+    classes = {full.rsplit('.', 1)[-1].lower(): full
+               for full in cls._subclasses}
+    if name.lower() not in classes:
+        raise ValueError(f"Unknown type '{name}'")
+    return me.base.get_document(classes[name.lower()])
+
+
+def form_params(form) -> dict:
+    """ A submitted form as JSON, for a job: {field: [values]} """
+    return {key: form.getlist(key) for key in form}
 
 
 def owner_spec_settings(args) -> dict:
@@ -186,11 +202,10 @@ class CollectionViews(flask.Blueprint):
         """
         cls = self.doc_cls
         if type_:
-            classes = {name.rsplit('.', 1)[-1].lower(): name
-                       for name in self.doc_cls._subclasses}
-            if type_.lower() not in classes:
-                flask.abort(400, f"Unknown type '{type_}'")
-            cls = me.base.get_document(classes[type_.lower()])
+            try:
+                cls = subclass_named(cls, type_)
+            except ValueError as e:
+                flask.abort(400, str(e))
         return cls(version_tag=flask.g.active_version)
 
     def delete_impact(self, obj) -> list:
@@ -392,20 +407,30 @@ class CollectionViews(flask.Blueprint):
                 if overrides:
                     obj.mark_overrides(edited_rows(shown, req.form, 'sources'))
                 if not errors:
+                    # so that mistakes are shown with the form; the job
+                    # does it again with the saved document
                     try:
-                        if owner:
-                            owner.add_owned_spec(obj, **settings)
-                        else:
-                            obj.save()
+                        obj.validate()
                     except me.ValidationError as e:
                         errors = validation_fields(e)
+                if not errors:
+                    if owner:
+                        target = flask.url_for('component.view', object=owner)
+                    elif obj.pk:
+                        target = flask.url_for('.view', object=obj)
                     else:
-                        flask.flash(f"Successfully saved {obj}", 'success')
-                        if owner:
-                            return flask.redirect(flask.url_for(
-                                'component.view', object=owner))
-                        return flask.redirect(flask.url_for('.view',
-                                                            object=obj))
+                        target = flask.url_for('.overview')
+                    return appjobs.submit_and_redirect(
+                        'save_document', {
+                            'cls': self.doc_cls.__name__,
+                            'version': flask.g.active_version,
+                            'objid': flask.g.objid,
+                            'type': req.args.get('type'),
+                            'owner': str(owner.original_id) if owner else None,
+                            'settings': {k: getattr(v, 'value', v)
+                                         for k, v in settings.items()},
+                            'form': form_params(req.form)},
+                        flask.g.active_version, target)
             return flask.render_template(f'edit_{self.clsname}.html',
                                          form=flask.request.form,
                                          errors=errors), \
@@ -416,25 +441,25 @@ class CollectionViews(flask.Blueprint):
             check_writable(flask.g.active_version)
             obj = flask.g.object
             if flask.request.method == 'POST':
-                # only removes it from the active version
-                obj.delete()
-                flask.flash(f"Deleted {obj} from {flask.g.active_version}",
-                            'success')
-                return flask.redirect(flask.url_for('.overview'))
+                return appjobs.submit_and_redirect(
+                    'delete_document', {
+                        'cls': self.doc_cls.__name__,
+                        'version': flask.g.active_version,
+                        'objid': str(obj.original_id)},
+                    flask.g.active_version, flask.url_for('.overview'))
             return flask.render_template('delete_document.html',
                                          impact=self.delete_impact(obj))
 
         @self.post('/<objid>/clone')
-        @self.loads(*self.deferred_fields)
         def clone():
             check_writable(flask.g.active_version)
-            original = flask.g.object
-            copy = original.clone()
-            if hasattr(copy, 'name'):
-                copy.name = f"{original.name} (copy)"
-            copy.save()
-            flask.flash(f"Created {copy} as a copy of {original}", 'success')
-            return flask.redirect(flask.url_for('.edit', object=copy))
+            return appjobs.submit_and_redirect(
+                'clone_document', {
+                    'cls': self.doc_cls.__name__,
+                    'version': flask.g.active_version,
+                    'objid': flask.g.objid},
+                flask.g.active_version,
+                flask.url_for('.view', object=flask.g.object))
 
         @self.post('/bulk/delete')
         def bulk_delete():

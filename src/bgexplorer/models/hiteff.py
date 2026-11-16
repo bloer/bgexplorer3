@@ -4,6 +4,7 @@ from mongoengine.fields import (StringField, MapField, UUIDField, ListField,
 from mongoengine.errors import ValidationError
 from mongoengine import signals
 from pymongo import UpdateOne
+from .. import jobs
 from ..versioning.verdoc import DynamicVersionedDocument, check_writable
 from .fields import QuantityField, UncertainQuantityField, HistogramField
 from .common import units as unitreg
@@ -366,7 +367,10 @@ def store_rois(version_tag: str, rois) -> int:
     field = HitEfficiency._fields['rois']
     changes = []
     shared = []
-    for he in HitEfficiency.select_version(version_tag).no_cache():
+    queryset = HitEfficiency.select_version(version_tag)
+    total = queryset.count()
+    for done, he in enumerate(queryset.no_cache(), 1):
+        jobs.progress(done, total, stage='hit efficiencies')
         stored = field.to_mongo(he.rois)
         values = field.to_mongo({roi.key: roi.evaluate(he, store=False)
                                  for roi in rois})

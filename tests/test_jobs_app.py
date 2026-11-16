@@ -168,18 +168,18 @@ class TestStatusPage(AppTestCase):
         self.assertIn('progress-bar-striped', html)
         self.assertNotIn('width: 0%', html)
 
-    def test_succeeded_job_goes_on_to_next(self):
+    def test_succeeded_job_goes_on_to_where_it_says(self):
         job_id = put_job('app_quick', 'succeeded', result={
             'messages': [['All saved', 'success']], 'redirect': '/elsewhere'})
         response = self.page(job_id, next='/explore/main/')
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response.headers['Location'].endswith('/explore/main/'))
+        self.assertEqual(response.headers['Location'], '/elsewhere')
         self.assertIn('All saved', self.html(self.client.get('/')))
 
-    def test_succeeded_job_without_next_uses_its_own_redirect(self):
+    def test_succeeded_job_without_a_redirect_goes_on_to_next(self):
         job_id = put_job('app_quick', 'succeeded', result={
-            'redirect': '/explore/main/'})
-        response = self.page(job_id)
+            'messages': [['Done', 'success']]})
+        response = self.page(job_id, next='/explore/main/')
         self.assertTrue(response.headers['Location'].endswith('/explore/main/'))
         job_id = put_job('app_quick', 'succeeded')
         self.assertEqual(self.page(job_id).headers['Location'], '/')
