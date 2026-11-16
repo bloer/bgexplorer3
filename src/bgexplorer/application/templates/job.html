@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% set back = next or url_for('index') %}
+{% block head %}{{ super() }}
+{%- if active %}
+<noscript><meta http-equiv="refresh" content="3"></noscript>
+{%- endif %}
+{% endblock %}
+{% block title %}{{ job.label }} - Background Explorer{% endblock %}
+{% block pageheader %}<h1>{{ job.label }}</h1>{% endblock %}
+{% block pagecontent %}
+{% if active %}
+<div id="job-status">
+  {% set percent = job.percent %}
+  <p class="lead" id="job-state">
+    {% if job.status == 'queued' %}Waiting to start{% else %}Running{% endif %}
+    {% if job.cancel_requested %} (stopping){% endif %}
+  </p>
+  <div class="progress mb-2" id="job-progress" style="height: 1.5rem;">
+    {% if percent is none %}
+    <div class="progress-bar progress-bar-striped progress-bar-animated"
+         id="job-bar" role="progressbar" style="width: 100%"></div>
+    {% else %}
+    <div class="progress-bar" id="job-bar" role="progressbar"
+         style="width: {{ percent }}%" aria-valuenow="{{ percent }}"
+         aria-valuemin="0" aria-valuemax="100">{{ percent }}%</div>
+    {% endif %}
+  </div>
+  <p class="text-muted mb-1" id="job-detail">
+    {% if job.progress.stage %}<span id="job-stage">{{ job.progress.stage }}</span>{% endif %}
+    {% if job.progress.message %}<span id="job-message">{{ job.progress.message }}</span>{% endif %}
+  </p>
+  <p class="text-muted small"><span id="job-elapsed">{{ elapsed }}</span>
+    since {{ 'it was queued' if job.status == 'queued' else 'it started' }}.
+    This page updates by itself and takes you on when the job is done; you
+    can also leave it, the job carries on.</p>
+  {% if has_role('editor') %}
+  <form method="post" id="job-cancel"
+        action="{{ url_for('jobs.cancel', job_id=job.id, next=next) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-outline-danger btn-sm">Cancel</button>
+  </form>
+  {% endif %}
+</div>
+{% else %}
+<div class="alert alert-{{ 'warning' if job.status == 'cancelled' else 'danger' }}"
+     id="job-error">
+  <strong>{{ {'failed': 'The job failed', 'cancelled': 'The job was cancelled',
+              'abandoned': 'The job was abandoned'}[job.status] }}.</strong>
+  {% if job.error %}<div>{{ job.error }}</div>{% endif %}
+  {% if show_traceback and job.traceback %}
+  <pre class="small mt-2 mb-0">{{ job.traceback }}</pre>
+  {% endif %}
+</div>
+<p><a href="{{ back }}">Back</a></p>
+{% endif %}
+{% endblock %}
+{% block pagescripts %}
+{% if active %}
+<script>
+(function () {
+  var url = {{ url_for('jobs.status_json', job_id=job.id)|tojson }};
+  var bar = document.getElementById('job-bar');
+  function text(id, value) {
+    var el = document.getElementById(id);
+    if (el) { el.textContent = value || ''; }
+  }
+  function poll() {
+    fetch(url, {headers: {'Accept': 'application/json'}, credentials: 'same-origin'})
+      .then(function (r) { if (!r.ok) { throw new Error(r.status); } return r.json(); })
+      .then(function (job) {
+        if (job.finished) { window.location.reload(); return; }
+        text('job-state', (job.status === 'queued' ? 'Waiting to start'
+                                                   : 'Running')
+             + (job.cancel_requested ? ' (stopping)' : ''));
+        text('job-stage', job.stage);
+        text('job-message', job.message);
+        if (job.percent !== null && bar) {
+          bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+          bar.style.width = job.percent + '%';
+          bar.textContent = job.percent + '%';
+        }
+        setTimeout(poll, 1000);
+      })
+      .catch(function () { setTimeout(poll, 3000); });
+  }
+  setTimeout(poll, 1000);
+})();
+</script>
+{% endif %}
+{% endblock %}

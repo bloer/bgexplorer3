@@ -150,6 +150,10 @@ class JobRunner:
                              (self._settings, self.initializer,
                               self.initargs))
 
+    @property
+    def started(self) -> bool:
+        return self._executor is not None
+
     def start(self) -> None:
         """ Start the executor and, but for eager mode, the threads that
         claim jobs and renew their leases. Does nothing if started """

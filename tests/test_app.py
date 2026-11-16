@@ -27,8 +27,8 @@ import numpy as np
 # populating the full examples takes a few minutes, so is opt-in
 RUN_EXAMPLES = bool(os.environ.get('BGEXPLORER_TEST_EXAMPLES'))
 
-# endpoints that aren't pages
-SKIP_ENDPOINTS = {'static'}
+# endpoints that aren't pages, or need a job (see test_jobs_app)
+SKIP_ENDPOINTS = {'static', 'jobs.status', 'jobs.status_json'}
 
 # pages that don't work yet. These are expected to fail so that fixing them
 # is noticed.

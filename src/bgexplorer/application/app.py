@@ -27,6 +27,7 @@ from ..versioning.verdoc import VersionedDocument
 from ..versioning.history import recent_events
 from .forms import input_type, input_value, field_kind
 from . import auth
+from . import jobs as appjobs
 
 from ..models.asymmetric import AsymmetricUncertainty
 import pint
@@ -64,6 +65,7 @@ def create_app(config_file=None, config=None):
 
     # first, so that logins are checked before anything else
     auth.init_app(app)
+    appjobs.init_app(app)
 
     # blueprints
     # the API only accepts JSON bodies, which can't be sent cross-site
