@@ -337,6 +337,15 @@ def request_cancel(job_id) -> Optional[str]:
     return 'finished'
 
 
+def serial_running(scope: str, exclude=None) -> bool:
+    """ Whether a serial job other than `exclude` is running in `scope` """
+    query = {'scope': scope, 'serial': True, 'status': 'running'}
+    oid = _oid(exclude) if exclude is not None else None
+    if oid is not None:
+        query['_id'] = {'$ne': oid}
+    return Job._get_collection().find_one(query, {'_id': 1}) is not None
+
+
 def active_for_scope(scope: str, exclude=None) -> List[dict]:
     """ The queued and running jobs of `scope`, oldest first, as dicts for
     display. Uses the (scope, status) index """

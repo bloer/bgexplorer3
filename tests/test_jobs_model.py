@@ -1,12 +1,11 @@
 """ The job record, claiming, leases and the reaper """
 import datetime
 import unittest
-import mongoengine
 from bson import ObjectId
 from bgexplorer import jobs
 from bgexplorer.jobs import models
 from bgexplorer.jobs.models import Job, IllegalTransition
-from tests.dbutil import connect_test_db
+from tests.jobs_support import JobTestCase, later
 
 LEASE = 60
 
@@ -29,27 +28,6 @@ def _excl(params):
 @jobs.job_kind('t_idem', idempotent=True, max_attempts=2)
 def _idem(params):
     return {}
-
-
-def later(seconds):
-    return models.utcnow() + datetime.timedelta(seconds=seconds)
-
-
-class JobTestCase(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        connect_test_db()
-
-    @classmethod
-    def tearDownClass(cls):
-        mongoengine.disconnect()
-
-    def setUp(self):
-        Job.drop_collection()
-        Job.ensure_indexes()
-
-    def status(self, job_id):
-        return models.get(job_id).status
 
 
 class TestSubmit(JobTestCase):
