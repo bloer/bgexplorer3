@@ -197,13 +197,18 @@ def _blocked(doc) -> bool:
 
 
 def claim(owner: str, lease_seconds: float,
-          now: Optional[datetime.datetime] = None) -> Optional[Job]:
+          now: Optional[datetime.datetime] = None,
+          exclude=()) -> Optional[Job]:
     """ Start the oldest job that is ready and not held back, leasing it to
-    `owner` for `lease_seconds`. Returns None if there is no such job """
+    `owner` for `lease_seconds`. Jobs with an id in `exclude` are passed
+    over. Returns None if there is no such job """
     now = now or utcnow()
     coll = Job._get_collection()
     ready = {'status': 'queued', '$or': [{'not_before': None},
                                          {'not_before': {'$lte': now}}]}
+    skip = [oid for oid in map(_oid, exclude) if oid is not None]
+    if skip:
+        ready['_id'] = {'$nin': skip}
     candidates = coll.find(ready).sort([('created', 1), ('_id', 1)]) \
                      .limit(CLAIM_CANDIDATES)
     for doc in candidates:

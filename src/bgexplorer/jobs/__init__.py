@@ -7,7 +7,9 @@ from .kinds import JobKind, job_kind, get_kind
 from .models import submit, get
 from .context import (JobCancelled, JobLost, Retry, progress, check_cancelled,
                       current_user, current_job_id, require_idle)
+from .runner import JobRunner, execute, configure
 
 __all__ = ['JobKind', 'job_kind', 'get_kind', 'submit', 'get', 'JobCancelled',
            'JobLost', 'Retry', 'progress', 'check_cancelled', 'current_user',
-           'current_job_id', 'require_idle']
+           'current_job_id', 'require_idle', 'JobRunner', 'execute',
+           'configure']
