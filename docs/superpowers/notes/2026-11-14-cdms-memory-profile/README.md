@@ -165,3 +165,26 @@ peak of each job kind in its job record so the pool size can be set from data.
   `bexplorer3_testing_cdms`; delete it if it isn't wanted.
 - Export takes about six minutes for a 290 MB file, so it is a candidate job
   kind in the background-jobs design.
+
+## Retained memory of the cold spectra table (2026-11-16)
+
+`retained_cdms.py` builds the root's spectra table cold, keeps it, and
+reports what it holds (no tracemalloc, so the timing is real). Cold build
+11.2 s; RSS peak +2055 MB and +2051 MB after `gc`, so the peak is the
+retained table, not transient decoding.
+
+| What | Size |
+|---|---|
+| 3,466 hit-efficiency blocks, each with all 6 spectrum names (20,796 hit values) | 928 MB of moment arrays (mode, v0, v1) |
+| `HitValue.bin_edges`, one array per hit value | 310 MB (13,086 arrays, all with the same content) |
+| `_Columns` for one name, stacked copy of the moments | 150 MB (2,110 columns) |
+| `tt.nbytes` / `estimate_bytes` | 1,480 / 1,630 MB |
+
+- The spectra cache limit is 154 MB (30% of the default 512), so this table
+  is rejected by `ResultsCache`; at the defaults every spectra page load
+  repeats the 11 s.
+- After the table is dropped RSS is still +1853 MB, and `malloc_trim(0)`
+  returns it to +200 MB. So the "RSS stays high after a step" in the note is
+  mostly allocator fragmentation from about 60,000 small (25 KB) arrays, not
+  live data. Large arrays get their own mappings and are returned on free.
+- One name needs 150 MB of columns, about 1/14 of what is held.
