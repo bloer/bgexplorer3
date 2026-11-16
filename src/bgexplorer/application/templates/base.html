@@ -84,6 +84,21 @@
         This server has no site admin yet. <a href="{{ url_for('auth.setup') }}">Set it up</a>
     </div>
 {%- endif %}
+{%- if edit_jobs %}
+    <div class="alert alert-warning" id="stale-banner" role="status">
+        <strong>{{ 'An edit is' if edit_jobs|length == 1 else 'Edits are' }} in progress.</strong>
+        Figures on this page may not include {{ 'the change' if edit_jobs|length == 1 else 'the changes' }} yet.
+        <ul class="mb-0">
+{%- for job in edit_jobs %}
+            <li>{{ job.label }}
+                {%- if job.status == 'queued' %} is waiting to start
+                {%- elif job.percent is not none %} ({{ job.percent }}%)
+                {%- endif %}
+                &ndash; <a href="{{ url_for('jobs.status', job_id=job.id, next=request.path) }}">Watch progress</a></li>
+{%- endfor %}
+        </ul>
+    </div>
+{%- endif %}
 {%- for category, message in get_flashed_messages(with_categories=true) %}
     <div class="alert alert-{{ {'error': 'danger', 'message': 'info'}.get(category, category) }} alert-dismissible fade show" role="alert">
         {{ message }}

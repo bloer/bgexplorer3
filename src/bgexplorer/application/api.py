@@ -19,6 +19,7 @@ from ..versioning.record import VersionRecord, get_record
 from ..versioning import control as vc
 from ..versioning.archive import (export_version, import_version,
                                   VersionFileError)
+from . import jobs as appjobs
 from .auth import require, Role, SAFE_METHODS
 
 API_VERSION = 'v1'
@@ -344,16 +345,22 @@ def create_api() -> flask.Blueprint:
             'api.get_version', active_version=tag)
         return response
 
+    def version_json(record):
+        data = settings_to_json(record)
+        data['pending_jobs'] = [
+            {key: job[key] for key in ('id', 'kind', 'status', 'percent')}
+            for job in appjobs.active_edit_jobs(record.version_tag)]
+        return flask.jsonify(data)
+
     @api.get('/versions/<active_version>')
     def get_version():
-        return flask.jsonify(settings_to_json(
-            get_version_record(flask.g.active_version)))
+        return version_json(get_version_record(flask.g.active_version))
 
     @api.patch('/versions/<active_version>')
     def update_version():
         record = get_version_record(flask.g.active_version)
         update_settings(record, get_json_object())
-        return flask.jsonify(settings_to_json(record))
+        return version_json(record)
 
     @api.get('/versions/<active_version>/merge')
     def plan_merge():

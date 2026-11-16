@@ -200,8 +200,14 @@ def duration_text(seconds: float) -> str:
 
 
 def active_edit_jobs(tag: str) -> List[dict]:
-    """ The jobs queued or running for version `tag` """
-    return models.active_for_scope(tag)
+    """ The jobs queued or running for version `tag`, looked up once per
+    request """
+    if not flask.has_request_context():
+        return models.active_for_scope(tag)
+    cache = flask.g.setdefault('edit_jobs_by_version', {})
+    if tag not in cache:
+        cache[tag] = models.active_for_scope(tag)
+    return cache[tag]
 
 
 def create_blueprint() -> flask.Blueprint:
