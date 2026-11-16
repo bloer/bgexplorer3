@@ -10,18 +10,27 @@ operation. Memory is the resident set size of this process, sampled every few
 milliseconds, so its peak is the real one, with --tracemalloc also the peak of
 what Python allocated (which makes everything slower).
 
+With --jobs-mode thread or process, the operations that edit (the change,
+and the save or rebuild it needs) are run as a background job by a pool of
+--workers threads or processes, as the web application would, and the step
+"job" is the wall clock from submitting the job until it has finished. The
+views before and after stay in this process. The job reports its own steps
+and the peak resident size of the process that ran it, which in process mode
+is a worker, not this process, and which starts with a cold cache.
+
 This is a manual benchmark, not part of the test suite.
 
 Usage:
     python scripts/profile_standard.py [--uri URI] [--version TAG] [--populate]
         [--clean] [--ops view,add_roi,...] [--in-place] [--no-view]
         [--profile DIR] [--sort cumulative] [--limit 25] [--tracemalloc]
-        [--json FILE]
+        [--json FILE] [--jobs-mode inline|thread|process] [--workers N]
 """
 import argparse
 import contextlib
 import cProfile
 import gc
+import importlib
 import io
 import json
 import os
@@ -240,7 +249,128 @@ OPS = dict(view=(op_view, False), spectra=(op_spectra, False),
            rebuild=(op_rebuild, True), export=(op_export, False))
 
 
-def run(meter: Meter, base: str, name: str, in_place: bool, with_view: bool):
+BENCH_KIND = 'bench_op'
+JOB_TIMEOUT = 6 * 3600
+PROBE = False
+PROBE_PERIOD = 0.25
+
+
+class Probe:
+    """ Requests the table and dashboard of a version, as its pages would, from
+    a thread of this process while a job runs, to see what the job costs the
+    pages: the views are of the results as they were before the edit """
+
+    def __init__(self, tag: str):
+        self.tag = tag
+        self.latencies = []
+        self.errors = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        from bgexplorer.models.budget.dashboard import dashboard
+        from bgexplorer.models.budget.table import table, table_columns
+        while not self._stop.wait(PROBE_PERIOD):
+            started = time.perf_counter()
+            try:
+                root = root_of(self.tag)
+                table(root)
+                dashboard(root, table_columns(self.tag)[0][0])
+            except Exception:
+                self.errors += 1
+                continue
+            self.latencies.append(time.perf_counter() - started)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join()
+
+    def summary(self) -> dict:
+        lat = sorted(self.latencies)
+        if not lat:
+            return {'requests': 0, 'errors': self.errors}
+        return {'requests': len(lat), 'errors': self.errors,
+                'median_s': lat[len(lat) // 2], 'p95_s': lat[int(len(lat) * .95)],
+                'max_s': lat[-1]}
+
+
+def register_bench_kind():
+    """ Register the job kind that runs one of the operations above """
+    from bgexplorer import jobs
+    from bgexplorer.models.sourceterm import clear_results_cache
+
+    @jobs.job_kind(BENCH_KIND, label="Benchmark operation")
+    def bench_op(params):
+        if params['cold']:
+            clear_results_cache()
+        meter = Meter()
+        try:
+            OPS[params['op']][0](meter, params['op'], params['tag'])
+        finally:
+            meter.close()
+        return {'steps': meter.results, 'pid': os.getpid(),
+                'peak_rss_mb': max([r['rss_peak_mb'] for r in meter.results],
+                                   default=0)}
+
+
+def bench_init(uri: str, adapter: str = None):
+    """ Initializer of the worker processes: the application, and the kind.
+    `adapter` is 'module:function', called to adapt the operations as the
+    main program did (see profile_cdms.py) """
+    from bgexplorer.application.jobs import worker_init
+    worker_init(uri)
+    register_bench_kind()
+    if adapter:
+        module, function = adapter.split(':')
+        getattr(importlib.import_module(module), function)()
+
+
+def make_runner(mode: str, workers: int, uri: str, adapter: str = None):
+    """ A started job runner for `op_as_job`; `mode` is 'thread' or 'process' """
+    from bgexplorer import jobs
+    register_bench_kind()
+    runner = jobs.JobRunner(
+        mode=mode, workers=workers, poll_seconds=0.05,
+        initializer=bench_init if mode == 'process' else None,
+        initargs=(uri, adapter))
+    runner.start()
+    return runner
+
+
+def op_as_job(meter: Meter, runner, name: str, tag: str):
+    """ Make the change of the operation `name` in a job, and wait for it """
+    cold = runner.mode == 'process'
+    params = {'op': name, 'tag': tag, 'cold': cold}
+    probe = Probe(tag) if PROBE else contextlib.nullcontext()
+    with probe, meter.step(name, f"job ({runner.mode})", profile=False):
+        job = runner.wait(runner.submit(BENCH_KIND, params, scope=tag),
+                          JOB_TIMEOUT)
+    if PROBE:
+        summary = probe.summary()
+        print(f"    views of the version during the job: {summary}",
+              flush=True)
+        meter.results[-1]['probe'] = summary
+    if job is None or job.status != 'succeeded':
+        raise RuntimeError(f"The job of {name} didn't succeed: "
+                           f"{job and (job.status, job.error)}")
+    result = job.result
+    where = f"worker pid {result['pid']}" if cold else "this process"
+    print(f"    job ran in {where}, peak {result['peak_rss_mb']:.0f} MB; "
+          "its steps:", flush=True)
+    for step in result['steps']:
+        print(f"      {step['step']:<36s} {step['seconds']:8.2f} s   "
+              f"peak {step['rss_peak_mb']:7.0f} MB", flush=True)
+        meter.results.append(dict(step, worker=True, mode=runner.mode))
+    meter.results[-len(result['steps']) - 1]['job_peak_rss_mb'] = \
+        result['peak_rss_mb']
+
+
+def run(meter: Meter, base: str, name: str, in_place: bool, with_view: bool,
+        runner=None):
     from bgexplorer.models.sourceterm import clear_results_cache
     from bgexplorer.versioning import create_branch, delete_version
     func, edits = OPS[name]
@@ -255,7 +385,10 @@ def run(meter: Meter, base: str, name: str, in_place: bool, with_view: bool):
     try:
         if name == 'view' or (edits and with_view):
             view(meter, name, tag, 'before', profile=False)
-        func(meter, name, tag)
+        if runner is not None and edits:
+            op_as_job(meter, runner, name, tag)
+        else:
+            func(meter, name, tag)
         if edits and with_view:
             view(meter, name, tag, 'after')
     finally:
@@ -286,7 +419,19 @@ def main():
     parser.add_argument('--tracemalloc', action='store_true')
     parser.add_argument('--json', metavar='FILE',
                         help="save the results to compare runs")
+    parser.add_argument('--jobs-mode', choices=('inline', 'thread', 'process'),
+                        default='inline',
+                        help="run the operations that edit as background "
+                        "jobs of a pool of threads or processes")
+    parser.add_argument('--workers', type=int, default=4,
+                        help="size of the pool with --jobs-mode")
+    parser.add_argument('--probe', action='store_true',
+                        help="with --jobs-mode, request the table and "
+                        "dashboard from this process while each job runs and "
+                        "report how long that takes")
     args = parser.parse_args()
+    global PROBE
+    PROBE = args.probe
     ops = [op for op in args.ops.split(',') if op]
     unknown = set(ops) - set(OPS)
     if unknown:
@@ -308,12 +453,18 @@ def main():
         build_standard_scenario(args.version)
     print(f"scenario {args.version}: {summarize(args.version)}", flush=True)
 
+    runner = None
+    if args.jobs_mode != 'inline':
+        runner = make_runner(args.jobs_mode, args.workers, args.uri)
     meter = Meter(args.profile, args.sort, args.limit, args.tracemalloc)
     try:
         for name in ops:
-            run(meter, args.version, name, args.in_place, not args.no_view)
+            run(meter, args.version, name, args.in_place, not args.no_view,
+                runner)
     finally:
         meter.close()
+        if runner is not None:
+            runner.stop()
     if args.json:
         Path(args.json).write_text(json.dumps(meter.results, indent=1))
 

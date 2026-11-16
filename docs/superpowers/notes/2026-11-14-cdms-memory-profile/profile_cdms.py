@@ -1,9 +1,10 @@
 """ Run the profile_standard ops against the CDMS model, adapting the ones that
-assume the standard scenario's structure. Usage: profile_cdms.py ops [--profile DIR] [--in-place] [--json F]"""
+assume the standard scenario's structure. Usage: profile_cdms.py [--ops ...]
+[--profile DIR] [--in-place] [--json F] [--jobs-mode inline|thread|process]
+[--workers N]"""
 import argparse
 import json
 import sys
-from pathlib import Path
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / 'src'))
@@ -61,27 +62,47 @@ def op_edit_assay(meter, op, tag):
         best.save()
 
 
-ps.root_of = root_of
-ps.OPS['add_roi'] = (op_add_roi, True)
-ps.OPS['add_leaf'] = (op_add_leaf, True)
-ps.OPS['edit_assay'] = (op_edit_assay, True)
+def adapt():
+    """ Also called by the worker processes of the job modes """
+    ps.root_of = root_of
+    ps.OPS['add_roi'] = (op_add_roi, True)
+    ps.OPS['add_leaf'] = (op_add_leaf, True)
+    ps.OPS['edit_assay'] = (op_edit_assay, True)
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--ops', default=','.join(ps.OPS))
-parser.add_argument('--in-place', action='store_true')
-parser.add_argument('--no-view', action='store_true')
-parser.add_argument('--profile')
-parser.add_argument('--limit', type=int, default=25)
-parser.add_argument('--json')
-args = parser.parse_args()
 
-from bgexplorer.application.app import create_app
-create_app(config={'MONGODB_URI': URI, 'TESTING': True})
-meter = ps.Meter(args.profile, 'cumulative', args.limit)
-try:
-    for name in args.ops.split(','):
-        ps.run(meter, TAG, name, args.in_place, not args.no_view)
-finally:
-    meter.close()
-if args.json:
-    Path(args.json).write_text(json.dumps(meter.results, indent=1))
+def main():
+    adapt()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--ops', default=','.join(ps.OPS))
+    parser.add_argument('--in-place', action='store_true')
+    parser.add_argument('--no-view', action='store_true')
+    parser.add_argument('--profile')
+    parser.add_argument('--limit', type=int, default=25)
+    parser.add_argument('--json')
+    parser.add_argument('--jobs-mode', choices=('inline', 'thread', 'process'),
+                        default='inline')
+    parser.add_argument('--workers', type=int, default=4)
+    parser.add_argument('--probe', action='store_true')
+    args = parser.parse_args()
+    ps.PROBE = args.probe
+
+    from bgexplorer.application.app import create_app
+    create_app(config={'MONGODB_URI': URI, 'TESTING': True})
+    runner = None
+    if args.jobs_mode != 'inline':
+        runner = ps.make_runner(args.jobs_mode, args.workers, URI,
+                                'profile_cdms:adapt')
+    meter = ps.Meter(args.profile, 'cumulative', args.limit)
+    try:
+        for name in args.ops.split(','):
+            ps.run(meter, TAG, name, args.in_place, not args.no_view, runner)
+    finally:
+        meter.close()
+        if runner is not None:
+            runner.stop()
+    if args.json:
+        Path(args.json).write_text(json.dumps(meter.results, indent=1))
+
+
+if __name__ == '__main__':
+    main()
