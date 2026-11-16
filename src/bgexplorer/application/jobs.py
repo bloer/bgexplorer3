@@ -5,7 +5,6 @@ import atexit
 import logging
 import os
 import signal
-import tempfile
 import threading
 import time
 import uuid
@@ -13,7 +12,7 @@ from typing import List, Optional
 import flask
 from flask_login import current_user
 from .. import jobs as core
-from ..jobs import models
+from ..jobs import models, maintenance as job_maintenance
 from ..models.users import Role
 from ..versioning.verdoc import current_user_name
 from . import auth
@@ -104,8 +103,7 @@ def _resolve(config) -> None:
     if not config.get('JOBS_WORKERS'):
         config['JOBS_WORKERS'] = min(4, os.cpu_count() or 1)
     if not config.get('JOBS_FILES_DIR'):
-        config['JOBS_FILES_DIR'] = os.path.join(tempfile.gettempdir(),
-                                                'bgexplorer-jobs')
+        config['JOBS_FILES_DIR'] = job_maintenance.default_files_dir()
 
 
 def _stop_on_sigterm(job_runner: core.JobRunner) -> None:

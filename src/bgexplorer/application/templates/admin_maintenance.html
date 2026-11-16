@@ -46,6 +46,46 @@
     <div class="col-auto form-text">Regenerates the version's source terms from its components. Tags can't be rebuilt.</div>
 </form>
 
+<h2>Jobs</h2>
+<div id="jobs">
+{% if jobs %}
+<table class="table w-auto">
+    <thead><tr><th>Job</th><th>Version</th><th>User</th><th>Status</th><th>Progress</th><th>Created (UTC)</th><th></th></tr></thead>
+    <tbody>
+        {% for job in jobs %}
+        <tr><td><a href="{{ url_for('jobs.status', job_id=job.id) }}">{{ job.label }}</a></td>
+            <td>{{ job.scope or '' }}</td><td>{{ job.user or '' }}</td>
+            <td>{{ job.status }}{% if job.cancel_requested and job.status == 'running' %} (stopping){% endif %}
+                {%- if job.error and job.status != 'succeeded' %} <span class="text-muted small" title="{{ job.error }}">{{ job.error | truncate(40) }}</span>{% endif %}</td>
+            <td>{% if job.percent is not none %}{{ job.percent }}%{% endif %}{% if job.progress.stage %} {{ job.progress.stage }}{% endif %}</td>
+            <td>{{ job.created.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+            <td class="text-nowrap">
+                {% if job.status in ('queued', 'running') %}
+                <form method="POST" class="d-inline" action="{{ url_for('admin.cancel_job', job_id=job.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-secondary">Cancel</button>
+                </form>
+                {% endif %}
+                {% if job.status == 'running' %}
+                <form method="POST" class="d-inline" action="{{ url_for('admin.abandon_job', job_id=job.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Abandon this job? Only do so if it is stuck: whatever is running it is not stopped, and any lock it holds stays.');">Abandon</button>
+                </form>
+                {% endif %}
+            </td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+<form method="POST" id="clearjobs" action="{{ url_for('admin.clear_jobs') }}" class="mb-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-warning">Clear finished jobs</button>
+    <span class="form-text">The most recent jobs are shown. Finished jobs are removed after a few days anyway.</span>
+</form>
+{% else %}
+<p>No jobs have been run recently.</p>
+{% endif %}
+</div>
+
 <h2>Locks</h2>
 <div id="locks">
 {% if locks %}

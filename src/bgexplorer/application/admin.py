@@ -5,7 +5,9 @@ from bson import ObjectId
 from mongoengine.errors import ValidationError, NotUniqueError
 from werkzeug.datastructures import MultiDict
 from ..versioning import control as vc
+from ..jobs import models as job_models
 from ..versioning import maintenance
+from ..jobs import maintenance as job_maintenance
 from ..models.sourceterm import clear_calculation_cache
 from ..models.settings import ApplicationSettings, get_application_settings
 from ..models.users import User, is_last_site_admin
@@ -82,6 +84,7 @@ def create_admin_blueprint() -> flask.Blueprint:
                                      stats=maintenance.database_stats(),
                                      orphans=maintenance.find_orphans(),
                                      locks=maintenance.find_locks(),
+                                     jobs=job_maintenance.find_jobs(limit=50),
                                      versions=vc.list_versions())
 
     @bp.post('/maintenance/clear-cache')
@@ -99,6 +102,43 @@ def create_admin_blueprint() -> flask.Blueprint:
         return appjobs.submit_and_redirect(
             'rebuild', {'version': version}, version,
             flask.url_for('.maintenance_page'))
+
+    def job_or_404(job_id):
+        job = job_models.get(job_id)
+        if job is None:
+            flask.abort(404, "There is no such job")
+        return job
+
+    @bp.post('/jobs/<job_id>/cancel')
+    def cancel_job(job_id):
+        job = job_or_404(job_id)
+        outcome = job_maintenance.cancel_job(job.id)
+        if outcome == 'cancelled':
+            flask.flash(f"Cancelled {job.label}", 'success')
+        elif outcome == 'requested':
+            flask.flash(f"Asked {job.label} to stop at its next safe point",
+                        'success')
+        else:
+            flask.flash(f"{job.label} had already ended", 'warning')
+        return flask.redirect(flask.url_for('.maintenance_page') + '#jobs')
+
+    @bp.post('/jobs/<job_id>/abandon')
+    def abandon_job(job_id):
+        job = job_or_404(job_id)
+        if job_maintenance.abandon_job(job.id):
+            flask.flash(f"{job.label} was abandoned. Whatever was running it "
+                        "may still be at work, and any version lock it holds "
+                        "stays until cleared below", 'warning')
+        else:
+            flask.flash(f"{job.label} is not running", 'warning')
+        return flask.redirect(flask.url_for('.maintenance_page') + '#jobs')
+
+    @bp.post('/jobs/clear')
+    def clear_jobs():
+        cleared = job_maintenance.clear_jobs(
+            files_dir=flask.current_app.config['JOBS_FILES_DIR'])
+        flask.flash(f"Removed {len(cleared)} finished job(s)", 'success')
+        return flask.redirect(flask.url_for('.maintenance_page') + '#jobs')
 
     @bp.post('/maintenance/clear-locks')
     def clear_locks():
