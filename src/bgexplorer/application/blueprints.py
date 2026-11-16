@@ -30,6 +30,11 @@ import json
 import markupsafe
 
 
+# table column index -> stored SourceTerm field the server can sort by
+_SOURCETERM_SORT = {1: 'assemblyPathStr', 3: 'source.name', 5: 'location'}
+_MAX_PAGE = 1000
+
+
 def get_or_404(queryset, objid):
     try:
         return queryset.get(original_id=ObjectId(objid))
@@ -576,13 +581,48 @@ class CollectionViews(flask.Blueprint):
         def sourceterms():
             return flask.render_template('view_sourceterms.html')
 
-        @self.get('/<objid>/sourceterms/rows')
-        def sourceterm_rows():
-            """ The table rows of `sourceterms`, which the page loads """
-            rows = listed_sourceterms(find_sourceterms(flask.g.object))
-            return str(flask.get_template_attribute(
-                'utils.html', 'print_sourceterm_rows')(
-                    rows, activecomponent=flask.g.object))
+        @self.get('/<objid>/sourceterms/data')
+        def sourceterm_data():
+            """ One page of the `sourceterms` table, for DataTables'
+            server-side processing. Cells are html.
+            """
+            args = flask.request.args
+            try:
+                draw = int(args.get('draw', 0))
+                start = max(int(args.get('start', 0)), 0)
+                length = int(args.get('length', 100))
+                column = args.get('order[0][column]')
+                column = None if column is None else int(column)
+            except ValueError:
+                flask.abort(400, "draw, start, length and order must be "
+                                 "integers")
+            length = _MAX_PAGE if length < 0 else min(length, _MAX_PAGE)
+
+            terms = find_sourceterms(flask.g.object)
+            total = terms.count()
+            search = args.get('search[value]', '').strip()
+            if search:
+                terms = terms.filter(me.Q(assemblyPathStr__icontains=search) |
+                                     me.Q(source__name__icontains=search) |
+                                     me.Q(location__icontains=search))
+            filtered = terms.count() if search else total
+            if column in _SOURCETERM_SORT:
+                desc = '-' if args.get('order[0][dir]') == 'desc' else ''
+                terms = terms.order_by(desc + _SOURCETERM_SORT[column], 'id')
+            else:
+                terms = terms.order_by('id')
+
+            rows = listed_sourceterms(terms.skip(start).limit(length))
+            cells = {name: flask.get_template_attribute(
+                'utils.html', 'sourceterm_' + name)
+                for name in ('path', 'spec', 'source', 'rate', 'location',
+                             'hiteffs')}
+            data = [{'DT_RowId': str(row.original_id),
+                     **{name: str(cell(row, activecomponent=flask.g.object))
+                        for name, cell in cells.items()}}
+                    for row in rows]
+            return flask.jsonify(draw=draw, recordsTotal=total,
+                                 recordsFiltered=filtered, data=data)
 
         @self.post('/<objid>/sourceterms/bulk/delete')
         def sourceterms_bulk_delete():

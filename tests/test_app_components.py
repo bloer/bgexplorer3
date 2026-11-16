@@ -190,10 +190,10 @@ class TestComponentPages(AppTestCase):
         self.assertIn('c1 surface', html)
         html = self.html(self.client.get(
             self.url('component.sourceterms', 'b', object=c1)))
-        self.assertNotIn('class="sourceterm"', html)  # the rows load later
-        html = self.html(self.client.get(
-            self.url('component.sourceterm_rows', 'b', object=c1)))
-        self.assertIn('title="override on c1"', html)
+        self.assertNotIn('override on c1', html)  # the rows load later
+        page = self.client.get(
+            self.url('component.sourceterm_data', 'b', object=c1)).get_json()
+        self.assertIn('title="override on c1"', page['data'][0]['location'])
 
         # an assembly places the component, and the spec still decides
         a1 = Assembly.select_version('b').get(name='a1')
@@ -242,6 +242,55 @@ class TestComponentPages(AppTestCase):
         # main is untouched
         self.assertEqual(Component.select_version('main').get(name='c1')
                          .spec_entries[0].location, None)
+
+    def test_sourceterm_data(self):
+        """ the sourceterms table is paged, searched and sorted by the server
+        """
+        def get(**params):
+            url = self.url('component.sourceterm_data', 'b', object=self.c1)
+            response = self.client.get(url, query_string=params)
+            self.assertEqual(response.status_code, 200)
+            return response.get_json()
+
+        url = self.url('emissionspec.edit', 'b', type='emissionspec',
+                       owner=self.c1.original_id)
+        self.client.post(url, data={
+            'name': 'c1 own', '_listfields': 'sources', 'sources.id': '',
+            'sources.name': 'Co60', 'sources.rate': '1 mBq/kg'})
+        data = get(draw=3)  # K40 and Co60
+        self.assertEqual((data['draw'], data['recordsTotal'],
+                          data['recordsFiltered']), (3, 2, 2))
+        self.assertEqual(sorted(data['data'][0]), [
+            'DT_RowId', 'hiteffs', 'location', 'path', 'rate', 'source',
+            'spec'])
+        ids = {st.original_id for st in
+               SourceTerm.select_version('b')(assemblyRoot=self.c1)}
+        self.assertEqual({row['DT_RowId'] for row in data['data']},
+                         {str(i) for i in ids})
+        self.assertEqual(len(get(length=1)['data']), 1)
+        self.assertEqual(len(get(start=1, length=1)['data']), 1)
+
+        found = get(**{'search[value]': 'k40'})
+        self.assertEqual((found['recordsTotal'], found['recordsFiltered']),
+                         (2, 1))
+        self.assertIn('K40', found['data'][0]['source'])
+        none = get(**{'search[value]': 'nothing like this'})
+        self.assertEqual((none['recordsTotal'], none['recordsFiltered'],
+                          none['data']), (2, 0, []))
+
+        sources = [[r['source'] for r in get(**{
+            'order[0][column]': 3, 'order[0][dir]': d})['data']]
+            for d in ('asc', 'desc')]
+        self.assertEqual(sources[0], sources[1][::-1])
+        self.assertNotEqual(sources[0], sources[1])
+        # the emission rate is not stored, so the server can't sort by it
+        self.assertEqual(get(**{'order[0][column]': 4})['data'],
+                         get()['data'])
+        for bad in ({'start': 'x'}, {'length': 'all'}, {'draw': '1.5'}):
+            response = self.client.get(
+                self.url('component.sourceterm_data', 'b', object=self.c1),
+                query_string=bad)
+            self.assertEqual(response.status_code, 400)
 
     def test_owned_specs(self):
         """ a component can create specs of its own, or copy a shared one """

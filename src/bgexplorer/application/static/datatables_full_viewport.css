@@ -23,3 +23,15 @@ table.dataTable td{
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* selected rows: a light tint, so links stay readable */
+table.dataTable > tbody > tr.selected > *,
+table.dataTable.table-hover > tbody > tr.selected:hover > * {
+    box-shadow: inset 0 0 0 9999px rgba(13, 110, 253, 0.12);
+    color: inherit;
+}
+table.dataTable > tbody > tr.selected > td.select-checkbox:before {border-color: black;}
+/* the check mark sits in the box, which table-sm moves up 3px */
+table.dataTable > tbody > tr.selected > td.select-checkbox:after {
+    color: black; font-size: 14px; line-height: 12px; margin-top: -9px;
+}
