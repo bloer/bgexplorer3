@@ -32,11 +32,13 @@ def is_encoded_array(value) -> bool:
             and 'data' in value)
 
 
-def decode_array(value: Mapping) -> np.ndarray:
-    """ Inverse of `encode_array` """
+def decode_array(value: Mapping, readonly: bool = False) -> np.ndarray:
+    """ Inverse of `encode_array`. Arrays are copied so they can be written
+    to, unless `readonly`, when they are read-only views of the data
+    """
     data = value['data']
     if value.get('zlib'):
         data = zlib.decompress(data)
-    # copy, since arrays backed by bytes are read-only
-    return (np.frombuffer(data, dtype=value['dtype'])
-            .reshape(value['shape']).copy())
+    result = np.frombuffer(data, dtype=value['dtype']).reshape(value['shape'])
+    # arrays backed by bytes are read-only
+    return result if readonly else result.copy()

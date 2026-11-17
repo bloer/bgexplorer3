@@ -135,8 +135,9 @@ def _encode(value, compressarrays: bool = True):
     return value
 
 
-def _decode(value):
-    return decode_array(value) if is_encoded_array(value) else value
+def _decode(value, readonly: bool = False):
+    return (decode_array(value, readonly) if is_encoded_array(value)
+            else value)
 
 
 class LeafStore:
@@ -170,9 +171,24 @@ def _isone(value) -> bool:
             and not isinstance(value, bool) and value == 1)
 
 
+def _immutable(value) -> bool:
+    """ Is array `value` a view of bytes, which can't be changed through it
+    or any other array?
+    """
+    while isinstance(value, np.ndarray):
+        if value.flags.writeable:
+            return False
+        value = value.base
+    return value is None or isinstance(value, bytes)
+
+
 def _frozen(value):
-    """ A read-only copy of array `value`, or scalar `value` """
+    """ A read-only copy of array `value` (or the array itself if nothing can
+    change it), or scalar `value`
+    """
     if value is None or np.isscalar(value):
+        return value
+    if isinstance(value, np.ndarray) and _immutable(value):
         return value
     value = np.array(value)
     value.setflags(write=False)
@@ -526,8 +542,7 @@ class AsymmetricUncertainty:
         if isinstance(val[0], bytes) and len(val) == 1:
             # legacy compressed numpy archive
             val = tuple(np.load(io.BytesIO(val[0])).values())
-        val = tuple(decode_array(v) if is_encoded_array(v) else v
-                    for v in val)
+        val = tuple(_decode(v, True) for v in val)
         if expression is not None:
             expression = LinearExpression.from_terms(expression, store)
         result = AsymmetricUncertainty(*val, forceposdef=False,
@@ -1012,7 +1027,7 @@ class LinearExpression:
         """ The inverse of `to_terms`. Leaves not in `data` are looked up
         in `store`
         """
-        leaves = {i: AsymmetricUncertainty(*(_decode(v) for v in val),
+        leaves = {i: AsymmetricUncertainty(*(_decode(v, True) for v in val),
                                            id=i)
                   for i, val in (data.get('leaves') or {}).items()}
         wanted = {i for ids, _ in data['terms'] for i in ids}
