@@ -27,6 +27,7 @@ from ..versioning.verdoc import VersionedDocument
 from ..versioning.history import recent_events
 from .forms import input_type, input_value, field_kind
 from . import auth, relativeto
+from . import jobs as appjobs
 
 from ..models.asymmetric import AsymmetricUncertainty
 import pint
@@ -64,6 +65,7 @@ def create_app(config_file=None, config=None):
 
     # first, so that logins are checked before anything else
     auth.init_app(app)
+    appjobs.init_app(app)
 
     # blueprints
     # the API only accepts JSON bodies, which can't be sent cross-site
@@ -205,9 +207,21 @@ def create_app(config_file=None, config=None):
             return dict()
         # whether to show buttons and forms that change this version
         return dict(settings=settings, version_record=version_record,
+                    edit_jobs=appjobs.active_edit_jobs(tag),
                     can_edit=(version_record.editable
                               and version_record.active_lock is None
                               and auth.has_role('editor')))
+
+    @app.after_request
+    def flag_stale_views(response):
+        """ Tell API clients that read results of a version that has edits
+        in progress, which they may not include yet """
+        tag = flask.g.get('active_version')
+        if tag and flask.request.method in ('GET', 'HEAD'):
+            if pending := appjobs.active_edit_jobs(tag):
+                response.headers['X-Bgexplorer-Stale'] = ','.join(
+                    job['id'] for job in pending)
+        return response
 
     @app.template_global()
     def has_diff_page(cls):

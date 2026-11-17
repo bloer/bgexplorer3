@@ -601,11 +601,12 @@ def clear_calculation_cache() -> None:
     clear_results_cache()
 
 
-def load_hiteffs(sourceterms: Iterable[SourceTerm], spectra: bool = True
+def load_hiteffs(sourceterms: Iterable[SourceTerm],
+                 spectra: Union[bool, str] = True
                  ) -> Dict[ObjectId, HitEfficiency]:
     """ Load all HitEfficiencies referenced by `sourceterms` with one query
     per version, rather than dereferencing each sourceterm's list. If not
-    `spectra`, don't load spectra.
+    `spectra`, don't load spectra; if it is a name, load only that spectrum.
 
     Returns a dict keyed by original_id
     """
@@ -619,6 +620,11 @@ def load_hiteffs(sourceterms: Iterable[SourceTerm], spectra: bool = True
             original_id__in=list(versionids))
         if not spectra:
             query = query.exclude('spectra')
+        elif spectra is not True:
+            others = [f'spectra.{key}' for key in query.distinct('spectra_keys')
+                      if key != spectra]
+            if others:
+                query = query.exclude(*others)
         result.update((hiteff.original_id, hiteff) for hiteff in query)
     return result
 

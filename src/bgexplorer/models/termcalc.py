@@ -11,7 +11,7 @@ folded into the hit efficiency's values.
 import logging
 import numpy as np
 from numbers import Real
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Union
 from pint.errors import PintError
 from .common import units as unitreg, Quantity, UnitMismatchError
 from .asymmetric import (AsymmetricUncertainty, CorrelationsNotLoaded,
@@ -261,19 +261,21 @@ class TermCalculator:
             return terms, unit
         return [RateTerm(key, moments, scale)], unit
 
-    def hit_blocks(self, sourceterm, spectra: bool = False
+    def hit_blocks(self, sourceterm, spectra: Union[bool, str] = False
                    ) -> Tuple[List[RateTerm], List[HitBlock]]:
         """ The pieces of the sourceterm's results: the terms of its rate,
-        and the scalars, ROIs (or if `spectra`, the spectra) of each of its
-        hit efficiencies. The result for a name is the sum over the blocks
-        of the rate times the block's `HitValue`
+        and the scalars, ROIs (or if `spectra`, the spectra, or if it is a
+        name only that spectrum) of each of its hit efficiencies. The result
+        for a name is the sum over the blocks of the rate times the block's
+        `HitValue`
         """
         terms, rate_unit = self.rate_terms(sourceterm)
         blocks = [self._block(hiteff, rate_unit, spectra)
                   for hiteff in self._hiteffs(sourceterm)]
         return terms, blocks
 
-    def _block(self, hiteff, rate_unit, spectra: bool) -> HitBlock:
+    def _block(self, hiteff, rate_unit, spectra: Union[bool, str]
+               ) -> HitBlock:
         cache_key = 'block', spectra, id(hiteff), rate_unit
         try:
             return self._scaled[cache_key][1]
@@ -282,7 +284,7 @@ class TermCalculator:
         values = {}
         if spectra:
             for key, val in hiteff.spectra.items():
-                if not isinstance(val, Histogram):
+                if not isinstance(val, Histogram) or spectra not in (True, key):
                     continue
                 m, unit = _split(val.hist)
                 display = self.config.spectrum_unit(key)

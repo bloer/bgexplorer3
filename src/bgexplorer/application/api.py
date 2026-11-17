@@ -7,7 +7,7 @@ Requests with a body must be sent as application/json, except uploads of
 version files to POST /api/v1/versions/import, which are multipart forms.
 """
 import datetime
-import tempfile
+import re
 import flask
 from bson import ObjectId
 from mongoengine.base.document import NON_FIELD_ERRORS
@@ -17,14 +17,20 @@ from werkzeug.exceptions import HTTPException
 from ..models.settings import VersionSettings, HitEffDbConfig, get_settings
 from ..versioning.record import VersionRecord, get_record
 from ..versioning import control as vc
-from ..versioning.archive import (export_version, import_version,
-                                  VersionFileError)
-from .auth import require, Role, SAFE_METHODS
+from ..versioning.control import ProtectedVersionError
+from ..versioning.verdoc import ReadOnlyVersionError, VersionedDocument
+from ..jobs import maintenance as job_maintenance, models as job_models
+from . import jobs as appjobs
+from .auth import require, has_role, Role, SAFE_METHODS
 
 API_VERSION = 'v1'
 
-# endpoints that take multipart file uploads instead of JSON
-UPLOAD_ENDPOINTS = ('api.import_version',)
+# endpoints that take multipart file uploads, or nothing, instead of JSON
+UPLOAD_ENDPOINTS = ('api.import_version', 'api.cancel_job')
+# how long a request may be asked to wait for its job, at the most
+MAX_WAIT_SECONDS = 3600
+# what to tell clients that were sent a job to poll, in seconds
+RETRY_AFTER_SECONDS = 2
 
 # Fields of a version that can be changed with PATCH: the description is
 # the VersionRecord's, the others are VersionSettings'
@@ -181,20 +187,29 @@ def update_settings(record: VersionRecord, body: dict) -> None:
     record.reload()
 
 
-def send_version_file(version_tag: str):
-    """ A download of `version_tag` exported to a file """
-    tmp = tempfile.SpooledTemporaryFile(max_size=2**26)
-    export_version(version_tag, tmp)
-    tmp.seek(0)
-    return flask.send_file(tmp, mimetype='application/gzip',
-                           as_attachment=True,
-                           download_name=f"{version_tag}.bgx.tar.gz")
+def check_editable(version_tag: str) -> None:
+    """ Raise a PermissionError if the version is a tag """
+    if not get_record(version_tag).editable:
+        raise ReadOnlyVersionError(f"'{version_tag}' is a tag, which can't "
+                                   "be changed")
 
 
-def import_uploaded_version(form, files) -> VersionRecord:
-    """ Import the version file uploaded as `file`, as the version named
-    `version_tag` of `type` 'branch' or 'tag' in `form`. Raises APIError
-    """
+def check_deletable(version_tag: str) -> None:
+    """ Raise a PermissionError if the version can't be deleted from the web
+    interface and API, i.e. it is the default version or a tag """
+    if version_tag == VersionedDocument.get_default_tag():
+        raise ProtectedVersionError(f"The default version '{version_tag}' "
+                                    "can't be deleted")
+    if not get_record(version_tag).editable:
+        raise ProtectedVersionError(f"'{version_tag}' is a tag; tags can't "
+                                    "be deleted")
+
+
+def prepare_import(form, files) -> dict:
+    """ Check the form that uploads the version file `file` to be imported as
+    the version named `version_tag`, of `type` 'branch' or 'tag'. Keeps the
+    upload in the folder for job files and returns the parameters of the job
+    that imports it, which removes it. Raises APIError """
     tag = form.get('version_tag')
     tag = tag.strip() if isinstance(tag, str) else tag
     type_ = form.get('type') or 'branch'
@@ -210,12 +225,65 @@ def import_uploaded_version(form, files) -> VersionRecord:
                        fields={'file': "required"})
     if type_ == 'tag':
         require(Role.admin)
-    try:
-        return import_version(upload.stream, tag, editable=type_ == 'branch',
-                              description=description)
-    except VersionFileError as e:
-        raise APIError(str(e), problems=e.problems,
-                       fields={'file': str(e)}) from e
+    path = appjobs.new_upload_path()
+    upload.save(path)
+    return dict(path=path, version_tag=tag, editable=type_ == 'branch',
+                description=description)
+
+
+def job_error(job) -> APIError:
+    """ The error to reply with when `job` ended without succeeding """
+    data = job.result or {}
+    if job.status == 'failed' and 'status' in data:
+        return APIError(job.error or "The job failed", data['status'],
+                        data.get('fields'), data.get('problems'))
+    return APIError(appjobs.failure_text(job),
+                    409 if job.status == 'cancelled' else 500)
+
+
+def wait_preference(header) -> tuple:
+    """ What the `Prefer` request header asks for: (seconds to wait for a job
+    or None for the default, the preference applied, if any). Preferences
+    that can't be read are ignored """
+    asked = None
+    applied = None
+    for token in (header or '').split(','):
+        name, _, value = token.strip().partition('=')
+        name = name.strip().lower()
+        value = value.strip().strip('"')
+        if name == 'respond-async' and asked is None:
+            asked, applied = 0.0, 'respond-async'
+        elif name == 'wait' and re.fullmatch(r'\d+', value):
+            asked = min(float(value), MAX_WAIT_SECONDS)
+            applied = f'wait={int(value)}'
+    return asked, applied
+
+
+def accepted(job) -> flask.Response:
+    """ The reply that sends the client to follow `job` """
+    response = flask.jsonify(appjobs.job_json(job))
+    response.status_code = 202
+    response.headers['Location'] = flask.url_for('api.get_job',
+                                                 job_id=str(job.id))
+    response.headers['Retry-After'] = str(RETRY_AFTER_SECONDS)
+    return response
+
+
+def submit_for_api(kind: str, params: dict, scope):
+    """ Submit a job for an API request and wait for it as long as the client
+    prefers, by default JOBS_API_WAIT_SECONDS. Returns (job, None) once it has
+    succeeded, and (job, response) with the 202 response if it is still going.
+    Raises the APIError that a failure is to be answered with """
+    wait, applied = wait_preference(flask.request.headers.get('Prefer'))
+    if wait is None:
+        wait = flask.current_app.config['JOBS_API_WAIT_SECONDS']
+    flask.g.preference_applied = applied
+    job = appjobs.submit_and_wait(kind, params, scope, wait)
+    if job.status == 'succeeded':
+        return job, None
+    if job.status in job_models.FINISHED:
+        raise job_error(job)
+    return job, accepted(job)
 
 
 def merge_args(args) -> tuple:
@@ -302,6 +370,13 @@ def create_api() -> flask.Blueprint:
                 and not flask.request.is_json):
             raise APIError("Content-Type must be application/json", 415)
 
+    @api.after_request
+    def say_what_was_preferred(response):
+        applied = flask.g.get('preference_applied')
+        if applied and 'Preference-Applied' not in response.headers:
+            response.headers['Preference-Applied'] = applied
+        return response
+
     @api.errorhandler(APIError)
     def api_error(e):
         error = dict(message=e.message)
@@ -344,16 +419,25 @@ def create_api() -> flask.Blueprint:
             'api.get_version', active_version=tag)
         return response
 
+    def version_json(record):
+        data = settings_to_json(record)
+        data['pending_jobs'] = [
+            {key: job[key] for key in ('id', 'kind', 'status', 'percent')}
+            for job in appjobs.active_edit_jobs(record.version_tag)]
+        return flask.jsonify(data)
+
     @api.get('/versions/<active_version>')
     def get_version():
-        return flask.jsonify(settings_to_json(
-            get_version_record(flask.g.active_version)))
+        return version_json(get_version_record(flask.g.active_version))
 
     @api.patch('/versions/<active_version>')
     def update_version():
-        record = get_version_record(flask.g.active_version)
-        update_settings(record, get_json_object())
-        return flask.jsonify(settings_to_json(record))
+        tag = flask.g.active_version
+        get_version_record(tag)
+        check_editable(tag)
+        job, early = submit_for_api(
+            'update_version', {'version': tag, 'body': get_json_object()}, tag)
+        return early or version_json(get_version_record(tag))
 
     @api.get('/versions/<active_version>/merge')
     def plan_merge():
@@ -373,31 +457,74 @@ def create_api() -> flask.Blueprint:
         if fingerprint is not None and not isinstance(fingerprint, str):
             raise APIError("fingerprint must be a string",
                            fields={'fingerprint': "must be a string"})
-        try:
-            plan = vc.merge_version(source, flask.g.active_version, rule,
-                                    fingerprint)
-        except vc.MergeError as e:
-            raise APIError(str(e), 409, problems=e.problems) from e
-        return flask.jsonify(plan_to_json(plan))
+        job, early = submit_for_api('merge', {
+            'version': flask.g.active_version, 'source': source,
+            'rule': rule.value, 'fingerprint': fingerprint},
+            flask.g.active_version)
+        return early or flask.jsonify(job.result['plan'])
 
     @api.get('/versions/<active_version>/export')
     def export_version():
-        return send_version_file(flask.g.active_version)
+        tag = flask.g.active_version
+        get_version_record(tag)
+        job, early = submit_for_api('export_version', {'version': tag}, None)
+        return early or appjobs.send_export(job)
 
     @api.post('/versions/import')
     def import_version():
-        record = import_uploaded_version(flask.request.form,
-                                         flask.request.files)
-        response = flask.jsonify(settings_to_json(record))
+        params = prepare_import(flask.request.form, flask.request.files)
+        tag = params['version_tag']
+        job, early = submit_for_api('import_version', params, tag)
+        if early:
+            return early
+        response = flask.jsonify(settings_to_json(get_record(tag)))
         response.status_code = 201
         response.headers['Location'] = flask.url_for(
-            'api.get_version', active_version=record.version_tag)
+            'api.get_version', active_version=tag)
         return response
 
     @api.delete('/versions/<active_version>')
     def delete_version():
-        get_version_record(flask.g.active_version)
-        vc.delete_version(flask.g.active_version, allow_tags=False)
-        return '', 204
+        tag = flask.g.active_version
+        get_version_record(tag)
+        check_deletable(tag)
+        job, early = submit_for_api('delete_version', {'version': tag}, tag)
+        return early or ('', 204)
+
+    @api.get('/jobs')
+    def list_jobs():
+        args = flask.request.args
+        status = args.get('status')
+        if status is not None and status not in job_models.STATUSES:
+            raise APIError(f"Unknown status '{status}'",
+                           fields={'status': "must be one of "
+                                   + ', '.join(job_models.STATUSES)})
+        try:
+            limit = int(args.get('limit', 100))
+            if limit < 1:
+                raise ValueError
+        except ValueError:
+            raise APIError("limit must be a positive integer",
+                           fields={'limit': "must be a positive integer"}
+                           ) from None
+        jobs = job_maintenance.find_jobs(
+            status=status, kind=args.get('kind'), scope=args.get('version'),
+            user=None if has_role(Role.site_admin)
+            else appjobs.current_user_name(), limit=min(limit, 500))
+        return flask.jsonify(jobs=[appjobs.job_json(j) for j in jobs])
+
+    @api.get('/jobs/<job_id>')
+    def get_job(job_id):
+        return flask.jsonify(appjobs.job_json(appjobs.visible_job(job_id)))
+
+    @api.post('/jobs/<job_id>/cancel')
+    def cancel_job(job_id):
+        job = appjobs.visible_job(job_id)
+        outcome = job_models.request_cancel(job.id)
+        if outcome not in ('cancelled', 'requested'):
+            raise APIError(f"The job has already {job.status}", 409)
+        response = flask.jsonify(appjobs.job_json(job_models.get(job.id)))
+        response.status_code = 200 if outcome == 'cancelled' else 202
+        return response
 
     return api

@@ -1,0 +1,122 @@
+[
+ {
+  "op": "view",
+  "step": "create branch",
+  "seconds": 7.855694809928536,
+  "rss_start_mb": 169.86328125,
+  "rss_peak_mb": 169.890625,
+  "rss_end_mb": 169.890625,
+  "caches": {}
+ },
+ {
+  "op": "view",
+  "step": "before term_table",
+  "seconds": 8.662515260279179,
+  "rss_start_mb": 170.1484375,
+  "rss_peak_mb": 630.890625,
+  "rss_end_mb": 625.16015625,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ]
+  }
+ },
+ {
+  "op": "view",
+  "step": "before table",
+  "seconds": 0.2718504536896944,
+  "rss_start_mb": 619.30078125,
+  "rss_peak_mb": 619.5546875,
+  "rss_end_mb": 619.5546875,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    4.770561218261719
+   ],
+   "filtered": [
+    1,
+    0.0925455093383789
+   ]
+  }
+ },
+ {
+  "op": "view",
+  "step": "before dashboard",
+  "seconds": 0.22060062922537327,
+  "rss_start_mb": 619.5546875,
+  "rss_peak_mb": 619.5546875,
+  "rss_end_mb": 619.5546875,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "spectra",
+  "step": "create branch",
+  "seconds": 9.079651284962893,
+  "rss_start_mb": 619.5546875,
+  "rss_peak_mb": 619.5546875,
+  "rss_end_mb": 619.5546875,
+  "caches": {
+   "terms": [
+    7481,
+    10.701656341552734
+   ],
+   "tables": [
+    1,
+    5.060325622558594
+   ],
+   "filtered": [
+    2,
+    0.2290210723876953
+   ]
+  }
+ },
+ {
+  "op": "spectra",
+  "step": "cold spectra",
+  "seconds": 11.133761016651988,
+  "rss_start_mb": 419.31640625,
+  "rss_peak_mb": 2145.3671875,
+  "rss_end_mb": 2145.3671875,
+  "caches": {}
+ },
+ {
+  "op": "export",
+  "step": "create branch",
+  "seconds": 6.759239537641406,
+  "rss_start_mb": 1970.2265625,
+  "rss_peak_mb": 2145.3671875,
+  "rss_end_mb": 1932.95703125,
+  "caches": {}
+ },
+ {
+  "op": "export",
+  "step": "export_version",
+  "seconds": 350.43197571858764,
+  "rss_start_mb": 1931.97265625,
+  "rss_peak_mb": 2145.3671875,
+  "rss_end_mb": 1564.80859375,
+  "caches": {}
+ }
+]

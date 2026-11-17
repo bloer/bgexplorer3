@@ -439,6 +439,7 @@ class TestDashboard(AppTestCase):
         for spectra in (False, True):
             clear_results_cache()
             with mock.patch.object(budget_terms, '_LOAD_CHUNK', 2), \
+                    mock.patch.object(budget_terms, '_SPECTRA_CHUNK', 2), \
                     mock.patch.object(budget_terms, 'load_hiteffs',
                                       side_effect=budget_terms.load_hiteffs
                                       ) as load:
@@ -451,6 +452,53 @@ class TestDashboard(AppTestCase):
         with mock.patch.object(budget_terms, '_LOAD_CHUNK', 2):
             self.assertSame(dashboard(self.a2, 'v1')['total'],
                             expected['total'])
+
+    def test_spectrum_tables(self):
+        """ A table of one spectrum loads only that spectrum, sums like the
+        table of all of them, and is for that spectrum only
+        """
+        from bgexplorer.models.budget import terms as budget_terms
+        for hiteff in HitEfficiency.select_version('main'):
+            for name, scale in (('s1', 1), ('s2', 2)):
+                # c3 has no s2
+                if name == 's2' and hiteff.location == 'c3':
+                    continue
+                hiteff.spectra[name] = Histogram(
+                    AsymmetricUncertainty(np.ones(10) * scale,
+                                          np.ones(10) * .1)
+                    * unitreg('dru/mBq/keV'), np.arange(11) * unitreg.keV)
+            hiteff.save()
+        clear_results_cache()
+        everything = term_table(self.a2, spectra=True)
+        real = budget_terms.load_hiteffs
+        loaded = {}
+
+        def spy(sourceterms, spectra=True):
+            loaded[spectra] = real(sourceterms, spectra)
+            return loaded[spectra]
+        with mock.patch.object(budget_terms, 'load_hiteffs', side_effect=spy):
+            s1 = term_table(self.a2, spectra='s1')
+            s2 = term_table(self.a2, spectra='s2')
+        for name in ('s1', 's2'):
+            self.assertEqual({key for h in loaded[name].values()
+                              for key in h.spectra}, {name})
+        # a table for each spectrum, shared
+        self.assertIs(term_table(self.a2, spectra='s1'), s1)
+        self.assertIsNot(s1, s2)
+        self.assertIsNot(s1, everything)
+        # terms whose hit efficiencies don't have the spectrum are left out
+        self.assertEqual((len(everything), len(s1), len(s2)), (4, 4, 3))
+        for name, table_ in (('s1', s1), ('s2', s2)):
+            expected = everything.total_spectrum(
+                name, np.flatnonzero(everything.having(name)))
+            found = table_.total_spectrum(name, np.arange(len(table_)))
+            for attr in ('mode', 's0', 's1'):
+                np.testing.assert_allclose(getattr(found.hist.m, attr),
+                                           getattr(expected.hist.m, attr))
+        # the blocks' arrays aren't kept as well as the columns
+        self.assertTrue(all(not block.values for block in s1._blocks))
+        with self.assertRaises(KeyError):
+            s1.columns('s2')
 
     def test_cache_budget_from_environment(self):
         from bgexplorer.models.sourceterm import cache_bytes

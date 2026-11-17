@@ -5,6 +5,7 @@ from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.histogram import Histogram
 from bgexplorer.models.settings import (VersionSettings, SpectrumROI, get_settings, HitEffConfig)
+from bgexplorer.versioning import create_version, create_branch
 from bgexplorer.versioning.record import VersionRecord
 from bgexplorer.models import sourceterm  # need this to get signals registered
 import numpy as np
@@ -194,6 +195,98 @@ class TestHitEFficiency(unittest.TestCase):
             SpectrumROI(spectrum='v1', start=0*units.kg, stop=5*units.keV)]
         with self.assertRaises(ValidationError):
             config.save()
+
+
+class TestRoiUpdates(unittest.TestCase):
+    """ The ROIs are re-evaluated when the settings are saved, in bulk """
+    @classmethod
+    def setUpClass(cls):
+        connect_test_db()
+
+    @classmethod
+    def tearDownClass(cls):
+        disconnect()
+
+    def setUp(self):
+        for cls in (HitEfficiency, VersionRecord, VersionSettings):
+            cls.drop_collection()
+        create_version('main')
+        # v1 counts 0..9, v2 ten times as many, in 1 keV bins
+        for location in ('l1', 'l2'):
+            HitEfficiency(
+                source='h', location=location, version_tag='main',
+                spectra={name: Histogram(
+                    AsymmetricUncertainty.fromcounts(scale * np.arange(10.))
+                    * units('dru/mBq'), np.arange(11) * units.keV)
+                    for name, scale in (('v1', 1), ('v2', 10))}).save()
+        settings = get_settings('main')
+        settings.hiteffdbconfig.rois = [
+            SpectrumROI(spectrum='v1', display_name='peak', mode='average',
+                        start=0 * units.keV, stop=5 * units.keV)]
+        settings.save()
+
+    def peak(self, tag='main', location='l1'):
+        he = HitEfficiency.select_version(tag).get(location=location)
+        return he.rois['peak'].m.mode
+
+    def test_redefined_without_renaming(self):
+        """ An ROI with the same key but another range or spectrum is updated
+        """
+        self.assertAlmostEqual(self.peak(), 2)
+        settings = get_settings('main')
+        roi = settings.hiteffdbconfig.rois[0]
+        roi.start, roi.stop = 1 * units.keV, 7 * units.keV
+        settings.save()
+        self.assertAlmostEqual(self.peak(), 3.5)
+        roi.spectrum = 'v2'
+        settings.save()
+        self.assertAlmostEqual(self.peak(), 35)
+        self.assertAlmostEqual(self.peak(location='l2'), 35)
+        roi.mode = 'integrate'
+        roi.display_unit = None
+        settings.save()
+        # keV * dru/mBq per keV
+        self.assertAlmostEqual(self.peak(), 210)
+
+    def test_copy_on_write(self):
+        """ Only the hit efficiencies of the version with the new settings
+        change, and only those that have to
+        """
+        create_branch('b', 'main')
+        shared = HitEfficiency.objects(version_tags='b')
+        self.assertTrue(all(len(he.version_tags) == 2 for he in shared))
+        # settings that don't change the ROIs' values leave them shared
+        settings = get_settings('b')
+        settings.hiteffdbconfig.extra_columns = ['x']
+        settings.save()
+        self.assertTrue(all(len(he.version_tags) == 2
+                            for he in HitEfficiency.objects(
+                                version_tags='b')))
+        revisions = {he.original_id: he.revision
+                     for he in HitEfficiency.select_version('main')}
+
+        roi = settings.hiteffdbconfig.rois[0]
+        roi.stop = 7 * units.keV
+        settings.save()
+        self.assertAlmostEqual(self.peak('b'), 3)
+        self.assertAlmostEqual(self.peak('main'), 2)
+        for tag, change in (('main', 0), ('b', 1)):
+            found = HitEfficiency.select_version(tag)
+            self.assertEqual(found.count(), 2)
+            for he in found:
+                self.assertEqual(he.version_tags, [tag])
+                self.assertEqual(he.revision,
+                                 revisions[he.original_id] + change)
+
+    def test_new_roi(self):
+        settings = get_settings('main')
+        settings.hiteffdbconfig.rois.append(
+            SpectrumROI(spectrum='v2', display_name='other', mode='average',
+                        start=0 * units.keV, stop=2 * units.keV))
+        settings.save()
+        he = HitEfficiency.select_version('main').get(location='l1')
+        self.assertEqual(set(he.rois), {'peak', 'other'})
+        self.assertAlmostEqual(he.rois['other'].m.mode, 5)
 
 
 class TestPartialLoad(unittest.TestCase):

@@ -3,12 +3,13 @@ from bson.dbref import DBRef
 from .component import Component, Assembly
 from .emissionspec import EmissionSpec, Multiplier
 from .cosmogenic import ActivatedMaterial, CosmogenicActivation
-from .hiteff import HitEfficiency
+from .hiteff import HitEfficiency, store_rois
 from .sourceterm import (SourceTerm, find_sourceterms, sync_sourceterms,
                          placed_sourceterms, check_version_units)
 from ..versioning import hooks, archive
 from ..versioning.verdoc import ref_id, check_writable
 from . import settings
+from .. import jobs
 import importlib.metadata
 import logging
 log = logging.getLogger(__name__)
@@ -59,7 +60,10 @@ def delete_emissionspec(sender, document, **kwargs):
         component.save()
 
 
-def update_component(sender, document, **kwargs):
+def update_component(sender, document, propagate=True, **kwargs):
+    """ Update the SourceTerms of `document`, and, if `propagate`, those of
+    the assemblies containing it
+    """
     component = document
     log.debug("update_component for %s", component.name)
     # first, generate the list of all source terms for this component
@@ -73,6 +77,8 @@ def update_component(sender, document, **kwargs):
                   for source in getattr(spec, 'sources', [])]
     sync_sourceterms(version, candidates, SourceTerm.objects(
         version_tags=version, assemblyRoot=component))
+    if not propagate:
+        return
     # update all assemblies containing us. These are always checked, even if
     # our SourceTerms didn't change, in case they missed a previous update
     for parent in component.find_parents():
@@ -121,7 +127,10 @@ def update_parent(assembly, component, scope=()):
 
 
 def update_assembly(sender, document, component=None, placement=None,
-                    **kwargs):
+                    propagate=True, **kwargs):
+    """ Update the SourceTerms of `document` for the placements of its
+    children, and, if `propagate`, those of the assemblies containing it
+    """
     assembly = document
     placements = [child for child in assembly.children
                   if not ((component and child.component.id != component.id)
@@ -130,6 +139,8 @@ def update_assembly(sender, document, component=None, placement=None,
     # those children
     restrict = bool(component or placement)
     result, scope = _sync_placements(assembly, placements, (), restrict)
+    if not propagate:
+        return
     # parents always get updated, in case they missed a previous update
     scope = scope if restrict else []
     for parent in assembly.find_parents():
@@ -227,9 +238,20 @@ def rebuild_sourceterms(version: str) -> int:
     check_writable(version)
     log.warning(f"Rebuilding SourceTerms for version '{version}'")
     SourceTerm.select_version(version).delete()
-    for component in Component.select_version(version):
+    components = list(Component.select_version(version))
+    done = 0
+    jobs.progress(done, len(components), stage='source terms')
+    for component in components:
         if not isinstance(component, Assembly):
-            update_component(sender=None, document=component)
+            update_component(sender=None, document=component, propagate=False)
+            done += 1
+            jobs.progress(done)
+    # each assembly once, after everything below it
+    assemblies = [c for c in components if isinstance(c, Assembly)]
+    for assembly in sorted(assemblies, key=lambda a: a.hierarchy_level):
+        update_assembly(sender=None, document=assembly, propagate=False)
+        done += 1
+        jobs.progress(done)
     settings.touch(version)
     return SourceTerm.select_version(version).count()
 
@@ -275,15 +297,8 @@ def _update_rois(version_tag: str) -> None:
     """ Evaluate the ROIs of the hit efficiencies in `version_tag` with its
     settings, and save those that changed
     """
-    rois = settings.get_settings(version_tag).hiteffdbconfig.rois
-    for hiteff in HitEfficiency.select_version(version_tag):
-        values = {roi.key: roi.evaluate(hiteff, store=False) for roi in rois}
-        try:
-            changed = values != dict(hiteff.rois)
-        except Exception:
-            changed = True
-        if changed:
-            hiteff.update(set__rois=values)
+    store_rois(version_tag, settings.get_settings(version_tag)
+               .hiteffdbconfig.rois)
 
 
 def _update_sourceterms(target: str, plan, rebuild_all: bool) -> None:

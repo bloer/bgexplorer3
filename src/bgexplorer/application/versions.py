@@ -3,7 +3,8 @@ import flask
 from mongoengine.errors import ValidationError
 from werkzeug.datastructures import MultiDict
 from ..versioning import control as vc
-from ..versioning.verdoc import VersionedDocument, check_writable
+from ..versioning.verdoc import check_writable
+from ..jobs import models as job_models
 from ..versioning import maintenance
 from ..models.settings import (get_settings, VersionSettings,
                                SETTINGS_ORIGINAL_ID)
@@ -11,9 +12,10 @@ from ..versioning.record import get_record
 from ..versioning.diff import diff_versions, compare_document
 from ..models.hiteff import HitEfficiency
 from .api import (APIError, validate_new_version, validation_fields,
-                  import_uploaded_version, send_version_file)
+                  prepare_import, check_deletable, job_error)
 from .forms import update_object, LISTFIELDS_KEY
-from .blueprints import format_raw_value
+from . import jobs as appjobs
+from .blueprints import format_raw_value, form_params
 from .auth import require, role_required, Role
 
 
@@ -56,33 +58,44 @@ def create_versions_blueprint() -> flask.Blueprint:
         """ Create a new version from an exported version file """
         req = flask.request
         form = req.form if req.method == 'POST' else req.args
-        errors, problems = {}, []
+        errors, problems, status = {}, [], 200
         if req.method == 'POST':
             try:
-                settings = import_uploaded_version(req.form, req.files)
+                params = prepare_import(req.form, req.files)
+                tag = params['version_tag']
+                job = appjobs.submit_and_wait('import_version', params, tag)
+                if job.status in job_models.FINISHED \
+                        and job.status != 'succeeded':
+                    raise job_error(job)
             except APIError as e:
                 errors = dict(e.fields or {}, __all__=e.message)
                 problems = e.problems or []
                 status = e.status
             else:
-                flask.flash(f"Imported '{settings.version_tag}'", 'success')
-                return flask.redirect(flask.url_for(
-                    'overview', active_version=settings.version_tag))
+                if job.status == 'succeeded':
+                    appjobs.flash_result(job)
+                    return flask.redirect(job.result['redirect'])
+                return appjobs.waiting_page(job, flask.url_for(
+                    'overview', active_version=tag))
         return flask.render_template('versions_import.html', form=form,
                                      errors=errors, problems=problems), \
-            (status if errors else 200)
+            status
 
     @bp.route('/<active_version>/delete', methods=['GET', 'POST'])
     def delete():
         tag = flask.g.active_version
         record = get_record(tag)
-        protected = (tag == VersionedDocument.get_default_tag()
-                     or not record.editable)
         if flask.request.method == 'POST':
             # the model refuses to delete the default version and tags
-            vc.delete_version(tag, allow_tags=False)
-            flask.flash(f"Deleted version '{tag}'", 'success')
-            return flask.redirect(flask.url_for('index'))
+            check_deletable(tag)
+            return appjobs.submit_and_redirect(
+                'delete_version', {'version': tag}, tag,
+                flask.url_for('overview'))
+        try:
+            check_deletable(tag)
+            protected = False
+        except PermissionError:
+            protected = True
         return flask.render_template('versions_delete.html',
                                      summary=vc.version_summary(tag),
                                      protected=protected,
@@ -110,18 +123,17 @@ def create_versions_blueprint() -> flask.Blueprint:
             get_settings(source, create=False)
             get_settings(tag, create=False)
             if req.method == 'POST':
-                try:
-                    done = vc.merge_version(source, tag, rule,
-                                            form.get('fingerprint') or None)
-                except vc.MergeError as e:
-                    error, status = e, 409
+                job = appjobs.submit_and_wait('merge', {
+                    'version': tag, 'source': source, 'rule': rule.value,
+                    'fingerprint': form.get('fingerprint') or None}, tag)
+                if job.status == 'succeeded':
+                    appjobs.flash_result(job)
+                    return flask.redirect(job.result['redirect'])
+                if job.status in job_models.FINISHED:
+                    error = job_error(job)
+                    status = error.status
                 else:
-                    flask.flash(f"Merged '{source}' into '{tag}': "
-                                f"{vc._merge_summary(done)}"
-                                if done.changes else
-                                f"Nothing to merge from '{source}'",
-                                'success')
-                    return flask.redirect(flask.url_for('overview'))
+                    return appjobs.waiting_page(job, flask.url_for('overview'))
             plan = vc.plan_merge(source, tag, rule)
         elif source == tag:
             error, status = "Can't merge a version into itself", 400
@@ -168,14 +180,17 @@ def edit_settings():
         update_object(settings, form, errors=errors)
         update_object(record, form, errors=errors)
         if not errors:
+            # so that mistakes are shown with the form; the job saves them
             try:
-                settings.save()
-                record.save()
+                settings.validate()
+                record.validate()
             except ValidationError as e:
                 errors = validation_fields(e)
             else:
-                flask.flash("Settings saved", 'success')
-                return flask.redirect(flask.url_for('overview'))
+                return appjobs.submit_and_redirect(
+                    'save_settings',
+                    {'version': tag, 'form': form_params(form)},
+                    tag, flask.url_for('overview'))
     # show display settings for every key in the hit efficiencies
     config = settings.hiteffdbconfig
     hiteffs = HitEfficiency.select_version(tag)
@@ -211,4 +226,11 @@ def compare_versions():
 
 def export_version():
     """ Download the active version as a file """
-    return send_version_file(flask.g.active_version)
+    tag = flask.g.active_version
+    job = appjobs.submit_and_wait('export_version', {'version': tag}, None)
+    if job.status == 'succeeded':
+        return appjobs.send_export(job)
+    if job.status in job_models.FINISHED:
+        raise job_error(job)
+    return appjobs.waiting_page(job, flask.url_for('jobs.download',
+                                                   job_id=str(job.id)))

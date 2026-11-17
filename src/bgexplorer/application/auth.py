@@ -12,6 +12,7 @@ import logging
 import flask
 from flask_login import LoginManager, current_user, login_user, logout_user
 from mongoengine import NotUniqueError
+from .. import jobs
 from ..models.settings import (get_application_settings, get_server_secret,
                                use_server_secret)
 from ..models.users import User, Role, check_login, has_site_admin
@@ -110,14 +111,19 @@ def require_for_changes(role: Role, form_endpoints=()):
     return check
 
 
+def is_local_path(target: Optional[str]) -> bool:
+    """ Whether `target` is a path on this site, which is safe to redirect
+    to, and not another site or a scheme-relative url like //evil.example """
+    if not target:
+        return False
+    parts = urlsplit(target)
+    return (not parts.scheme and not parts.netloc and target.startswith('/')
+            and not target.startswith('//') and '\\' not in target)
+
+
 def safe_next(target: Optional[str]) -> str:
     """ `target` if it is a path on this site, else the index """
-    if target:
-        parts = urlsplit(target)
-        if (not parts.scheme and not parts.netloc and target.startswith('/')
-                and not target.startswith('//') and '\\' not in target):
-            return target
-    return flask.url_for('index')
+    return target if is_local_path(target) else flask.url_for('index')
 
 
 def create_auth_blueprint() -> flask.Blueprint:
@@ -218,7 +224,10 @@ def create_auth_blueprint() -> flask.Blueprint:
 
 
 def _entered_by() -> Optional[str]:
-    """ The name of the logged in user making a change, for `enteredby` """
+    """ The name of the logged in user making a change, for `enteredby`: the
+    user that submitted the job if this runs in one """
+    if (name := jobs.current_user()) is not None:
+        return name
     if flask.has_request_context() and current_user.is_authenticated:
         return current_user.name
     return None

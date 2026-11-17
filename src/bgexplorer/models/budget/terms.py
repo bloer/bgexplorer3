@@ -2,7 +2,9 @@
 by, as a `TermTable` to sum over. Values are in the version's display units
 (see `termcalc`).
 """
-from typing import List, Optional, Tuple
+import ctypes
+import gc
+from typing import List, Optional, Tuple, Union
 from ..component import Component, Assembly
 from ..hiteff import HitEfficiency
 from ..sourceterm import (ResultsCache, SourceTerm, cache_bytes,
@@ -26,6 +28,8 @@ _table_cache = ResultsCache(64, cache_bytes(.2), name='tables')
 _spectra_cache = ResultsCache(16, cache_bytes(.3), name='spectra')
 # loading and calculating this many SourceTerms at once
 _LOAD_CHUNK = 2000
+# the same for spectra, whose hit efficiencies are much bigger
+_SPECTRA_CHUNK = 500
 
 
 def available_scalars(version: str) -> List[str]:
@@ -68,16 +72,28 @@ def _exclude_large(query):
     return query.exclude('assemblyPath', 'livetimes', 'assemblyPathStr')
 
 
-def _record(sourceterm, calculator, spectra: bool) -> TermRecord:
+def _record(sourceterm, calculator, spectra: Union[bool, str]) -> TermRecord:
     rate, blocks = calculator.hit_blocks(sourceterm, spectra)
     return TermRecord(sourceterm.id, sourceterm.group_keys(),
                       sourceterm.confidence_rating, tuple(rate),
                       tuple(block for block in blocks if block.values))
 
 
-def _chunks(ids: list):
-    for i in range(0, len(ids), _LOAD_CHUNK):
-        yield ids[i:i + _LOAD_CHUNK]
+def _return_freed_memory():
+    """ Give the OS the memory freed while loading spectra, which the
+    allocator keeps in the many small holes left by the arrays discarded
+    along the way (only where glibc is available)
+    """
+    gc.collect()
+    try:
+        ctypes.CDLL('libc.so.6').malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
+
+
+def _chunks(ids: list, size: int = _LOAD_CHUNK):
+    for i in range(0, len(ids), size):
+        yield ids[i:i + size]
 
 
 def _scalar_records(query, config, version, token) -> List[TermRecord]:
@@ -95,7 +111,7 @@ def _scalar_records(query, config, version, token) -> List[TermRecord]:
     missing = [_id for _id, _ in stored if _id not in cached]
     query = _exclude_large(query)
     records = {}
-    for ids in _chunks(missing):
+    for ids in _chunks(missing, _LOAD_CHUNK):
         sourceterms = list(query(id__in=ids))
         calculator = TermCalculator(config,
                                     load_hiteffs(sourceterms, spectra=False))
@@ -119,26 +135,33 @@ def _scalar_records(query, config, version, token) -> List[TermRecord]:
     return result
 
 
-def _spectrum_records(query, config):
-    """ The records of the SourceTerms in `query`, a chunk at a time """
+def _spectrum_records(query, config, spectra: Union[bool, str]):
+    """ The records of the SourceTerms in `query`, a chunk at a time, with
+    the spectra or the one named `spectra`
+    """
     ids = [doc['_id'] for doc in query.only('id').as_pymongo()]
     query = _exclude_large(query)
-    for chunk in _chunks(ids):
+    sourceterms = calculator = None
+    for chunk in _chunks(ids, _SPECTRA_CHUNK):
+        # so the last chunk's hit efficiencies are freed before loading more
+        sourceterms = calculator = None
         sourceterms = list(query(id__in=chunk))
         calculator = TermCalculator(config,
-                                    load_hiteffs(sourceterms, spectra=True))
+                                    load_hiteffs(sourceterms, spectra))
         for st in sourceterms:
-            yield _record(st, calculator, True)
+            yield _record(st, calculator, spectra)
 
 
 def term_table(obj: Component, relativeto: Optional[Assembly] = None,
-               spectra: bool = False) -> TermTable:
+               spectra: Union[bool, str] = False) -> TermTable:
     """ The scalar values (or if `spectra`, the spectra) of each SourceTerm
     of `obj` (optionally only as placed in `relativeto`) that has any, in the
-    version's display units. Kept in memory until any data in the version
-    changes, and shared, so must not be modified. When it does, the
-    SourceTerms that didn't change are reused. Raises UnitMismatchError if
-    saved data has units that don't fit together.
+    version's display units. If `spectra` is a name, only that spectrum is
+    loaded, which takes a fraction of the time and memory of all of them, and
+    the table is only for it (see `TermTable`). Kept in memory until any data
+    in the version changes, and shared, so must not be modified. When it
+    does, the SourceTerms that didn't change are reused. Raises
+    UnitMismatchError if saved data has units that don't fit together.
     """
     version = obj.active_version
 
@@ -146,14 +169,18 @@ def term_table(obj: Component, relativeto: Optional[Assembly] = None,
         config = get_settings(version).hiteffdbconfig
         query = find_sourceterms(obj, relativeto)
         if spectra:
-            records = _spectrum_records(query, config)
+            records = _spectrum_records(query, config, spectra)
         else:
             records = _scalar_records(query, config, version,
                                       get_calc_token(version))
         root = budget_root(obj, relativeto)
         child_ids = {str(p.id) for p in getattr(root, 'children', None) or []}
-        return TermTable(records,
-                         lambda path: _component_path(path, child_ids))
-    key = _cache_key(obj, 'spectra' if spectra else 'terms', _ref_id(obj),
-                     relativeto and _ref_id(relativeto))
+        table = TermTable(records,
+                          lambda path: _component_path(path, child_ids),
+                          only=spectra if isinstance(spectra, str) else None)
+        if spectra:
+            _return_freed_memory()
+        return table
+    key = _cache_key(obj, ('spectra', spectra) if spectra else 'terms',
+                     _ref_id(obj), relativeto and _ref_id(relativeto))
     return (_spectra_cache if spectra else _table_cache).get(key, calculate)

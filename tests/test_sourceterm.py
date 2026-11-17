@@ -574,6 +574,36 @@ class TestSourceTerm(unittest.TestCase):
                          {'c', 'c2', 'a1/c2', 'a2/a1/c2'})
         self.assertEqual(SourceTerm.objects.count(), 8)
 
+    def test_rebuild(self):
+        """ A rebuild makes the same terms as saving things one at a time,
+        looking at each assembly once
+        """
+        spec = spec_of(EmissionSource(name="Th232", rate="10 +- 1 mBq/kg"),
+                       EmissionSource(name="K40", rate="<25 mBq/kg"))
+        c1 = Component(name="c1", mass="2 kg", specs=[spec]).save()
+        c2 = Component(name="c2", mass="1 kg", specs=[spec]).save()
+        a1 = Assembly(name="a1", children=[
+            Placement(component=c1, weight=2),
+            Placement(component=c2),
+            Placement(component=c1, weight=3, label='again')]).save()
+        a2 = Assembly(name="a2", children=[
+            Placement(component=a1, weight=2), Placement(component=c2)]).save()
+        Assembly(name="a3", children=[
+            Placement(component=a2), Placement(component=a1, weight=5),
+            Placement(component=c1, weight=7)]).save()
+
+        def state():
+            return {(st.assemblyPathStr, str(st.placement_ids),
+                     st.source.name): (st.stamp, st.weight)
+                    for st in SourceTerm.objects}
+        before = state()
+        self.assertGreater(len(before), 10)
+        with mock.patch.object(signals, '_sync_placements',
+                               wraps=signals._sync_placements) as sync:
+            signals.rebuild_sourceterms('main')
+        self.assertEqual(sync.call_count, 3)
+        self.assertEqual(state(), before)
+
 
 class TestLocationOverride(unittest.TestCase):
     maxDiff = None

@@ -61,6 +61,12 @@ collection (`classes`) the items to `add`, `replace`, `keep`, and those only in
 the target (`target_only`). To merge only what you reviewed, pass the plan's
 `fingerprint` to the `POST`.
 
+`GET /versions/<v>` also has `pending_jobs`: the edits of that version that are
+queued or running, each with its `id`, `kind`, `status` and `percent`.
+
+`PATCH`, `merge`, `export`, `import` and `DELETE` of a version run as
+[background jobs](#jobs), and may answer `202` instead of the result.
+
 ### Example
 
 ```sh
@@ -74,6 +80,63 @@ curl -b cookies.txt 'http://localhost:8000/api/v1/versions/main/merge?source=tes
 curl -b cookies.txt -H 'Content-Type: application/json' \
      -d '{"source": "test", "fingerprint": "..."}' \
      http://localhost:8000/api/v1/versions/main/merge
+```
+
+## Jobs
+
+Changes that can take minutes on a large model run as background jobs, so that
+a request doesn't time out. The request waits for its job for up to
+`JOBS_API_WAIT_SECONDS` (100 by default, see [Administration](admin.html#background-jobs)).
+If the job has finished by then, you get the usual response. If it hasn't, you
+get `202 Accepted` with the job as the body, a `Location` header with its URL
+and `Retry-After: 2`; poll the job until it has finished. If the job fails
+you get the error as for any other request (`409` if it was cancelled).
+
+The `Prefer` request header changes how long to wait:
+
+- `Prefer: respond-async` answers `202` at once.
+- `Prefer: wait=N` waits for up to N seconds (at most 3600).
+
+The response has `Preference-Applied` with the preference that was used.
+
+| Method and path | Response |
+|-----------------|----------|
+| `GET /jobs` | `{"jobs": [...]}`, newest first. Filters: `status`, `kind`, `version`, `limit` (default 100, at most 500). You see your own jobs; a site admin sees everyone's |
+| `GET /jobs/<id>` | the job |
+| `POST /jobs/<id>/cancel` | cancels a queued job (`200`), or asks a running one to stop at its next safe point (`202`). `409` if it has finished |
+
+A job is:
+
+```json
+{"id": "...", "kind": "rebuild", "label": "Rebuild source terms",
+ "status": "running", "finished": false, "percent": 40,
+ "done": 2, "total": 5, "stage": "...", "message": "...",
+ "error": null, "error_type": null, "user": "ed", "scope": "main",
+ "cancel_requested": false,
+ "created_at": "2026-11-16T10:00:00Z", "started_at": "...", "finished_at": null,
+ "result": null}
+```
+
+`status` is `queued`, `running`, `succeeded`, `failed`, `cancelled` or
+`abandoned`; `result` is set once the job has finished. A finished export
+job's file is downloaded from `/jobs/<id>/download` (not under `/api/v1`).
+
+Jobs of one version run one at a time, in the order they were submitted.
+
+### Stale results
+
+While edits of a version are queued or running, reading its results gives the
+results as they were before the edits. Responses that read a version with edits
+in progress have the header `X-Bgexplorer-Stale`, with the ids of those jobs
+separated by commas. The web pages show a banner with the same information.
+
+```sh
+# start an edit and don't wait for it
+curl -b cookies.txt -X PATCH -H 'Prefer: respond-async' \
+     -H 'Content-Type: application/json' \
+     -d '{"description": "new"}' http://localhost:8000/api/v1/versions/test
+# follow the job at the URL in the Location header
+curl -b cookies.txt http://localhost:8000/api/v1/jobs/<id>
 ```
 
 ## Documents and results
