@@ -206,7 +206,12 @@ class TestPlots(AppTestCase):
             'Background Contributions', 'id="budgetplot"',
             'id="spectrumplot"')]
         self.assertEqual(order, sorted(order))
-        self.assertIn('<tr class="component depth1">', page)
+        # the table's rows are loaded after the page, not built with it
+        self.assertNotIn('<tr class="component', page)
+        self.assertIn('id="resultstable" class="loading"', page)
+        self.assertIn('<tr class="component depth1">', self.html(
+            self.client.get(self.url('component.results_table',
+                                     object=self.a1))))
         self.assertIn('bgplots.dashboard(', page)
         self.assertIn('bgplots.spectrumBreakdown(', page)
         self.assertIn('plotly-basic.min.js', page)

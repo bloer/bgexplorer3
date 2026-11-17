@@ -17,7 +17,7 @@ tr.depth{{ depth }} td:first-child {padding-left: {{1.2*depth }}em; }
 <div class="row mb-3">
     <div class="col">
         <h3>Background Contributions</h3>
-        <div id="resultstable">
+        <div id="resultstable" class="loading">
             {% with filtered=false %}{% include "results_table.html" %}{% endwith %}
         </div>
     </div>
@@ -64,6 +64,7 @@ const dashboard = bgplots.dashboard('budgetplot', {{ url_for('.dashboard_json', 
     {table: {id: 'resultstable', url: {{ url_for('.results_table', object=g.object) | tojson }}}});
 {%- else %}
 const dashboard = null;
+bgplots.table('resultstable', {{ url_for('.results_table', object=g.object) | tojson }});
 {%- endif %}
 bgplots.spectrumBreakdown('spectrumplot', {{ url_for('.spectrum_json', object=g.object) | tojson }}, dashboard);
 </script>

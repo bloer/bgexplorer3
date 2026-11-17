@@ -419,11 +419,14 @@ class TestAudit(UnitTestCase):
         unexplained error
         """
         self.bad_hiteff()
+        # the page has no table to fail; its request for the rows is reported
         response = self.client.get(self.url('component.results',
                                             object=self.comp))
-        self.assertEqual(response.status_code, 500)
-        self.assertIn("Units in the saved data don't match",
-                      self.html(response))
+        self.assertEqual(response.status_code, 200)
+        response = self.client.get(self.url('component.results_table',
+                                            object=self.comp))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('not the display unit', self.html(response))
         response = self.client.get(self.url('component.dashboard_json',
                                             object=self.comp))
         self.assertEqual(response.status_code, 400)

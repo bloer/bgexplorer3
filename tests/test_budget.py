@@ -652,11 +652,16 @@ class TestDashboard(AppTestCase):
         self.show_columns()
         page = self.html(self.client.get(self.url('component.results',
                                                   object=self.a2)))
+        # the page has the headings, and the rows are requested after it
         self.assertIn('<th>Value [mdru]</th>', page)
-        self.assertIn('<tr class="component depth2">', page)
+        self.assertNotIn('<tr class="component', page)
         self.assertNotIn('passing the budget filters', page)
         self.assertIn('resultstable', page)
         url = self.url('component.results_table', object=self.a2)
+        unfiltered = self.html(self.client.get(url))
+        self.assertIn('<th>Value [mdru]</th>', unfiltered)
+        self.assertIn('<tr class="component depth2">', unfiltered)
+        self.assertNotIn('passing the budget filters', unfiltered)
         page = self.html(self.client.get(url, query_string=dict(
             filters='{"material": [{"key": "copper"}]}')))
         self.assertIn('Only the 2 of 4', page)

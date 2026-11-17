@@ -910,13 +910,14 @@ const bgplots = (function(){
     }
 
     /* Keep the contributions table in `div` filtered like `dash`, by
-     * replacing it with the HTML from `url` for each change. The page
-     * draws it unfiltered
+     * replacing it with the HTML from `url` for each change, including the
+     * first, as the page has only its headings. It shows a spinner until the
+     * rows arrive
      */
     function filteredTable(div, url, dash){
         if(typeof div === 'string')
             div = document.getElementById(div);
-        let shown = JSON.stringify({root: []}), request = 0;
+        let shown = null, request = 0;
         dash.onFilter((filters, json) => {
             if(json === shown)
                 return;
@@ -950,5 +951,18 @@ const bgplots = (function(){
         });
     }
 
-    return {spectrum: spectrum, spectrumBreakdown: spectrumBreakdown, dashboard: dashboard};
+    /* Load the unfiltered contributions table from `url` into `div`, for
+     * pages without a dashboard to filter it
+     */
+    function table(div, url){
+        filteredTable(div, url, {
+            onFilter(callback){
+                const filters = {root: []};
+                callback(filters, JSON.stringify(filters));
+            },
+        });
+    }
+
+    return {spectrum: spectrum, spectrumBreakdown: spectrumBreakdown, dashboard: dashboard,
+            table: table};
 })();

@@ -6,8 +6,8 @@ from io import BytesIO
 from ..models.sourceterm import (find_sourceterms, relativeto_choices,
                                  listed_sourceterms, SourceTerm)
 from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
-                             spectrum_breakdown, spectrum_names,
-                             cached_filtered,
+                             table_headings, spectrum_breakdown,
+                             spectrum_names, cached_filtered,
                              BudgetFilter)
 from ..models.component import (Component, Assembly, ComponentSpec,
                                LocationMode)
@@ -796,11 +796,13 @@ class CollectionViews(flask.Blueprint):
         def results():
             if self._needs_relativeto():
                 return self.render_picker('results')
+            # only the headings; the rows come from results_table, which
+            # the page requests after it is drawn
             return flask.render_template(
                 'results.html', groupby=GROUPBY,
                 scalars=available_scalars(flask.g.active_version),
-                table=table(flask.g.object,
-                            relativeto=flask.g.get('relativeto')),
+                table=dict(columns=table_headings(flask.g.active_version),
+                           rows=[], count=0, ntotal=0),
                 unit_str=unit_str)
 
     def _create_spectra_endpoints(self):

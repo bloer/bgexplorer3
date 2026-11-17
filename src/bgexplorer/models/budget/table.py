@@ -27,6 +27,14 @@ def table_columns(version: str) -> List[Tuple[str, str]]:
     return list(columns.items())
 
 
+def table_headings(version: str) -> List[dict]:
+    """ The columns of `table` (dict(key, name, units)) without calculating
+    any of its rows """
+    config = get_settings(version).hiteffdbconfig
+    return [dict(key=key, name=name, units=Output(config.scalar_unit(key)).unit)
+            for key, name in table_columns(version)]
+
+
 @filtered_cached
 def table(obj: Component, filters: Optional[BudgetFilter] = None,
           relativeto: Optional[Assembly] = None,
@@ -49,10 +57,8 @@ def table(obj: Component, filters: Optional[BudgetFilter] = None,
     tt = term_table(obj, relativeto)
     version = obj.active_version
     config = get_settings(version).hiteffdbconfig
-    outs = {key: Output(config.scalar_unit(key))
-            for key, name in table_columns(version)}
-    columns = [dict(key=key, name=name, units=outs[key].unit)
-               for key, name in table_columns(version)]
+    columns = table_headings(version)
+    outs = {c['key']: Output(config.scalar_unit(c['key'])) for c in columns}
     root = filters.root
     sums = defaultdict(list)
     count = 0
