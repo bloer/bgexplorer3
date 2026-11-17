@@ -152,9 +152,10 @@ const bgplots = (function(){
         if(typeof div === 'string')
             div = document.getElementById(div);
         whenVisible(div, () => {
-            div.replaceChildren(el('div', {'class': 'spinner-border', role: 'status'}));
+            div.classList.add('loading');
             getJSON(url).then(data => drawSpectra(div, data))
-                        .catch(error => showError(div, error));
+                        .catch(error => showError(div, error))
+                        .finally(() => div.classList.remove('loading'));
         });
     }
 

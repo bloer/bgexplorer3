@@ -190,6 +190,9 @@ class TestComponentPages(AppTestCase):
         self.assertIn('c1 surface', html)
         html = self.html(self.client.get(
             self.url('component.sourceterms', 'b', object=c1)))
+        self.assertNotIn('class="sourceterm"', html)  # the rows load later
+        html = self.html(self.client.get(
+            self.url('component.sourceterm_rows', 'b', object=c1)))
         self.assertIn('title="override on c1"', html)
 
         # an assembly places the component, and the spec still decides

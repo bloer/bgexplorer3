@@ -8,7 +8,7 @@
 {% if clsname in ('component', 'emissionspec', 'hitefficiency') %}
 {{ utils.relativeto_banner(g.object, g.get('relativeto'), 'sourceterms') }}
 {% endif %}
-{{ utils.print_sourceterms(sourceterms, activecomponent=g.object) }}
+{{ utils.print_sourceterms(url_for('.sourceterm_rows', object=g.object)) }}
 {% endblock %}
 
 {% block pagestyle %}

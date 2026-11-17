@@ -124,6 +124,10 @@
             document.getElementById('page-spinner').classList.remove('d-none');
         }
     });
+    // going back can show the page as it was left, spinner and all
+    window.addEventListener('pageshow', function() {
+        document.getElementById('page-spinner').classList.add('d-none');
+    });
 </script>
 {% endblock scripts %}
 {% endblock body%}

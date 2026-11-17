@@ -30,14 +30,17 @@
     </tr>
 {%- endmacro -%}
 
-{%- macro print_sourceterms(sourceterms, activecomponent=none) -%}
+{%- macro print_sourceterm_rows(sourceterms, activecomponent=none) -%}
+{%- for sourceterm in sourceterms %}
+{{ print_sourceterm(sourceterm, activecomponent=activecomponent) }}
+{%- endfor %}
+{%- endmacro -%}
+
+{#- the rows are fetched from `rows_url` when the page loads -#}
+{%- macro print_sourceterms(rows_url) -%}
 {% set headers = ['Assembly Path', 'Emission spec', 'Source', 'Emission rate',
                   'Location', 'Hit Efficiencies'] %}
-{% call datatable.render(headers, bulk=true) %}
-    {% for sourceterm in sourceterms %}
-    {{ print_sourceterm(sourceterm, activecomponent=activecomponent) }}
-    {% endfor %}
-{% endcall %}
+{% call datatable.render(headers, bulk=true, rows_url=rows_url) %}{% endcall %}
 {%- endmacro -%}
 
 
