@@ -259,8 +259,6 @@ class CollectionViews(flask.Blueprint):
                 # if self.test_cache(g.objid):
                 #    return ("Not Modified", 304)
                 flask.g.object = self.queryset.get_or_404(objid)
-            if relativeto := flask.request.args.get('relativeto'):
-                flask.g.relativeto = self.queryset.get_or_404(relativeto)
 
         @self.after_request
         def set_mtime(response):
