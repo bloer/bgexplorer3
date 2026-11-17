@@ -219,6 +219,12 @@ def may_see(job: models.Job) -> bool:
                 and job.user == current_user.name)
 
 
+def elapsed_text(job: models.Job) -> str:
+    """ How long ago `job` started, or if it hasn't, was queued """
+    since = job.started or job.created
+    return duration_text((models.utcnow() - since).total_seconds())
+
+
 def job_json(job: models.Job) -> dict:
     """ A job as the status page and the API show it """
     def when(time):
@@ -229,6 +235,8 @@ def job_json(job: models.Job) -> dict:
         'id': str(job.id), 'kind': job.kind, 'label': job.label,
         'status': job.status, 'finished': finished, 'percent': job.percent,
         'done': progress.done, 'total': progress.total,
+        'elapsed': elapsed_text(job),
+        'since': 'it was queued' if job.status == 'queued' else 'it started',
         'stage': progress.stage, 'message': progress.message,
         'error': job.error, 'error_type': job.error_type,
         'user': job.user, 'scope': job.scope,
@@ -300,13 +308,11 @@ def create_blueprint() -> flask.Blueprint:
             return flask.redirect(
                 safe_next((job.result or {}).get('redirect')) or target
                 or flask.url_for('index'))
-        since = job.started or job.created
         return flask.render_template(
             'job.html', job=job, next=target,
             active=job.status in models.ACTIVE,
             show_traceback=auth.has_role(Role.site_admin),
-            elapsed=duration_text(
-                (models.utcnow() - since).total_seconds()))
+            elapsed=elapsed_text(job))
 
     @bp.get('/<job_id>/status')
     def status_json(job_id):

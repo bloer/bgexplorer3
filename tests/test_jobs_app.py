@@ -1,5 +1,6 @@
 """ Jobs in the web application: configuration, the status page and
 submitting a job from a request """
+import datetime
 import threading
 import unittest
 from bson import ObjectId
@@ -167,6 +168,32 @@ class TestStatusPage(AppTestCase):
         html = self.html(self.page(job_id))
         self.assertIn('progress-bar-striped', html)
         self.assertNotIn('width: 0%', html)
+
+    def test_unknown_total_says_so(self):
+        """ a bar that is full from the start doesn't look like progress """
+        job_id = put_job('app_hold', 'running')
+        html = self.html(self.page(job_id))
+        self.assertIn('id="job-no-estimate"', html)
+        self.assertNotIn('aria-valuenow="', html)
+        job_id = put_job('app_hold', 'running', **{
+            'progress.done': 5, 'progress.total': 10})
+        self.assertNotIn('id="job-no-estimate"', self.html(self.page(job_id)))
+
+    def test_elapsed_time_is_kept_up_to_date(self):
+        """ the page asks for it, and the status gives it """
+        started = models.utcnow() - datetime.timedelta(seconds=75)
+        job_id = put_job('app_hold', 'running', started=started)
+        html = self.html(self.page(job_id))
+        self.assertIn('id="job-elapsed"', html)
+        self.assertIn('id="job-since"', html)
+        self.assertIn('job.elapsed', html)
+        data = self.client.get(f'/jobs/{job_id}/status').get_json()
+        self.assertRegex(data['elapsed'], r'^1 min 1\d s$')
+        self.assertEqual(data['since'], 'it started')
+        job_id = put_job('app_hold')
+        data = self.client.get(f'/jobs/{job_id}/status').get_json()
+        self.assertEqual(data['since'], 'it was queued')
+        self.assertRegex(data['elapsed'], r'^\d+ s$')
 
     def test_succeeded_job_goes_on_to_where_it_says(self):
         job_id = put_job('app_quick', 'succeeded', result={

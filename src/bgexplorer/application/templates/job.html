@@ -18,7 +18,8 @@
   <div class="progress mb-2" id="job-progress" style="height: 1.5rem;">
     {% if percent is none %}
     <div class="progress-bar progress-bar-striped progress-bar-animated"
-         id="job-bar" role="progressbar" style="width: 100%"></div>
+         id="job-bar" role="progressbar" style="width: 100%"
+         aria-label="In progress, no estimate">Working&hellip;</div>
     {% else %}
     <div class="progress-bar" id="job-bar" role="progressbar"
          style="width: {{ percent }}%" aria-valuenow="{{ percent }}"
@@ -29,8 +30,12 @@
     {% if job.progress.stage %}<span id="job-stage">{{ job.progress.stage }}</span>{% endif %}
     {% if job.progress.message %}<span id="job-message">{{ job.progress.message }}</span>{% endif %}
   </p>
+  {% if percent is none %}
+  <p class="text-muted small mb-1" id="job-no-estimate">The striped bar means
+    this job can't say how far along it is or how long it will take.</p>
+  {% endif %}
   <p class="text-muted small"><span id="job-elapsed">{{ elapsed }}</span>
-    since {{ 'it was queued' if job.status == 'queued' else 'it started' }}.
+    since <span id="job-since">{{ 'it was queued' if job.status == 'queued' else 'it started' }}</span>.
     This page updates by itself and takes you on when the job is done; you
     can also leave it, the job carries on.</p>
   {% if has_role('editor') %}
@@ -74,10 +79,16 @@
              + (job.cancel_requested ? ' (stopping)' : ''));
         text('job-stage', job.stage);
         text('job-message', job.message);
+        text('job-elapsed', job.elapsed);
+        text('job-since', job.since);
         if (job.percent !== null && bar) {
           bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+          bar.removeAttribute('aria-label');
           bar.style.width = job.percent + '%';
           bar.textContent = job.percent + '%';
+          bar.setAttribute('aria-valuenow', job.percent);
+          var note = document.getElementById('job-no-estimate');
+          if (note) { note.remove(); }
         }
         setTimeout(poll, 1000);
       })

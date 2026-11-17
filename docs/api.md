@@ -110,7 +110,8 @@ A job is:
 ```json
 {"id": "...", "kind": "rebuild", "label": "Rebuild source terms",
  "status": "running", "finished": false, "percent": 40,
- "done": 2, "total": 5, "stage": "...", "message": "...",
+ "done": 2, "total": 5, "elapsed": "1 min 05 s", "since": "it started",
+ "stage": "...", "message": "...",
  "error": null, "error_type": null, "user": "ed", "scope": "main",
  "cancel_requested": false,
  "created_at": "2026-11-16T10:00:00Z", "started_at": "...", "finished_at": null,
@@ -118,7 +119,10 @@ A job is:
 ```
 
 `status` is `queued`, `running`, `succeeded`, `failed`, `cancelled` or
-`abandoned`; `result` is set once the job has finished. A finished export
+`abandoned`; `result` is set once the job has finished. `percent` is `null`
+for a job that can't tell how much work it has, such as saving a document,
+where `elapsed` (as text) since `it was queued` or `it started` is all there is
+to show. A finished export
 job's file is downloaded from `/jobs/<id>/download` (not under `/api/v1`).
 
 Jobs of one version run one at a time, in the order they were submitted.
