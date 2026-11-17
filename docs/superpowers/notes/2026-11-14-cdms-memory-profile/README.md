@@ -188,3 +188,27 @@ retained table, not transient decoding.
   mostly allocator fragmentation from about 60,000 small (25 KB) arrays, not
   live data. Large arrays get their own mappings and are returned on free.
 - One name needs 150 MB of columns, about 1/14 of what is held.
+
+### After per-name tables and fewer copies (2026-11-17)
+
+`term_table(root, spectra='<name>')` now loads only that spectrum from the
+database, builds its columns eagerly and drops the blocks' arrays. The same
+script (`retained_cdms.py`, 'Ge HV ERsingles') gives:
+
+| Change | Cold build | RSS peak | RSS after build |
+|---|---|---|---|
+| Before (all names) | 11.2 s | +2055 MB | +2051 MB |
+| One spectrum per table, blocks dropped | 9.1 s | +740 MB | |
+| Decoded arrays used read-only, no second copy in `_frozen` | | +747 MB | |
+| Previous chunk freed before loading the next | 9.0 s | +696 MB | +664 MB |
+| `malloc_trim` after the build | 9.3 s | +699 MB | +418 MB |
+| Spectra loaded 500 SourceTerms at a time (was 2000) | 10.2 s | +565 MB | +321 MB |
+
+- The table's `estimate_bytes` is about 154 MB, equal to the default spectra
+  cache limit, so it is still not kept at the defaults. Raise
+  `BGEXPLORER_CACHE_MB` (or the spectra share) to keep one table per name.
+- The read-only decode and the chunk release hardly change the peak: what
+  remains is the blocks' arrays and their stacked copy (about 300 MB) plus
+  whatever one chunk of hit efficiencies needs, which the smaller chunk cuts.
+- Not done: streaming the moments into a memmap, float32 and a changed stored
+  format (steps 4 to 6 of the proposal).

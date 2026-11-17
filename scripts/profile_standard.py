@@ -150,11 +150,13 @@ def view(meter: Meter, op: str, tag: str, label: str = 'view',
     """
     from bgexplorer.models.budget.dashboard import dashboard
     from bgexplorer.models.budget.table import table, table_columns
+    from bgexplorer.models.budget.spectra import spectrum_names
     from bgexplorer.models.budget.terms import term_table
     root = root_of(tag)
     if spectra:
+        spectrum = spectrum_names(tag)[0][0]
         with meter.step(op, f"{label} spectra", profile):
-            tt = term_table(root, spectra=True)
+            tt = term_table(root, spectra=spectrum)
         return
     scalar = table_columns(tag)[0][0]
     with meter.step(op, f"{label} term_table", profile):

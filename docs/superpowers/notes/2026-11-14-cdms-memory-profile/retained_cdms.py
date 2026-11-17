@@ -1,6 +1,7 @@
 """ What the cold spectra table of the CDMS root keeps in memory afterwards, by
 kind, and the process memory before, at the peak and after. Usage:
-retained_cdms.py [name]   (name: the spectrum whose columns to build)
+retained_cdms.py [name|ALL]   (name: the one spectrum to build the table for,
+default the first; ALL: every spectrum, as before per-name tables)
 """
 import gc
 import sys
@@ -58,7 +59,8 @@ def main():
     start = rss()
     sampler = Sampler()
     t0 = time.perf_counter()
-    tt = term_table(root, spectra=True)
+    arg = sys.argv[1] if len(sys.argv) > 1 else 'Ge HV ERsingles'
+    tt = term_table(root, spectra=True if arg == 'ALL' else arg)
     seconds = time.perf_counter() - t0
     sampler.stop()
     peak = sampler.peak
@@ -103,7 +105,7 @@ def main():
           f"kept entries: {len(cache._data) if hasattr(cache, '_data') else '?'}"
           f"; attrs {[a for a in vars(cache)][:12]}")
 
-    name = sys.argv[1] if len(sys.argv) > 1 else sorted(names)[0]
+    name = arg if arg != 'ALL' else sorted(names)[0]
     before = rss()
     cols = tt.columns(name)
     gc.collect()

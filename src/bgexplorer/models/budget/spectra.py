@@ -50,7 +50,7 @@ def spectrum_breakdown(obj: Component, name: str,
         raise ValueError(f"groupby must be one of {', '.join(GROUPBY)}")
     chart_root, breadcrumb = resolve_root(obj, filters.root)
     root = filters.root
-    tt = term_table(obj, relativeto, spectra=True)
+    tt = term_table(obj, relativeto, spectra=name)
     terms = np.flatnonzero(tt.having(name))
 
     def group_key(keys):

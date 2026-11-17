@@ -78,9 +78,13 @@ class TermTable:
     Those without results (no hit efficiency has anything for them) are left
     out. `component_path` converts a record's component key to the path
     below the object whose budget is being made. Read-only once made: shared
-    by all the budgets of the object, so safe to use from several threads
+    by all the budgets of the object, so safe to use from several threads.
+
+    If `only` is given, the table is just for that name: its columns are made
+    now and the blocks' values, which would otherwise be kept as well as the
+    columns, are dropped, so other names raise KeyError
     """
-    def __init__(self, records, component_path):
+    def __init__(self, records, component_path, only: Optional[str] = None):
         self.ids: List[ObjectId] = []
         self.keys: List[dict] = []
         self.ratings: List[Optional[int]] = []
@@ -134,6 +138,11 @@ class TermTable:
         self._columns: Dict[str, _Columns] = {}
         self._sizes: Dict[str, np.ndarray] = {}
         self._having: Dict[str, np.ndarray] = {}
+        self._only = only
+        if only is not None:
+            self.columns(only)
+            self._blocks = [HitBlock(block.key, {}) for block in self._blocks]
+            self._block_bytes = 0
 
     def __len__(self) -> int:
         return len(self.ids)
@@ -153,6 +162,8 @@ class TermTable:
         try:
             return self._columns[name]
         except KeyError:
+            if self._only not in (None, name):
+                raise KeyError(f"{name}: table is only for {self._only}")
             return self._columns.setdefault(name, _Columns(self._blocks, name))
 
     def having(self, name: str) -> np.ndarray:
