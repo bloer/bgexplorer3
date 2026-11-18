@@ -18,6 +18,14 @@ cell-by-cell comparison, but does not build the diff.
 - **Scope:** per assemblyRoot, at `/explore/<active_version>/component/<objid>/billofmaterials`
   on the existing component blueprint. The component is the assemblyRoot; "total
   weight" is relative to it. No version-level page.
+- **Identity:** every `VersionedDocument` (Component, Assay and other
+  EmissionSpecs, HitEfficiency) is identified by its `original_id`, never by
+  `_id`; this holds in URLs (`<objid>`), row keys, links and the cache. A
+  `Placement` is an embedded document, so its `id` is a plain ObjectId. Ids are
+  handled as strings in rows, as in `placement_names` and
+  `SourceTerm.group_keys`.
+- **Row key:** a row is uniquely identified by the full list of placement ids
+  from the assemblyRoot plus the `original_id` of the row's component.
 - **Contributions:** each scalar/ROI column is the *inclusive subtree total*
   for that path (the path and everything beneath it); a leaf equals its own
   contribution.
@@ -53,11 +61,11 @@ Shown by default:
 | U238, Th232, K40 | bulk values from the component's emission specs |
 | Cosmogenic | summary of attached `CosmogenicActivation` periods |
 | Radon | summary of attached `RadonExposure` periods |
-| Hit effs | count and names of matching HitEfficiencies |
+| Hit effs | the HitEfficiencies on this row's own SourceTerms (see below) |
 | Contributions | one column per `table_columns(version)` entry (scalars, then ROIs), in its unit |
 
-Hidden by default (toggled with the column-visibility button): component id,
-placement id, surface area, owner, comment, other (non-automatic) isotopes,
+Hidden by default (toggled with the column-visibility button): component
+`original_id`, placement id, surface area, owner, comment, other (non-automatic) isotopes,
 assay detail (sample, measurement, radiopurity id), confidence rating,
 location.
 
@@ -74,17 +82,36 @@ copy, CSV, Excel.
 - `BomColumn(key, label, group, visible)`: the single declaration of the
   columns, driving table headers, the default visibility, and (later) the diff.
   Contribution columns are generated from `table_columns(version)`.
-- `BomRow`: a frozen record keyed by `path` (tuple of placement-id strings,
-  the same keys as `placement_names`), plus `outline`, `depth`,
+- `RowKey(placement_ids, component)`: `placement_ids` is the tuple of
+  placement-id strings from the root (empty for the root row, the same paths
+  as `placement_names`), and `component` is the row's component `original_id`
+  as a string. The key is unique within a BoM and is what a diff matches on.
+- `BomRow`: a frozen record with a `RowKey`, plus `outline`, `depth`,
   `has_children` and a mapping from column key to a typed cell. A cell is a
   plain value (text or number) or a list of `(text, href)` items. Cells hold
   data only, never HTML.
-- `bom(obj, relativeto=None) -> Bom` (decorated with `filtered_cached`): a
-  `Bom` holds the columns and the ordered rows; shared and never mutated.
+- `bom(obj) -> Bom`, cached through `cached_filtered`: `obj` is the
+  assemblyRoot (SourceTerms with `assemblyRoot=obj`), so there is no
+  `relativeto` argument. A `Bom` holds the columns and the ordered rows;
+  shared and never mutated.
   Raises `ValueError` for an unknown root, `UnitMismatchError` for bad units
   (same as `table`).
 - Walks the hierarchy once for outline, weights and component fields, and
-  once for contributions.
+  once over the SourceTerms for contributions and hit efficiencies.
+
+### Hit efficiencies
+
+No matching logic. A HitEfficiency is associated with a row through the
+SourceTerms that already carry it: `SourceTerm.hiteffs` holds the matches the
+app computed (the same data the relativeto picker counts in
+`relativeto_choices`). One aggregation over the SourceTerm collection for
+`assemblyRoot=obj` in the active version, grouped by `placement_ids` (the row's
+own path, no descendants), collects the distinct `hiteffs` `original_id`s and
+the numbers of terms with and without any. Names are then loaded from the
+HitEfficiency collection in one `original_id__in` query. The cell lists the
+hit efficiencies by name, linked, and notes terms that have none (as the
+picker's "no hit efficiencies" badge does). It is the row's own terms, not the
+subtree, since hit efficiencies are a property of where a source sits.
 
 ### Inclusive contributions
 
@@ -101,12 +128,13 @@ unit handling (`Output`, `get_settings(...).hiteffdbconfig`) is reused as-is.
 
 ### View
 
-- Routes `/<objid>/billofmaterials` (page shell) and
+- Routes `/<objid>/billofmaterials` (page shell; `<objid>` is the component's
+  `original_id`) and
   `/<objid>/billofmaterials/rows` (row HTML) on the component blueprint, mirroring
   `view_sourceterms` and its `/rows` endpoint, in
   `application/blueprints.py` `_create_endpoints` for the component class
-  only. `relativeto` is honoured via the existing `application/relativeto.py`
-  mechanism and carried on all outgoing links.
+  only. The BoM does not use `relativeto`; links in the table are ordinary
+  `original_id` links to components, assays and hit efficiencies.
 - `templates/view_billofmaterials.html` uses `datatable.html` macros; a small
   `bom_rows.html` partial renders `BomRow` cells (the only place cells become
   HTML). A link to the BoM is added to the component page.
@@ -115,15 +143,20 @@ unit handling (`Output`, `get_settings(...).hiteffdbconfig`) is reused as-is.
 
 ### Future diff (not built here, but not precluded)
 
-- Rows match across versions by `path` (placement ids). Placement ids are
-  `ObjectIdField`s on embedded documents; whether they survive version
-  copies and merges must be verified in the diff spec. If they do not, match
-  on component `original_id` plus the parent's match.
-- Same key, different cell: highlight the cell, old and new value in `title`.
-- Same placement id under a different parent: a *moved* row (outline shown as
-  old → new). Present in only one BoM: *added* or *removed*. Keyed matching is
-  the standard practical approach; tree-edit-distance (Zhang–Shasha) is
-  only needed when no stable identity exists.
+- Rows are matched across versions by exact `RowKey` (placement-id path plus
+  component `original_id`). A matched row with a differing cell has that
+  cell highlighted, old and new value in `title`.
+- Hierarchy changes fall out of the key. A row whose parent changed has a
+  different path, so it is unmatched in both BoMs. A second pass pairs
+  unmatched rows on (last placement id, component `original_id`) and reports
+  them as *moved* (outline shown as old → new), then compares their cells. A
+  component swapped at the same placement has a different key too and shows as
+  removed plus added. Whatever is still unpaired is *added* or *removed*.
+  Keyed matching like this is the standard practical approach;
+  tree-edit-distance (Zhang–Shasha) is only needed when no stable identity
+  exists.
+- The diff spec must verify that placement ids survive version copies and
+  merges, which the second pass depends on.
 - Because rows are typed cells keyed by column key, the diff is a dict
   comparison and needs no HTML parsing.
 
@@ -140,18 +173,18 @@ modelled on `test_budget.py` and `test_app_components.py`.
   `table()` results are unchanged by the refactor.
 - Cache: second call returns the same object; an edit to any component
   invalidates it.
+- Hit efficiencies: a row lists exactly the hit efficiencies on SourceTerms
+  with its `placement_ids`; terms without any are flagged; no matching code.
+- Row keys: unique within a BoM, built from placement ids and component
+  `original_id` (never `_id`).
 - Route: page and `/rows` return 200 for a populated version, 404/error for an
-  unknown id, links keep `relativeto`.
+  unknown `original_id`.
 - Manual: run the app, open the BoM for a populated version, check hidden
   columns, fixed header and left columns, column-visibility and export
   buttons.
 
 ## Open details for the plan
 
-- Exact rule for "associated HitEfficiencies": hit efficiencies match on
-  `(source, location, material)`; use the same matching code SourceTerm
-  creation uses, including `ComponentSpec`/`Placement` location overrides,
-  rather than re-deriving it.
 - Which isotope names count as "automatic" bulk (U238, Th232, K40 shown;
   everything else in "other isotopes"), read from the existing emission
   source names.
