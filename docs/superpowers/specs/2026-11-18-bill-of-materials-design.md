@@ -88,7 +88,8 @@ copy, CSV, Excel.
   as a string. The key is unique within a BoM and is what a diff matches on.
 - `BomRow`: a frozen record with a `RowKey`, plus `outline`, `depth`,
   `has_children` and a mapping from column key to a typed cell. A cell is a
-  plain value (text or number) or a list of `(text, href)` items. Cells hold
+  plain value (text, number or Quantity) or a tuple of `Link(text, endpoint, id,
+  url)` (a document by `original_id`, or an external url). Cells hold
   data only, never HTML.
 - `bom(obj) -> Bom`, cached through `cached_filtered`: `obj` is the
   assemblyRoot (SourceTerms with `assemblyRoot=obj`), so there is no
