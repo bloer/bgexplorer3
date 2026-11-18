@@ -237,7 +237,7 @@ def _hiteffs(obj: Component) -> Dict[tuple, tuple]:
              HitEfficiency.select_version(version)(
                  original_id__in=list({i for ids, _ in found.values()
                                        for i in ids})
-             ).only('original_id', 'source', 'location')}
+             ).only('original_id', 'version_tags', 'source', 'location')}
     cells = {}
     for path, (ids, nnone) in found.items():
         links = sorted((Link(names[i], 'hitefficiency', str(i))

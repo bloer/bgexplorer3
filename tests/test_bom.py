@@ -296,6 +296,17 @@ class TestBom(AppTestCase):
         cell = self.row(bom(self.a2), self.p_c3).cells['hiteffs']
         self.assertEqual([c.text for c in cell], ['Th232 - c1'])
 
+    def test_non_default_version(self):
+        """ Only 'main' is the default tag, so the hit efficiency lookup
+        must not rely on defaults for fields it leaves out
+        """
+        vc.create_version('other', 'main')
+        root = Component.select_version('other').get(
+            original_id=self.a2.original_id)
+        cell = self.row(bom(root), self.p_a1, self.p_c1).cells['hiteffs']
+        self.assertEqual({c.text for c in cell},
+                         {'Th232 - c1', 'K40 - c1', 'Co60 - c1'})
+
     def test_cache(self):
         result = bom(self.a2)
         self.assertIs(bom(self.a2), result)
