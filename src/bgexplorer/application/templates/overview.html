@@ -13,19 +13,24 @@
             {%- endfor %}
         </ul>
     </div>
-    <a class="btn btn-outline-secondary me-1" id="exportlink" href="{{ url_for('export_version') }}" title="Download this version as a file">Export</a>
-    {% if has_role('editor') %}
-    <a class="btn btn-outline-primary me-1" href="{{ url_for('versions.new', **{'from': g.active_version}) }}">Branch</a>
-    {% endif %}
-    {% if has_role('admin') %}
-    <a class="btn btn-outline-secondary me-1" href="{{ url_for('versions.new', type='tag', **{'from': g.active_version}) }}">Tag</a>
-    {% endif %}
-    {% if can_edit %}
-    <a class="btn btn-outline-primary me-1" id="mergelink" href="{{ url_for('versions.merge') }}">Merge into</a>
-    {% endif %}
-    {% if can_edit and g.active_version != default_version %}
-    <a class="btn btn-outline-danger" href="{{ url_for('versions.delete') }}">Delete</a>
-    {% endif %}
+    <div class="dropdown me-1">
+        <button class="btn btn-outline-primary dropdown-toggle" type="button" id="actions" data-bs-toggle="dropdown" aria-expanded="false">Actions</button>
+        <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" id="exportlink" href="{{ url_for('export_version') }}" title="Download this version as a file">Export</a></li>
+            {% if has_role('editor') %}
+            <li><a class="dropdown-item" href="{{ url_for('versions.new', **{'from': g.active_version}) }}">Branch</a></li>
+            {% endif %}
+            {% if has_role('admin') %}
+            <li><a class="dropdown-item" href="{{ url_for('versions.new', type='tag', **{'from': g.active_version}) }}">Tag</a></li>
+            {% endif %}
+            {% if can_edit %}
+            <li><a class="dropdown-item text-warning" id="mergelink" href="{{ url_for('versions.merge') }}">Merge into</a></li>
+            {% endif %}
+            {% if can_edit and g.active_version != default_version %}
+            <li><a class="dropdown-item text-danger" href="{{ url_for('versions.delete') }}">Delete</a>
+            {% endif %}
+          </ul>
+    </div>
 </div>
 {% endblock %}
 {% block pagecontent %}

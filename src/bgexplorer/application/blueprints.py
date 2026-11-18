@@ -285,7 +285,8 @@ class CollectionViews(flask.Blueprint):
 
         @self.context_processor
         def inject_bp_settings():
-            return dict(doc_cls=self.doc_cls, clsname=self.clsname)
+            return dict(doc_cls=self.doc_cls, clsname=self.clsname,
+                        has_attachments=self.has_attachments)
 
     def _create_endpoints(self):
         @self.get('/')

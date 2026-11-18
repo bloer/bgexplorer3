@@ -24,6 +24,9 @@
 {%- block navbar %}
 <nav class="navbar navbar-expand">
     <div class="container-fluid">
+        <a class="navbar-brand" href="https://www.pnnl.gov">
+            <img src="{{ url_for('static', filename="logopnnl.png") }}" alt="PNNL">
+        </a>
         <a class="navbar-brand" href="https://github.com/bloer/bgexplorer3">
             <img src="{{ url_for('static', filename="bgexplorer_brand.png") }}" alt="Background Explorer">
         </a>
@@ -118,8 +121,7 @@
 
 <footer id="pagefooter">
     Background Explorer version {{ bgexplorer_version() }} |
-    <a href="https://github.com/bloer/bgexplorer3/blob/master/LICENSE">License</a> |
-    developed at <a href="https://pnnl.gov"><img src="{{ url_for('static', filename='logopnnl.png') }}" alt="PNNL"></a>
+    <a href="https://github.com/bloer/bgexplorer3/blob/master/LICENSE">License</a>
 </footer>
 {% endblock content %}
 

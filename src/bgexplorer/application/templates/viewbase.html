@@ -1,0 +1,41 @@
+{% extends "versionbase.html" %}
+{% set activepage = activepage | default("summary") %}
+
+{% block pageheader %}
+<div class="col-5">
+{% block viewheader %}
+{% endblock %}
+</div>
+{% block viewtabs%}
+<div class="col-7">
+    <div class="nav nav-tabs justify-content-end">
+        <a class="nav-link {% if activepage == 'summary' %}active{% endif %}" href="{{ url_for('.view', object=g.object) }}">Summary</a>
+        {% if clsname != 'activatedmaterial' %}
+        <a class="nav-link {% if activepage == 'sourceterms' %}active{% endif %}" href="{{ url_for('.sourceterms', object=g.object) }}">Source Terms</a>
+        <a class="nav-link {% if activepage == 'results' %}active{% endif %}" href="{{ url_for('.results', object=g.object) }}">Results</a>
+        {% endif %}
+        {% if has_attachments %}
+        <a class="nav-link {% if activepage == 'attachments' %}active{% endif %}" href="{{ url_for('.attachments', object=g.object) }}">Attachments
+            <span class="badge text-bg-secondary">{{ g.object.attachments|length }}</span>
+        </a>
+        {% endif %}
+        <div class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 9 9" fill="currentColor"><circle cx="1.5" cy="1.5" r="1"/><circle cx="4.5" cy="1.5" r="1"/><circle cx="7.5" cy="1.5" r="1"/><circle cx="1.5" cy="4.5" r="1"/><circle cx="4.5" cy="4.5" r="1"/><circle cx="7.5" cy="4.5" r="1"/><circle cx="1.5" cy="7.5" r="1"/><circle cx="4.5" cy="7.5" r="1"/><circle cx="7.5" cy="7.5" r="1"/></svg></a>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ url_for('.get_json', object=g.object) }}">Export</a></li>
+                {% if can_edit %}
+                <li><a class="dropdown-item text-success" href="{{ url_for('.edit', object=g.object) }}">Edit</a></li>
+                <li>
+                    <form method="POST" action="{{ url_for('.clone', object=g.object) }}" id="cloneform">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="dropdown-item text-primary">Clone</button>
+                    </form>
+                </li>
+                <li><a class="dropdown-item text-danger" id="deletelink" href="{{ url_for('.delete', object=g.object) }}">Delete</a></li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% endblock %}
