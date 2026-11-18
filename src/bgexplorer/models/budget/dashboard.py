@@ -42,7 +42,7 @@ def dashboard(obj: Component, scalar: str,
     shared, so must not be modified.
     """
     check_args(obj, scalar, groupbys)
-    chart_root, breadcrumb = resolve_root(obj, filters.root)
+    chart_root, breadcrumb = resolve_root(obj, filters.root, relativeto)
     table = term_table(obj, relativeto)
     out = Output(get_settings(obj.active_version).hiteffdbconfig
                  .scalar_unit(scalar), unit)

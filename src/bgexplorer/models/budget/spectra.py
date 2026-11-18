@@ -48,7 +48,7 @@ def spectrum_breakdown(obj: Component, name: str,
     """
     if groupby is not None and groupby not in GROUPBY:
         raise ValueError(f"groupby must be one of {', '.join(GROUPBY)}")
-    chart_root, breadcrumb = resolve_root(obj, filters.root)
+    chart_root, breadcrumb = resolve_root(obj, filters.root, relativeto)
     root = filters.root
     tt = term_table(obj, relativeto, spectra=True)
     terms = np.flatnonzero(tt.having(name))

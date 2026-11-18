@@ -7,11 +7,12 @@ import json
 from collections import defaultdict
 from typing import List, Optional, Tuple
 from ..component import Component, Assembly
+from ...versioning.verdoc import VersionedDocument
 from ..sourceterm import ResultsCache, cache_bytes, _cache_key, _ref_id
 from ..common import units as unitreg
 from ..termcalc import conversion_factor
 from .filters import GROUPBY, BudgetFilter
-from .terms import available_scalars
+from .terms import available_scalars, budget_root
 from .termtable import TermTable
 
 # levels of children shown in the dashboard's component breakdown
@@ -29,7 +30,7 @@ def _cache_arg(arg):
         return arg
     if isinstance(arg, BudgetFilter):
         return json.dumps(arg.todict(), sort_keys=True)
-    if isinstance(arg, (Component, Assembly)):
+    if isinstance(arg, VersionedDocument):
         return _ref_id(arg)
     return str(arg)
 
@@ -95,12 +96,14 @@ def placement_names(component: Component, depth: int) -> dict:
     return names
 
 
-def resolve_root(obj: Component, root: Tuple[str, ...]):
-    """ The component at placement path `root` below `obj`, and the
-    breadcrumb of (path, name) pairs leading to it
+def resolve_root(obj, root: Tuple[str, ...],
+                 relativeto: Optional[Assembly] = None):
+    """ The component at placement path `root` below the `budget_root` of
+    `obj`, and the breadcrumb of (path, name) pairs leading to it
     """
-    component = obj
-    crumbs = [((), obj.name)]
+    start = budget_root(obj, relativeto)
+    component = start
+    crumbs = [((), start.name)]
     for i, pid in enumerate(root):
         for placement in getattr(component, 'children', None) or []:
             if str(placement.id) == pid:

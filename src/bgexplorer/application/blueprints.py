@@ -3,8 +3,8 @@ import mongoengine as me
 from bson import ObjectId
 from bson.errors import InvalidId
 from io import BytesIO
-from ..models.sourceterm import (find_sourceterms, listed_sourceterms,
-                                 SourceTerm)
+from ..models.sourceterm import (find_sourceterms, relativeto_choices,
+                                 listed_sourceterms, SourceTerm)
 from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
                              spectrum_breakdown, spectrum_names,
                              cached_filtered,
@@ -22,17 +22,13 @@ from ..versioning.control import (version_exists, import_document,
                                      VersionControlError)
 from .api import validation_fields
 from .auth import require_for_changes, Role
+from .relativeto import TARGETS
 from .forms import update_object, list_snapshot, edited_rows
 from ..models.histogram import Histogram
 from pint.errors import PintError
 from .plotting import histogram_json, scalar_json, unit_str
 import json
 import markupsafe
-
-
-# table column index -> stored SourceTerm field the server can sort by
-_SOURCETERM_SORT = {1: 'assemblyPathStr', 3: 'source.name', 5: 'location'}
-_MAX_PAGE = 1000
 
 
 def get_or_404(queryset, objid):
@@ -255,8 +251,6 @@ class CollectionViews(flask.Blueprint):
         def load_object():
             if objid := flask.g.get('objid'):
                 flask.g.object = self.queryset.get_or_404(objid)
-            if relativeto := flask.request.args.get('relativeto'):
-                flask.g.relativeto = self.queryset.get_or_404(relativeto)
 
         @self.context_processor
         def inject_bp_settings():
@@ -538,8 +532,8 @@ class CollectionViews(flask.Blueprint):
 
         if 'spectra' in self.doc_cls._fields:
             self._create_spectra_endpoints()
-        if issubclass(self.doc_cls, Component):
-            self._create_plot_endpoints()
+        if issubclass(self.doc_cls, (Component, EmissionSpec, HitEfficiency)):
+            self._create_results_endpoints()
 
         if issubclass(self.doc_cls, Component):
             @self.post('/<objid>/makespecific/<specid>')
@@ -565,48 +559,15 @@ class CollectionViews(flask.Blueprint):
         def sourceterms():
             return flask.render_template('view_sourceterms.html')
 
-        @self.get('/<objid>/sourceterms/data')
-        def sourceterm_data():
-            """ One page of the `sourceterms` table, for DataTables'
-            server-side processing. Cells are html.
-            """
-            args = flask.request.args
-            try:
-                draw = int(args.get('draw', 0))
-                start = max(int(args.get('start', 0)), 0)
-                length = int(args.get('length', 100))
-                column = args.get('order[0][column]')
-                column = None if column is None else int(column)
-            except ValueError:
-                flask.abort(400, "draw, start, length and order must be "
-                                 "integers")
-            length = _MAX_PAGE if length < 0 else min(length, _MAX_PAGE)
-
-            terms = find_sourceterms(flask.g.object)
-            total = terms.count()
-            search = args.get('search[value]', '').strip()
-            if search:
-                terms = terms.filter(me.Q(assemblyPathStr__icontains=search) |
-                                     me.Q(source__name__icontains=search) |
-                                     me.Q(location__icontains=search))
-            filtered = terms.count() if search else total
-            if column in _SOURCETERM_SORT:
-                desc = '-' if args.get('order[0][dir]') == 'desc' else ''
-                terms = terms.order_by(desc + _SOURCETERM_SORT[column], 'id')
-            else:
-                terms = terms.order_by('id')
-
-            rows = listed_sourceterms(terms.skip(start).limit(length))
-            cells = {name: flask.get_template_attribute(
-                'utils.html', 'sourceterm_' + name)
-                for name in ('path', 'spec', 'source', 'rate', 'location',
-                             'hiteffs')}
-            data = [{'DT_RowId': str(row.original_id),
-                     **{name: str(cell(row, activecomponent=flask.g.object))
-                        for name, cell in cells.items()}}
-                    for row in rows]
-            return flask.jsonify(draw=draw, recordsTotal=total,
-                                 recordsFiltered=filtered, data=data)
+        @self.get('/<objid>/sourceterms/rows')
+        def sourceterm_rows():
+            """ The table rows of `sourceterms`, which the page loads """
+            rows = listed_sourceterms(find_sourceterms(flask.g.object,
+                                                       flask.g.get('relativeto'))
+                                      )
+            return str(flask.get_template_attribute(
+                'utils.html', 'print_sourceterm_rows')(
+                    rows, activecomponent=flask.g.object))
 
         @self.post('/<objid>/sourceterms/bulk/delete')
         def sourceterms_bulk_delete():
@@ -633,24 +594,59 @@ class CollectionViews(flask.Blueprint):
                     pass
             return flask.jsonify(cloned=len(ids))
 
-    def _create_plot_endpoints(self):
-        """ Data for the spectra and budget plots of a Component """
-        @self.get('/<objid>/spectra.json')
-        def spectra_json():
-            spectra = {}
-            for name, label in spectrum_names(flask.g.active_version):
-                total = spectrum_breakdown(
-                    flask.g.object, name,
-                    relativeto=flask.g.get('relativeto'))['total']
-                if total is not None:
-                    spectra[label] = histogram_json(total)
-            return flask.jsonify(spectra)
+    def render_picker(self, target: str):
+        """ The page to choose what results for the active object are shown
+        relative to, before going on to the page `target`
+        """
+        if target not in TARGETS:
+            flask.abort(400, f"Can't show {target} relative to a component")
+        hide_empty = bool(flask.request.args.get('hide_empty'))
+        choices = relativeto_choices(flask.g.object)
+        if hide_empty:
+            choices = [c for c in choices if c['nhiteffs']]
+        return flask.render_template('choose_relativeto.html', target=target,
+                                     choices=choices, hide_empty=hide_empty)
+
+    def _needs_relativeto(self) -> bool:
+        """ Whether results for the active object can't be shown without a
+        component to be relative to, and none is chosen
+        """
+        return (not isinstance(flask.g.object, Component)
+                and 'relativeto' not in flask.g)
+
+    @staticmethod
+    def _relativeto_error():
+        return flask.jsonify(error=dict(message=(
+            "Choose a component to show these results relative to"))), 400
+
+    def _create_results_endpoints(self):
+        """ The page to choose a component to show things relative to, and
+        data and the page for the spectra and budget plots. The objects other
+        than Components need one to be chosen
+        """
+        @self.get('/<objid>/relativeto')
+        def choose_relativeto():
+            return self.render_picker(flask.request.args.get('next', 'results'))
+
+        if issubclass(self.doc_cls, Component):
+            @self.get('/<objid>/spectra.json')
+            def spectra_json():
+                spectra = {}
+                for name, label in spectrum_names(flask.g.active_version):
+                    total = spectrum_breakdown(
+                        flask.g.object, name,
+                        relativeto=flask.g.get('relativeto'))['total']
+                    if total is not None:
+                        spectra[label] = histogram_json(total)
+                return flask.jsonify(spectra)
 
         @self.get('/<objid>/spectrum.json')
         def spectrum_json():
             """ One spectrum's total for the `filters` in BudgetFilter JSON
             format, and optionally its largest parts by `groupby`
             """
+            if self._needs_relativeto():
+                return self._relativeto_error()
             args = flask.request.args
             names = spectrum_names(flask.g.active_version)
             name = args.get('spectrum') or (names[0][0] if names else '')
@@ -693,6 +689,8 @@ class CollectionViews(flask.Blueprint):
             """ Every budget breakdown for the `filters` in BudgetFilter
             JSON format, and the totals with and without them
             """
+            if self._needs_relativeto():
+                return self._relativeto_error()
             args = flask.request.args
             scalars = available_scalars(flask.g.active_version)
             scalar = args.get('scalar') or (scalars[0] if scalars else '')
@@ -740,6 +738,8 @@ class CollectionViews(flask.Blueprint):
             """ The contributions table for the `filters` in BudgetFilter
             JSON format
             """
+            if self._needs_relativeto():
+                return self._relativeto_error()
             try:
                 filters = BudgetFilter.from_json(
                     flask.request.args.get('filters'))
@@ -753,8 +753,10 @@ class CollectionViews(flask.Blueprint):
 
         @self.get('/<objid>/results')
         def results():
+            if self._needs_relativeto():
+                return self.render_picker('results')
             return flask.render_template(
-                'results_component.html', groupby=GROUPBY,
+                'results.html', groupby=GROUPBY,
                 scalars=available_scalars(flask.g.active_version),
                 table=table(flask.g.object,
                             relativeto=flask.g.get('relativeto')),

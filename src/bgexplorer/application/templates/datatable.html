@@ -1,7 +1,6 @@
 {%- macro styles() -%}
 <!-- css for jquery datatables -->
 <link rel="stylesheet" href="{{ url_for('static', filename='datatables.min.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='datatables.select.min.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='datatables_full_viewport.css') }}">
 {%- endmacro -%}
 
@@ -9,7 +8,6 @@
 <!-- libraries for jquery datatables -->
 <script src="{{ url_for('static', filename='jquery.min.js') }}"></script>
 <script src="{{ url_for('static', filename='datatables.min.js') }}"></script>
-<script src="{{ url_for('static', filename='datatables.select.min.js') }}"></script>
 <!-- set good defaults for datatables -->
 <script>
     if (typeof DataTable !== 'undefined') {
@@ -24,63 +22,47 @@
 </script>
 {%- if initialize %}
 <script>
-    // a table with `data-ajax-url` is paged by the server and its rows are selected
-    // with DataTables' Select. `_selected` holds the ids across pages and
-    // `_rowTexts` their cell text, for the CSV export
-    var _serverTable = null;
-    var _selected = new Set();
-    var _rowTexts = new Map();
-    var _bar = document.getElementById('bulk-bar');
-    function _updateBar() {
-        _bar.style.visibility = _selected.size ? 'visible' : 'hidden';
-        document.getElementById('bulk-count').textContent = _selected.size + ' selected';
-    }
     if (typeof DataTable !== 'undefined') {
         document.querySelectorAll("table.datatable").forEach(function(table) {
-            if (!table.dataset.ajaxUrl) {
+            var start = function() {
                 new DataTable(table, {columnDefs: [{targets: 0, orderable: false, searchable: false}]});
+            };
+            if (!table.dataset.rowsUrl) {
+                start();
                 return;
             }
-            var columns = JSON.parse(table.dataset.colspec);
-            columns.unshift({data: null, defaultContent: '', className: 'select-checkbox', orderable: false, searchable: false});
-            var dt = _serverTable = new DataTable(table, {
-                serverSide: true, processing: true, ajax: table.dataset.ajaxUrl, columns: columns,
-                paging: true, pageLength: 100, dom: 'ipftr',
-                select: {style: 'multi', selector: 'td:first-child', info: false}
-            });
-            // a new page does not deselect the rows, but Select only restores the selection of rows still on it
-            dt.on('draw', function() {
-                document.querySelectorAll('.select-all').forEach(function(cb) { cb.checked = false; });
-                dt.rows().every(function() { if (_selected.has(this.id(true))) this.select(); });
-            });
-            dt.on('select', function(e, api, type, indexes) {
-                if (type !== 'row') return;
-                api.rows(indexes).every(function() {
-                    var id = this.id(true);
-                    _selected.add(id);
-                    _rowTexts.set(id, Array.from(this.node().querySelectorAll('td')).slice(1).map(function(td) { return td.textContent.trim(); }));
-                });
-                _updateBar();
-            });
-            dt.on('deselect', function(e, api, type, indexes) {
-                if (type !== 'row') return;
-                api.rows(indexes).ids(true).each(function(id) { _selected.delete(id); _rowTexts.delete(id); });
-                _updateBar();
+            var status = document.createElement('div');
+            status.className = 'text-center my-3';
+            status.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
+            table.before(status);
+            fetch(table.dataset.rowsUrl).then(function(response) {
+                if (!response.ok) throw new Error(response.status + ' ' + response.statusText);
+                return response.text();
+            }).then(function(html) {
+                table.tBodies[0].innerHTML = html;
+                status.remove();
+                start();
+            }).catch(function(error) {
+                status.className = 'alert alert-danger';
+                status.textContent = 'Could not load the table: ' + error.message;
             });
         });
     }
+    var _bar = document.getElementById('bulk-bar');
+    console.log('bulk-bar:', _bar);
     if (_bar) {
         var _csrf = "{{ csrf_token() }}";
         var _base = window.location.pathname.replace(/\/$/, '');
+        var _selected = new Set();
+        function _updateBar() {
+            _bar.style.visibility = _selected.size ? 'visible' : 'hidden';
+            document.getElementById('bulk-count').textContent = _selected.size + ' selected';
+        }
         document.addEventListener('change', function(e) {
+            console.log('change:', e.target.className, e.target.checked);
             if (e.target.classList.contains('select-all')) {
                 var checked = e.target.checked;
                 document.querySelectorAll('.select-all').forEach(function(cb) { cb.checked = checked; });
-                if (_serverTable) {
-                    var rows = _serverTable.rows({page: 'current'});
-                    checked ? rows.select() : rows.deselect();
-                    return;
-                }
                 document.querySelectorAll('.row-select').forEach(function(cb) {
                     cb.checked = checked;
                     checked ? _selected.add(cb.value) : _selected.delete(cb.value);
@@ -107,11 +89,9 @@
         document.getElementById('bulk-export').addEventListener('click', function() {
             var table = document.querySelector('table.datatable');
             var headers = Array.from(table.querySelectorAll('thead th')).slice(1).map(function(th) { return '"' + th.textContent.trim().replace(/"/g, '""') + '"'; }).join(',');
-            var quote = function(text) { return '"' + text.replace(/"/g, '""') + '"'; };
-            var rows = _serverTable ? Array.from(_selected).map(function(id) { return _rowTexts.get(id).map(quote).join(','); }) :
-                Array.from(document.querySelectorAll('.row-select')).filter(function(cb) { return _selected.has(cb.value); }).map(function(cb) {
-                    return Array.from(cb.closest('tr').querySelectorAll('td')).slice(1).map(function(td) { return quote(td.textContent.trim()); }).join(',');
-                });
+            var rows = Array.from(document.querySelectorAll('.row-select')).filter(function(cb) { return _selected.has(cb.value); }).map(function(cb) {
+                return Array.from(cb.closest('tr').querySelectorAll('td')).slice(1).map(function(td) { return '"' + td.textContent.trim().replace(/"/g, '""') + '"'; }).join(',');
+            });
             var a = document.createElement('a');
             a.href = URL.createObjectURL(new Blob([[headers].concat(rows).join('\n')], {type: 'text/csv'}));
             a.download = 'export.csv';
@@ -122,9 +102,8 @@
 {% endif -%}
 {% endmacro %}
 
-{#- with `ajax_url`, the server pages, sorts and searches the rows: it takes
-    DataTables' server-side processing request and `columns` describes the json -#}
-{% macro render(headings, tableid="dtable", bulk=false, ajax_url=none, columns=none) %}
+{#- with `rows_url`, the body is the html at that url, fetched on load -#}
+{% macro render(headings, tableid="dtable", bulk=false, rows_url=none) %}
 {%- if bulk %}
 <div class="modal fade" id="bulk-delete-modal" tabindex="-1">
     <div class="modal-dialog">
@@ -151,7 +130,7 @@
 </div>
 {%- endif %}
 <table id="{{ tableid }}" class="table table-hover table-bordered table-sm  nowrap datatable" width="100%"
-    {%- if ajax_url %} data-ajax-url="{{ ajax_url }}" data-colspec='{{ columns | tojson }}'{% endif %}>
+    {%- if rows_url %} data-rows-url="{{ rows_url }}"{% endif %}>
     <thead class="table-light">
         <tr>
             {%- if bulk %}<th style="width:1px"><input type="checkbox" class="select-all"></th>{% endif %}

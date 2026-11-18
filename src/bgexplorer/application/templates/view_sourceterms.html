@@ -5,7 +5,10 @@
 {% import "datatable.html" as datatable %}
 
 {% block pagecontent %}
-{{ utils.print_sourceterms(url_for('.sourceterm_data', object=g.object)) }}
+{% if clsname in ('component', 'emissionspec', 'hitefficiency') %}
+{{ utils.relativeto_banner(g.object, g.get('relativeto'), 'sourceterms') }}
+{% endif %}
+{{ utils.print_sourceterms(url_for('.sourceterm_rows', object=g.object)) }}
 {% endblock %}
 
 {% block pagestyle %}

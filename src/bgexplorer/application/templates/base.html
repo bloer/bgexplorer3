@@ -120,7 +120,7 @@
 <script>
     document.addEventListener('click', function(e) {
         var link = e.target.closest('a[href]');
-        if (link && !link.dataset.bsToggle && !link.getAttribute('href').startsWith('#') && link.target !== '_blank') {
+        if (link && !link.dataset.bsToggle && !link.href.startsWith('#') && link.target !== '_blank') {
             document.getElementById('page-spinner').classList.remove('d-none');
         }
     });

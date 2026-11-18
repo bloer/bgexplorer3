@@ -30,7 +30,7 @@ from ..versioning.control import list_versions, version_exists
 from ..versioning.verdoc import VersionedDocument
 from ..versioning.history import recent_events
 from .forms import input_type, input_value, field_kind
-from . import auth
+from . import auth, relativeto
 
 from ..models.asymmetric import AsymmetricUncertainty
 import pint
@@ -109,6 +109,8 @@ def create_app(config_file=None, config=None):
         tag = flask.g.get('active_version')
         if tag is not None and not version_exists(tag):
             flask.abort(404, f"Version '{tag}' does not exist")
+
+    relativeto.init_app(app)
 
     # Pages and json under /explore/<version>/ carry an ETag, and are answered
     # with 304 before rendering if the browser's copy is still good. Static
