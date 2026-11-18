@@ -13,7 +13,6 @@ from ..component import Assembly, Component
 from ..cosmogenic import CosmogenicActivation
 from ..emissionspec import Multiplier
 from ..exposure import RadonExposure
-from ..hiteff import HitEfficiency
 from ..isotope import compare_source_names
 from ..settings import get_settings
 from ..sourceterm import SourceTerm
@@ -35,14 +34,17 @@ class RowKey(NamedTuple):
 
 
 class Link(NamedTuple):
-    """ Text to show, linked to the document `endpoint` (a blueprint name,
-    e.g. 'component') with `original_id` `id`, or to the external `url`, or
-    to nothing
+    """ Text to show, linked to the page `view` (default the document's own)
+    of the document `endpoint` (a blueprint name, e.g. 'component') with
+    `original_id` `id`, shown relative to the component `relativeto` if
+    set, or to the external `url`, or to nothing
     """
     text: str
     endpoint: Optional[str] = None
     id: Optional[str] = None
     url: Optional[str] = None
+    view: str = 'view'
+    relativeto: Optional[str] = None
 
 
 class BomColumn(NamedTuple):
@@ -88,10 +90,10 @@ _BEFORE = (
     BomColumn('assay', 'Assay', 'assay'),
     BomColumn('assay_detail', 'Assay detail', 'assay', False),
 ) + tuple(BomColumn(iso, iso, 'isotopes') for iso in BULK_ISOTOPES) + (
-    BomColumn('other_isotopes', 'Other isotopes', 'isotopes', False),
+    BomColumn('other_sources', 'Other sources', 'isotopes', False),
     BomColumn('cosmogenic', 'Cosmogenic', 'exposure'),
     BomColumn('radon', 'Radon', 'exposure'),
-    BomColumn('hiteffs', 'Hit effs', 'hiteff'),
+    BomColumn('sourceterms', 'Source Terms', 'sourceterms'),
 )
 
 
@@ -195,7 +197,7 @@ def _component_cells(comp: Component) -> dict:
         assay=tuple(Link(_assay_text(a), 'emissionspec', str(a.original_id))
                     for a in assays),
         assay_detail=_text(_assay_detail(a) for a in assays),
-        other_isotopes=other,
+        other_sources=other,
         cosmogenic=_cosmogenic(specs),
         radon=_radon(specs),
         **bulk)
@@ -216,36 +218,20 @@ def _walk(root: Component):
     yield from walk(root, (), '', 1.)
 
 
-def _hiteffs(obj: Component) -> Dict[tuple, tuple]:
-    """ The cell of hit efficiencies for each path: the ones on the paths'
-    own SourceTerms, as the SourceTerms hold them, and how many terms have
-    none
+def _sourceterm_counts(obj: Component) -> Dict[tuple, Tuple[int, int]]:
+    """ For each path, how many SourceTerms it has of its own, and how many
+    of those have no HitEfficiency, as the SourceTerms hold them
     """
-    version = obj.active_version
-    query = SourceTerm.select_version(version)(assemblyRoot=obj)
-    found = {}
-    for doc in SourceTerm._get_collection().aggregate([
-            {'$match': query._query},
-            {'$group': {'_id': '$placement_ids', 'nterms': {'$sum': 1},
-                        'hiteffs': {'$addToSet': '$hiteffs'},
-                        'nnone': {'$sum': {'$cond': [
-                            {'$gt': [{'$size': {'$ifNull': ['$hiteffs', []]}},
-                                     0]}, 0, 1]}}}}]):
-        ids = {i for hits in doc['hiteffs'] for i in hits or []}
-        found[tuple(str(i) for i in doc['_id'] or [])] = (ids, doc['nnone'])
-    names = {hit.original_id: str(hit) for hit in
-             HitEfficiency.select_version(version)(
-                 original_id__in=list({i for ids, _ in found.values()
-                                       for i in ids})
-             ).only('original_id', 'version_tags', 'source', 'location')}
-    cells = {}
-    for path, (ids, nnone) in found.items():
-        links = sorted((Link(names[i], 'hitefficiency', str(i))
-                        for i in ids if i in names))
-        if nnone:
-            links.append(Link(f"none for {_plural(nnone, 'term')}"))
-        cells[path] = tuple(links)
-    return cells
+    query = SourceTerm.select_version(obj.active_version)(assemblyRoot=obj)
+    return {tuple(str(i) for i in doc['_id'] or []):
+            (doc['nterms'], doc['nnone'])
+            for doc in SourceTerm._get_collection().aggregate([
+                {'$match': query._query},
+                {'$group': {'_id': '$placement_ids', 'nterms': {'$sum': 1},
+                            'nnone': {'$sum': {'$cond': [
+                                {'$gt': [{'$size': {'$ifNull': ['$hiteffs',
+                                                                []]}}, 0]},
+                                0, 1]}}}}])}
 
 
 def _outputs(version: str) -> Dict[str, Output]:
@@ -262,6 +248,18 @@ def bom_columns(version: str) -> Tuple[BomColumn, ...]:
         for key, name in table_columns(version))
 
 
+def _sourceterms_cell(counts, comp: Component, root_id: str) -> tuple:
+    """ "# (# w/o hiteff)", linked to the component's SourceTerms page as
+    they are within the root
+    """
+    if not counts:
+        return ()
+    nterms, nnone = counts
+    return (Link(f"{nterms} ({nnone} w/o hiteff)", 'component',
+                 str(comp.original_id), view='sourceterms',
+                 relativeto=root_id),)
+
+
 def _build(obj: Component) -> Bom:
     version = obj.active_version
     outs = _outputs(version)
@@ -271,7 +269,8 @@ def _build(obj: Component) -> Bom:
     sums, _ = path_sums(tt, BudgetFilter(),
                         lambda path: range(len(path) + 1))
     contributions = path_values(tt, outs, sums)
-    hiteffs = _hiteffs(obj)
+    counts = _sourceterm_counts(obj)
+    root_id = str(obj.original_id)
     by_component: Dict[Any, dict] = {}
 
     def row(path, outline, comp, name, weight, total, location, placement_id):
@@ -284,7 +283,7 @@ def _build(obj: Component) -> Bom:
             placement_id=placement_id,
             weight=weight, total_weight=total,
             location=location or None,
-            hiteffs=hiteffs.get(path, ()),
+            sourceterms=_sourceterms_cell(counts.get(path), comp, root_id),
             **contributions(path))
         return BomRow(RowKey(path, str(comp.original_id)), outline,
                       len(path), bool(getattr(comp, 'children', None)), cells)

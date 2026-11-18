@@ -162,8 +162,8 @@ class TestBom(AppTestCase):
         self.assertIn('10', c1.cells['Th232'])
         self.assertIn('25', c1.cells['K40'])
         self.assertIsNone(c1.cells['U238'])
-        self.assertIn('Co60', c1.cells['other_isotopes'])
-        self.assertNotIn('Th232', c1.cells['other_isotopes'])
+        self.assertIn('Co60', c1.cells['other_sources'])
+        self.assertNotIn('Th232', c1.cells['other_sources'])
         self.assertIn('0.5', self.row(result, self.p_c3).cells['Th232'])
 
     def test_exposures(self):
@@ -188,7 +188,7 @@ class TestBom(AppTestCase):
         self.assertIn('1 period', c3.cells['radon'])
         self.assertIn('Pb210', c3.cells['radon'])
         # the computed exposure sources are not bulk isotopes
-        self.assertNotIn('Co60', c3.cells['other_isotopes'] or '')
+        self.assertNotIn('Co60', c3.cells['other_sources'] or '')
         self.assertIsNone(self.row(result, self.p_c1b).cells['cosmogenic'])
         self.assertIsNone(self.row(result, self.p_c1b).cells['radon'])
 
@@ -199,7 +199,7 @@ class TestBom(AppTestCase):
         self.assertEqual(keys[:2], ['outline', 'name'])
         by_key = {c.key: c for c in result.columns}
         for key in ('component_id', 'placement_id', 'surface_area',
-                    'other_isotopes'):
+                    'other_sources'):
             self.assertFalse(by_key[key].visible, key)
         for key in ('description', 'weight', 'total_weight', 'mass', 'part',
                     'assay', 'U238', 'Th232', 'K40', 'v1'):
@@ -259,53 +259,54 @@ class TestBom(AppTestCase):
                                low(self.p_a1, self.p_c2))
         self.assertGreater(low(self.p_c3), 0)
 
-    def test_hit_efficiencies(self):
+    def sourceterms(self, result, *path):
+        return self.row(result, *path).cells['sourceterms']
+
+    def test_sourceterms(self):
         result = bom(self.a2)
-        c1 = self.row(result, self.p_a1, self.p_c1)
-        names = {link.text: link for link in c1.cells['hiteffs']
-                 if isinstance(link, Link)}
-        self.assertEqual(set(names), {'Th232 - c1', 'K40 - c1', 'Co60 - c1'})
+        root = str(self.a2.original_id)
         self.assertEqual(
-            names['K40 - c1'],
-            Link('K40 - c1', 'hitefficiency',
-                 str(self.hits['K40', 'c1'].original_id)))
+            self.sourceterms(result, self.p_a1, self.p_c1),
+            (Link('3 (0 w/o hiteff)', 'component',
+                  str(self.c1.original_id), view='sourceterms',
+                  relativeto=root),))
         # own terms only: the assembly has none of its own
-        self.assertEqual(self.row(result, self.p_a1).cells['hiteffs'], ())
-        # the same component placed elsewhere has the same ones
-        other = self.row(result, self.p_c1b)
-        self.assertEqual({l.text for l in other.cells['hiteffs']},
-                         {'Th232 - c1', 'K40 - c1', 'Co60 - c1'})
+        self.assertEqual(self.sourceterms(result, self.p_a1), ())
+        # the same component placed elsewhere has the same count, and its
+        # link is the same page
+        self.assertEqual(self.sourceterms(result, self.p_c1b),
+                         self.sourceterms(result, self.p_a1, self.p_c1))
+        # K40 has no hit efficiency at c2
+        self.assertEqual(
+            [l.text for l in self.sourceterms(result, self.p_a1, self.p_c2)],
+            ['3 (1 w/o hiteff)'])
 
-    def test_hit_efficiencies_none(self):
-        """ SourceTerms with no hit efficiency are flagged, not matched """
+    def test_sourceterms_without_hiteffs(self):
         HitEfficiency.objects.get(source='Th232', location='c3').delete()
-        result = bom(self.a2)
-        cell = self.row(result, self.p_c3).cells['hiteffs']
-        self.assertEqual([c.text for c in cell], ['none for 1 term'])
-        self.assertIsNone(cell[0].endpoint)
+        cell = self.sourceterms(bom(self.a2), self.p_c3)
+        self.assertEqual([c.text for c in cell], ['1 (1 w/o hiteff)'])
 
-    def test_hit_efficiencies_from_sourceterms(self):
-        """ What SourceTerms carry is what is shown, with no matching """
+    def test_sourceterms_as_the_terms_hold_them(self):
+        """ What SourceTerms carry is what is counted, with no matching """
         bom(self.a2)
         term = SourceTerm.objects(assemblyRoot=self.a2,
                                   placement_ids=[ObjectId(self.p_c3)]).first()
         self.assertTrue(term.hiteffs)
-        term.hiteffs = [self.hits['Th232', 'c1']]
+        term.hiteffs = []
         term.hiteffs_auto = False
         term.save()
-        cell = self.row(bom(self.a2), self.p_c3).cells['hiteffs']
-        self.assertEqual([c.text for c in cell], ['Th232 - c1'])
+        cell = self.sourceterms(bom(self.a2), self.p_c3)
+        self.assertEqual([c.text for c in cell], ['1 (1 w/o hiteff)'])
 
     def test_non_default_version(self):
-        """ Only 'main' is the default tag, so the hit efficiency lookup
-        must not rely on defaults for fields it leaves out
+        """ Only 'main' is the default tag, so nothing may rely on defaults
+        for what it leaves out of a query
         """
         vc.create_version('other', 'main')
         root = Component.select_version('other').get(
             original_id=self.a2.original_id)
-        cell = self.row(bom(root), self.p_a1, self.p_c1).cells['hiteffs']
-        self.assertEqual({c.text for c in cell},
-                         {'Th232 - c1', 'K40 - c1', 'Co60 - c1'})
+        cell = self.sourceterms(bom(root), self.p_a1, self.p_c1)
+        self.assertEqual([c.text for c in cell], ['3 (0 w/o hiteff)'])
 
     def test_cache(self):
         result = bom(self.a2)
@@ -354,8 +355,10 @@ class TestBom(AppTestCase):
                                    objid=str(obj.original_id)), html)
         self.assertIn(self.url('emissionspec.view',
                                objid=str(self.assay.original_id)), html)
-        self.assertIn(self.url('hitefficiency.view', objid=str(
-            self.hits['K40', 'c1'].original_id)), html)
+        self.assertIn(
+            self.url('component.sourceterms', objid=str(self.c1.original_id),
+                     relativeto=str(self.a2.original_id)), html)
+        self.assertIn('3 (0 w/o hiteff)', html)
         self.assertIn('https://example.com/x1', html)
         self.assertIn('copper assay (Smith 2020)', html)
 

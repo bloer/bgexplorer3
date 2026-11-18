@@ -62,16 +62,19 @@ Shown by default:
 | U238, Th232, K40 | bulk values from the component's emission specs |
 | Cosmogenic | summary of attached `CosmogenicActivation` periods |
 | Radon | summary of attached `RadonExposure` periods |
-| Hit effs | the HitEfficiencies on this row's own SourceTerms (see below) |
+| Source Terms | `# (# w/o hiteff)` for this row's own SourceTerms (see below), linked to the component's Source Terms page relative to the root |
 | Contributions | one column per `table_columns(version)` entry (scalars, then ROIs), in its unit |
 
 Hidden by default (toggled with the column-visibility button): component
-`original_id`, placement id, surface area, owner, comment, other (non-automatic) isotopes,
-assay detail (sample, measurement, radiopurity id), confidence rating,
+`original_id`, placement id, surface area, owner, comment, other sources
+(non-automatic bulk isotopes), assay detail (sample, measurement, radiopurity id), confidence rating,
 location.
 
-Sub-assembly rows are shaded; long text cells are truncated with the full text
-in the `title` attribute. Ordering and paging are off, since the hierarchy is
+Sub-assembly rows are shaded (the Name column is not indented); long text
+cells are truncated. The table's height is `100vh - 222px`, 17px less than the
+shared datatable default, so the horizontal scrollbar is not flush with the
+bottom of the viewport (Firefox 102 ESR laid it out a pixel too tall; checked
+in Chromium only). Ordering and paging are off, since the hierarchy is
 the order. Header fixed (FixedHeader or `scrollY`), Outline and Name pinned
 (FixedColumns, two left columns). Buttons: column visibility (with restore),
 copy, CSV (visible columns, links as text, several links joined with "; ").
@@ -101,19 +104,17 @@ copy, CSV (visible columns, links as text, several links joined with "; ").
 - Walks the hierarchy once for outline, weights and component fields, and
   once over the SourceTerms for contributions and hit efficiencies.
 
-### Hit efficiencies
+### Source terms
 
-No matching logic. A HitEfficiency is associated with a row through the
-SourceTerms that already carry it: `SourceTerm.hiteffs` holds the matches the
-app computed (the same data the relativeto picker counts in
-`relativeto_choices`). One aggregation over the SourceTerm collection for
+No matching logic. One aggregation over the SourceTerm collection for
 `assemblyRoot=obj` in the active version, grouped by `placement_ids` (the row's
-own path, no descendants), collects the distinct `hiteffs` `original_id`s and
-the numbers of terms with and without any. Names are then loaded from the
-HitEfficiency collection in one `original_id__in` query. The cell lists the
-hit efficiencies by name, linked, and notes terms that have none (as the
-picker's "no hit efficiencies" badge does). It is the row's own terms, not the
-subtree, since hit efficiencies are a property of where a source sits.
+own path, no descendants), counts the terms and those whose `hiteffs` is empty
+(the data the app already computed, as the relativeto picker uses). The cell
+reads `# (# w/o hiteff)` and links to the row component's Source Terms page
+(`component.sourceterms`) with `relativeto` set to the BoM's root. The count is
+per row path, while that page lists the component's terms across all its
+placements within the root, so the two differ for a component placed more than
+once.
 
 ### Inclusive contributions
 
@@ -135,8 +136,9 @@ unit handling (`Output`, `get_settings(...).hiteffdbconfig`) is reused as-is.
   `/<objid>/billofmaterials/rows` (row HTML) on the component blueprint, mirroring
   `view_sourceterms` and its `/rows` endpoint, in
   `application/blueprints.py` `_create_endpoints` for the component class
-  only. The BoM does not use `relativeto`; links in the table are ordinary
-  `original_id` links to components, assays and hit efficiencies.
+  only. The BoM page takes no `relativeto`; links in the table are ordinary
+  `original_id` links to components and assays, plus the Source Terms link,
+  which sets `relativeto` to the root.
 - `templates/view_billofmaterials.html` uses `datatable.html` macros; a small
   `bom_rows.html` partial renders `BomRow` cells (the only place cells become
   HTML). A link to the BoM is added to the component page.
@@ -175,8 +177,9 @@ modelled on `test_budget.py` and `test_app_components.py`.
   `table()` results are unchanged by the refactor.
 - Cache: second call returns the same object; an edit to any component
   invalidates it.
-- Hit efficiencies: a row lists exactly the hit efficiencies on SourceTerms
-  with its `placement_ids`; terms without any are flagged; no matching code.
+- Source terms: a row counts exactly the SourceTerms with its `placement_ids`
+  and those without hit efficiencies; the link carries `relativeto`; no
+  matching code.
 - Row keys: unique within a BoM, built from placement ids and component
   `original_id` (never `_id`).
 - Route: page and `/rows` return 200 for a populated version, 404/error for an
@@ -188,7 +191,7 @@ modelled on `test_budget.py` and `test_app_components.py`.
 ## Open details for the plan
 
 - Which isotope names count as "automatic" bulk (U238, Th232, K40 shown;
-  everything else in "other isotopes"), read from the existing emission
+  everything else in "other sources"), read from the existing emission
   source names.
 - Where the cosmogenic and radon summaries get their text (reuse existing
   display helpers if present).

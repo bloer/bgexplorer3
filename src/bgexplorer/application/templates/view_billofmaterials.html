@@ -24,6 +24,10 @@
     #bom td.bom-text { max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
     #bom td.bom-number { text-align: right; }
     #bom_wrapper div.dt-buttons { margin-left: 1rem; }
+    /* the shared 205px leaves the table's horizontal scrollbar flush with the
+       bottom of the viewport, so a browser that lays out a pixel taller
+       pushes it out of reach */
+    #bom_wrapper div.dataTables_scroll { height: calc(100vh - 222px); }
 </style>
 {% endblock %}
 
