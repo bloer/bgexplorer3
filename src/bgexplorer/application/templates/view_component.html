@@ -11,6 +11,7 @@
         <a class="nav-link {% if activepage == 'summary' %}active{% endif %}" href="{{ url_for('.view', object=g.object) }}">Summary</a>
         <a class="nav-link {% if activepage == 'sourceterms' %}active{% endif %}" href="{{ url_for('.sourceterms', object=g.object) }}">Source Terms</a>
         <a class="nav-link {% if activepage == 'results' %}active{% endif %}" href="{{ url_for('.results', object=g.object) }}">Results</a>
+        <a class="nav-link {% if activepage == 'billofmaterials' %}active{% endif %}" href="{{ url_for('.billofmaterials', object=g.object) }}">Bill of Materials</a>
         <a class="nav-link {% if activepage == 'attachments' %}active{% endif %}" href="{{ url_for('.attachments', object=g.object) }}">Attachments
             <span class="badge text-bg-secondary">{{ g.object.attachments|length }}</span>
         </a>

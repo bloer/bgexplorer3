@@ -6,6 +6,7 @@ from io import BytesIO
 from ..models.sourceterm import (find_sourceterms, relativeto_choices,
                                  listed_sourceterms, SourceTerm)
 from ..models.budget import (available_scalars, GROUPBY, dashboard, table,
+                             bom, bom_columns,
                              spectrum_breakdown, spectrum_names,
                              cached_filtered,
                              BudgetFilter)
@@ -577,6 +578,21 @@ class CollectionViews(flask.Blueprint):
             self._create_results_endpoints()
 
         if issubclass(self.doc_cls, Component):
+            @self.get('/<objid>/billofmaterials')
+            def billofmaterials():
+                return flask.render_template(
+                    'view_billofmaterials.html',
+                    columns=bom_columns(flask.g.active_version))
+
+            @self.get('/<objid>/billofmaterials/rows')
+            def billofmaterials_rows():
+                """ The table rows of `billofmaterials`, which the page loads """
+                try:
+                    result = bom(flask.g.object)
+                except ValueError as e:
+                    return markupsafe.escape(str(e)), 400
+                return flask.render_template('bom_rows.html', bom=result)
+
             @self.post('/<objid>/makespecific/<specid>')
             def make_specific(specid):
                 """ Replace a shared spec with a copy of our own """

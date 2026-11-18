@@ -314,3 +314,59 @@ class TestBom(AppTestCase):
         self.assertEqual(len(result.rows), 1)
         self.assertEqual(result.rows[0].cells['mass'], 0)
         self.assertFalse(result.rows[0].has_children)
+
+    # the page and its rows
+    def page(self, obj, rows=False, **kwargs):
+        endpoint = 'component.billofmaterials' + ('_rows' if rows else '')
+        return self.client.get(self.url(
+            endpoint, objid=str(obj.original_id), **kwargs))
+
+    def test_page(self):
+        response = self.page(self.a2)
+        self.assertEqual(response.status_code, 200)
+        html = self.html(response)
+        for label in ('Outline', 'Component ID', 'Wt (parent)', 'Th232',
+                      'Value [mdru]'):
+            self.assertIn(label, html)
+        self.assertIn('data-visible="false"', html)
+        self.assertIn('buttons.colVis.min.js', html)
+        self.assertIn('Bill of Materials', html)
+
+    def test_rows(self):
+        response = self.page(self.a2, rows=True)
+        self.assertEqual(response.status_code, 200)
+        html = self.html(response)
+        self.assertEqual(html.count('<tr'), 6)
+        self.assertEqual(html.count('bom-assembly'), 2)
+        for obj in (self.a1, self.c1, self.c3):
+            self.assertIn(self.url('component.view',
+                                   objid=str(obj.original_id)), html)
+        self.assertIn(self.url('emissionspec.view',
+                               objid=str(self.assay.original_id)), html)
+        self.assertIn(self.url('hitefficiency.view', objid=str(
+            self.hits['K40', 'c1'].original_id)), html)
+        self.assertIn('https://example.com/x1', html)
+        self.assertIn('copper assay (Smith 2020)', html)
+
+    def test_unsafe_link(self):
+        # the model rejects these, but the view doesn't rely on that
+        self.c3.purchaseinfo = PurchaseInfo(vendor='Evil')
+        self.c3.save()
+        Component._get_collection().update_one(
+            {'_id': self.c3.id},
+            {'$set': {'purchaseinfo.link': 'javascript:alert(1)'}})
+        html = self.html(self.page(self.a2, rows=True))
+        self.assertIn('Evil', html)
+        self.assertNotIn('javascript:', html)
+
+    def test_text_is_escaped(self):
+        self.c3.description = '<script>alert(1)</script>'
+        self.c3.save()
+        self.assertNotIn('<script>alert',
+                         self.page(self.a2, rows=True).get_data(as_text=True))
+
+    def test_unknown_component(self):
+        for rows in (False, True):
+            self.assertEqual(
+                self.page(Component(name='x', original_id=ObjectId()),
+                          rows=rows).status_code, 404)

@@ -1,0 +1,71 @@
+{% extends "view_component.html" %}
+{% set activepage = "billofmaterials" %}
+{% import "datatable.html" as datatable %}
+
+{% block pagecontent %}
+<table id="bom" class="table table-hover table-bordered table-sm nowrap"
+       width="100%" data-rows-url="{{ url_for('.billofmaterials_rows', object=g.object) }}">
+    <thead class="table-light">
+        <tr>
+            {%- for col in columns %}
+            <th data-visible="{{ 'true' if col.visible else 'false' }}"
+                data-group="{{ col.group }}">{{ col.label }}{% if col.units %} [{{ col.units }}]{% endif %}</th>
+            {%- endfor %}
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+{% endblock %}
+
+{% block pagestyle %}
+{{ datatable.styles() }}
+<style>
+    #bom tr.bom-assembly td { background-color: var(--bs-tertiary-bg, #f1f3f5); font-weight: 500; }
+    #bom td.bom-text { max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
+    #bom td.bom-number { text-align: right; }
+</style>
+{% endblock %}
+
+{% block pagescripts %}
+{{ datatable.scripts(initialize=false) }}
+<script src="{{ url_for('static', filename='buttons.colVis.min.js') }}"></script>
+<script>
+(function () {
+    var table = document.getElementById('bom');
+    var status = document.createElement('div');
+    status.className = 'text-center my-3';
+    status.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
+    table.before(status);
+    fetch(table.dataset.rowsUrl).then(function (response) {
+        if (!response.ok) {
+            return response.text().then(function (text) {
+                throw new Error(response.status + ' ' + (text || response.statusText));
+            });
+        }
+        return response.text();
+    }).then(function (html) {
+        table.tBodies[0].innerHTML = html;
+        status.remove();
+        var hidden = [];
+        table.querySelectorAll('thead th').forEach(function (th, i) {
+            if (th.dataset.visible === 'false') hidden.push(i);
+        });
+        new DataTable(table, {
+            dom: 'Bifrt',
+            ordering: false,
+            fixedColumns: {left: 2},
+            columnDefs: [{targets: hidden, visible: false}],
+            buttons: [
+                {extend: 'colvis', text: 'Columns', postfixButtons: ['colvisRestore']},
+                {extend: 'copyHtml5', exportOptions: {columns: ':visible'}},
+                {extend: 'csvHtml5', title: 'bill_of_materials', exportOptions: {columns: ':visible'}},
+                {extend: 'excelHtml5', title: 'bill_of_materials', exportOptions: {columns: ':visible'}}
+            ]
+        });
+    }).catch(function (error) {
+        status.className = 'alert alert-danger';
+        status.textContent = 'Could not load the bill of materials: ' + error.message;
+    });
+})();
+</script>
+{% endblock %}

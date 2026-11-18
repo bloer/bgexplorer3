@@ -1,0 +1,30 @@
+{#- The rows of the bill of materials: the only place its cells become HTML.
+    A cell is None, text, a number, a Quantity, or a tuple of Links -#}
+{%- macro link(l) -%}
+{%- if l.endpoint -%}<a href="{{ url_for(l.endpoint ~ '.view', objid=l.id) }}">{{ l.text }}</a>
+{%- elif l.url and l.url.startswith(('http://', 'https://')) -%}<a href="{{ l.url }}" target="_blank" rel="noopener">{{ l.text }}</a>
+{%- else -%}<span class="text-secondary">{{ l.text }}</span>{%- endif -%}
+{%- endmacro -%}
+
+{%- macro cell(col, value, row) -%}
+{%- if value is none or value == () -%}<td></td>
+{%- elif value is string -%}<td class="bom-text" title="{{ value }}">{{ value }}</td>
+{%- elif value is number -%}<td class="bom-number">{{ '{:.4g}'.format(value) }}</td>
+{%- elif value.m is defined -%}<td class="bom-number">{{ '{:S}'.format(value.m) }}</td>
+{%- else -%}
+<td class="bom-text"
+    {%- if col.key == 'name' %} style="padding-left: {{ 0.5 + 1.25 * row.depth }}rem"{% endif %}
+    title="{{ value | map(attribute='text') | join('; ') }}">
+    {%- for l in value %}{{ link(l) }}{% if not loop.last %}<br>{% endif %}{% endfor -%}
+</td>
+{%- endif -%}
+{%- endmacro -%}
+
+{%- for row in bom.rows -%}
+<tr{% if row.has_children %} class="bom-assembly"{% endif %}>
+    {%- for col in bom.columns %}
+    {%- if col.key == 'outline' %}<td>{{ row.outline }}</td>
+    {%- else %}{{ cell(col, row.cells[col.key], row) }}{% endif %}
+    {%- endfor %}
+</tr>
+{% endfor -%}

@@ -248,14 +248,24 @@ def _hiteffs(obj: Component) -> Dict[tuple, tuple]:
     return cells
 
 
+def _outputs(version: str) -> Dict[str, Output]:
+    config = get_settings(version).hiteffdbconfig
+    return {key: Output(config.scalar_unit(key))
+            for key, _ in table_columns(version)}
+
+
+def bom_columns(version: str) -> Tuple[BomColumn, ...]:
+    """ The columns of every bill of materials in `version` """
+    outs = _outputs(version)
+    return _BEFORE + tuple(
+        BomColumn(key, name, 'contribution', True, str(outs[key].unit))
+        for key, name in table_columns(version))
+
+
 def _build(obj: Component) -> Bom:
     version = obj.active_version
-    config = get_settings(version).hiteffdbconfig
-    scalars = table_columns(version)
-    outs = {key: Output(config.scalar_unit(key)) for key, _ in scalars}
-    columns = _BEFORE + tuple(
-        BomColumn(key, name, 'contribution', True, str(outs[key].unit))
-        for key, name in scalars)
+    outs = _outputs(version)
+    columns = bom_columns(version)
 
     tt = term_table(obj)
     sums, _ = path_sums(tt, BudgetFilter(),
