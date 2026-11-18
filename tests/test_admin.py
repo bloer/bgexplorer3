@@ -213,7 +213,9 @@ class TestAdmin(AppTestCase):
         self.assertTrue(url.startswith('/explore/admin/'))
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
-        self.assertIn('c1', self.html(response))
+        self.assertIn('/explore/admin/', self.html(response))
+        data = self.client.get(self.url('component.overview_data', version='admin'))
+        self.assertIn('>c1</a>', data.get_data(as_text=True))
         self.assertEqual(self.client.get('/admin/').status_code, 200)
         self.assertIn('Site administration',
                       self.html(self.client.get('/admin/')))

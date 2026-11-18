@@ -156,6 +156,106 @@ class TestComponentPages(AppTestCase):
                          self.c1.original_id)
         self.assertEqual(Assembly.select_version('main').count(), 1)
 
+    def test_sourceterm_data(self):
+        """ the table is paged, searched and sorted by the server, with no
+        row missed or repeated
+        """
+        spec = EmissionSpec(name='e3', sources=[
+            EmissionSource(name=f'S{i}', rate='1 mBq/kg')
+            for i in range(5)]).save()
+        c3 = Component(name='c3', mass='1 kg', specs=[spec]).save()
+        url = self.url('component.sourceterm_data', object=c3)
+
+        def data(**query):
+            response = self.client.get(url, query_string=query)
+            self.assertEqual(response.status_code, 200)
+            return json.loads(response.get_data())
+
+        def ids(page):
+            return [row['DT_RowId'] for row in page['data']]
+        everything = data()
+        self.assertEqual(len(everything['data']), 5)
+        page = data(draw=3, start=0, length=2)
+        self.assertEqual((page['draw'], page['recordsTotal'],
+                          page['recordsFiltered']), (3, 5, 5))
+        chunks = [ids(data(start=start, length=2)) for start in (0, 2, 4)]
+        self.assertEqual([len(chunk) for chunk in chunks], [2, 2, 1])
+        self.assertEqual(sum(chunks, []), ids(everything))
+        self.assertEqual(ids(data(start=5, length=2)), [])
+
+        # the cells are [html, sort value], without the checkbox column
+        cells = everything['data'][0]['c']
+        self.assertEqual(len(cells), 6)
+        self.assertIn('>c3</a>', cells[0][0])
+        self.assertNotIn('<br', json.dumps(cells))
+
+        found = data(**{'search[value]': 's3'})
+        self.assertEqual((found['recordsTotal'], found['recordsFiltered']),
+                         (5, 1))
+        self.assertTrue(found['data'][0]['c'][2][1].startswith('S3:'))
+        names = [row['c'][2][1].split(':')[0] for row in data(
+            **{'order[0][column]': 3, 'order[0][dir]': 'desc'})['data']]
+        self.assertEqual(names, ['S4', 'S3', 'S2', 'S1', 'S0'])
+
+        for query in ({'start': 'x'}, {'draw': 'x'}, {'length': 'x'},
+                      {'order[0][column]': 'x'}):
+            with self.subTest(query=query):
+                self.assertEqual(self.client.get(url, query_string=query)
+                                 .status_code, 400)
+
+    def test_overview_data(self):
+        """ the overview tables load their rows as json, except in the
+        reference picker
+        """
+        HitEfficiency(source='K40', location='c1',
+                      scalars=dict(v1='0.1 dru/mBq')).save()
+        ActivatedMaterial(name='m1').save()
+        for clsname, name in (('component', 'c1'), ('emissionspec', 'e1'),
+                              ('hitefficiency', 'K40'),
+                              ('activatedmaterial', 'm1')):
+            with self.subTest(clsname=clsname):
+                url = self.url(f'{clsname}.overview')
+                html = self.html(self.client.get(url))
+                self.assertIn(f'data-ajax-url="{url}data"', html)
+                self.assertNotIn('<tr class=', html)
+                response = self.client.get(f'{url}data')
+                self.assertEqual(response.status_code, 200)
+                rows = json.loads(response.get_data())['data']
+                self.assertTrue(rows[0]['DT_RowId'])
+                self.assertTrue(any(f'>{name}</a>' in row['c'][0][0]
+                                    for row in rows))
+                picker = self.html(self.client.get(url + '?embedded=1'))
+                self.assertIn('<tr class=', picker)
+                self.assertNotIn('data-ajax-url="', picker)
+        # the sort value of a mass is in kg, a spec has a column per source
+        mass = self.client.get(self.url('component.overview_data'))
+        c1 = [row for row in json.loads(mass.get_data())['data']
+              if row['c'][0][1] == 'c1'][0]
+        self.assertEqual(c1['c'][4][1], 1.0)
+        spec = json.loads(self.client.get(self.url(
+            'emissionspec.overview_data')).get_data())['data'][0]
+        self.assertEqual(spec['c'][2][1], 0.001)
+
+    def test_sourceterm_bulk(self):
+        """ the ids the table selects (the row ids) are what the bulk
+        endpoints take
+        """
+        spec = EmissionSpec(name='e3', sources=[
+            EmissionSource(name=f'S{i}', rate='1 mBq/kg')
+            for i in range(3)]).save()
+        c3 = Component(name='c3', mass='1 kg', specs=[spec]).save()
+        rows = json.loads(self.client.get(self.url(
+            'component.sourceterm_data', object=c3)).get_data())['data']
+        ids = [row['DT_RowId'] for row in rows]
+        count = SourceTerm.select_version('main').count
+        before = count()
+        for endpoint, change in (('clone', before + 2), ('delete', before)):
+            response = self.client.post(
+                self.url(f'component.sourceterms_bulk_{endpoint}', object=c3),
+                json={'ids': ids[:2]})
+            self.assertEqual(response.status_code, 200, endpoint)
+            self.assertEqual(count(), change, endpoint)
+
     def test_spec_entries(self):
         """ confidence and location are edited with each attached spec, and
         change SourceTerm locations
@@ -191,9 +291,9 @@ class TestComponentPages(AppTestCase):
         html = self.html(self.client.get(
             self.url('component.sourceterms', 'b', object=c1)))
         self.assertNotIn('class="sourceterm"', html)  # the rows load later
-        html = self.html(self.client.get(
-            self.url('component.sourceterm_rows', 'b', object=c1)))
-        self.assertIn('title="override on c1"', html)
+        rows = json.loads(self.client.get(self.url(
+            'component.sourceterm_data', 'b', object=c1)).get_data())['data']
+        self.assertIn('title="override on c1"', rows[0]['c'][4][0])
 
         # an assembly places the component, and the spec still decides
         a1 = Assembly.select_version('b').get(name='a1')
@@ -268,13 +368,13 @@ class TestComponentPages(AppTestCase):
         self.assertEqual(own.version_tags, ['b'])
 
         # owned specs are only listed on request, and not in the picker
-        overview = self.url('emissionspec.overview', 'b')
+        overview = self.url('emissionspec.overview_data', 'b')
         link = '>c1 own</a>'
-        self.assertNotIn(link, self.html(self.client.get(overview)))
+        self.assertNotIn(link, self.client.get(overview).get_data(as_text=True))
         self.assertNotIn(link, self.html(self.client.get(
             self.url('emissionspec.overview', 'b', embedded=1))))
-        self.assertIn(link, self.html(self.client.get(
-            self.url('emissionspec.overview', 'b', owned=1))))
+        self.assertIn(link, self.client.get(
+            overview, query_string={'owned': 1}).get_data(as_text=True))
 
         # editing the component keeps them, and marks them
         html = self.html(self.client.get(self.url('component.edit', 'b',

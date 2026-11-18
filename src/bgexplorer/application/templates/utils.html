@@ -36,11 +36,12 @@
 {%- endfor %}
 {%- endmacro -%}
 
-{#- the rows are fetched from `rows_url` when the page loads -#}
-{%- macro print_sourceterms(rows_url) -%}
+{#- the server pages, sorts and searches the rows, see `sourceterm_data`. It
+    sorts by path, source and location -#}
+{%- macro print_sourceterms(data_url) -%}
 {% set headers = ['Assembly Path', 'Emission spec', 'Source', 'Emission rate',
                   'Location', 'Hit Efficiencies'] %}
-{% call datatable.render(headers, bulk=true, rows_url=rows_url) %}{% endcall %}
+{% call datatable.render(headers, bulk=true, ajax_url=data_url, server_side=true, unsortable=(1, 3, 5)) %}{% endcall %}
 {%- endmacro -%}
 
 

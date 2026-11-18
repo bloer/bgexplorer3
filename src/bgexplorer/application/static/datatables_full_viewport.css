@@ -23,3 +23,28 @@ table.dataTable td{
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* selected rows: a light tint, so links stay readable */
+table.dataTable > tbody > tr.selected > *,
+table.dataTable.table-hover > tbody > tr.selected:hover > * {
+    box-shadow: inset 0 0 0 9999px rgba(13, 110, 253, 0.12);
+    color: inherit;
+}
+table.dataTable > tbody > tr.selected > td.select-checkbox:before {border-color: black;}
+/* the check mark sits in the box, which table-sm moves up 3px */
+table.dataTable > tbody > tr.selected > td.select-checkbox:after {
+    color: black; font-size: 14px; line-height: 12px; margin-top: -9px;
+}
+
+/* Scroller needs rows of one height: no wrapping assembly paths */
+table.dataTable ol.breadcrumb {flex-wrap: nowrap; margin-bottom: 0;}
+
+/* Scroller's own diagonal stripes behind rows that are not drawn yet */
+div.dts div.dataTables_scrollBody {background: none;}
+/* items keep their width, the cell clips the path instead of the items overlapping their dividers */
+table.dataTable ol.breadcrumb > .breadcrumb-item {flex-shrink: 0; white-space: nowrap;}
+
+/* assembly paths need more than 400px; the min width is there because the
+   column is sized from the first rows drawn, not the longest path */
+table.dataTable[data-server-side] th:nth-child(2) {min-width: 620px;}
+table.dataTable[data-server-side] td:nth-child(2) {max-width: 700px;}
