@@ -1,0 +1,111 @@
+{#- the table rows of the overview pages, one macro per class (named as the
+    class, lowercase). They are the `overview_data` rows, and the rows of the
+    overview in a reference picker -#}
+
+{%- macro component(data) -%}
+{%- macro part(component) %}
+{{ component.purchaseinfo.vendor or '' }} {{ component.purchaseinfo.partnum or '' }}
+{% if component.purchaseinfo.batch or component.purchaseinfo.material_batch %}
+batch {{ component.purchaseinfo.batch or component.purchaseinfo.material_batch }}
+{% endif %}
+{% endmacro %}
+{% for component in data %}
+<tr class="component{% if component.hierarchy_level is gt 1 %} assembly{% endif %}" data-id="{{ component.id }}" data-original_id="{{ component.original_id }}">
+    <td><input type="checkbox" class="row-select" value="{{ component.original_id }}"></td>
+    <td><a href="{{ url_for('component.view', object=component) }}">{{ component.name }}</a> </td>
+    <td>{{ component.hierarchy_level }}</td>
+    <td>{{ component.description or '' }}</td>
+    <td>{{ component.material or '' }}</td>
+    <td data-order="{{ '%.6e' | format(component.mass.to('kg').m) }}">{{ "{:.3g}".format(component.mass.to('kg').m) }}</td>
+    <td>{{ component.confidence_rating if component.confidence_rating is not none else '' }}</td>
+    <td>{{ part(component) }} </td>
+    <td data-order="{{ component.modified.timestamp() }}">{{ pretty_date(component.modified) }}</td>
+</tr>
+{% endfor %}
+{%- endmacro -%}
+
+
+{%- macro emissionspec(data) -%}
+{% set sourcenames = all_source_names() %}
+
+{# publication, sample, and measurement are only defined for Assays #}
+{% macro reference(spec) %}
+{% if spec.publication %}
+<td {% if spec.publication.reference %}title="{{ spec.publication.reference }}"{% endif %}>
+{{ spec.publication.org or '' }}
+{% if spec.publication.url %}<a href="{{ spec.publication.url }}" target="_blank">{% endif %}
+{{ spec.publication.shortlabel or spec.publication.url or '' }}
+{% if spec.publication.url %}</a>{% endif %}
+{% if spec.publication.details %}({{ spec.publication.details }}){% endif %}
+</td>
+{% else %}<td></td>{% endif %}
+{% endmacro %}
+
+{% macro sample(spec) %}
+{% if spec.sample %}
+{{ spec.sample.material or '' }}
+{{ spec.sample.vendor or '' }} {{ spec.sample.partnum or '' }}
+{%- if spec.sample.batch %} (batch {{ spec.sample.batch }}) {% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro measurement(spec) %}
+{% if spec.measurement %}
+{{ spec.measurement.institution or '' }} {{ spec.measurement.technique or '' }}
+{% endif %}
+{% endmacro %}
+
+{% macro sourcerate(spec, sourcename) %}
+{% set source = spec.sourcemap.get(sourcename) %}
+{% if source %}<td data-order="{{ source.rate | sourcesort }}"
+                   class="emissionrate {% if source.generated_from %}autosource{% endif %}">
+   {% if get_fromstr(source.rate) %} {{ get_fromstr(source.rate) }} {% else %} {{ "{:.2g~C}".format(source.rate) }} {% endif %}
+{% else %}<td>{% endif %}</td>
+{% endmacro %}
+
+{% for spec in data %}
+<tr class="spec{% if spec.sample is defined %} assay{% endif %}" data-id="{{ spec.id }}" data-original_id="{{ spec.original_id }}">
+    <td><input type="checkbox" class="row-select" value="{{ spec.original_id }}"></td>
+    <td><a href="{{ url_for('emissionspec.view', object=spec) }}">{{ spec.name }}</a> {{ spec.description or '' }}
+        {%- if spec.owner %} <span class="badge text-bg-secondary owned" title="Belongs to {{ spec.owner.name }}">{{ spec.owner.name }}</span>{% endif %} </td>
+    <td>{{ sample(spec) }}</td>
+    {% for sourcename in sourcenames %}
+    {{ sourcerate(spec, sourcename) }}
+    {% endfor %}
+    <td>{{ measurement(spec) }}</td>
+    {{ reference(spec) }}
+    <td data-order="{{ spec.modified.timestamp() }}">{{ pretty_date(spec.modified) }}</td>
+</tr>
+{% endfor %}
+{%- endmacro -%}
+
+
+{%- macro hitefficiency(data) -%}
+{% for hiteff in data %}
+<tr class="hiteff" data-id="{{ hiteff.id }}" data-original_id="{{ hiteff.original_id }}">
+    <td><input type="checkbox" class="row-select" value="{{ hiteff.original_id }}"></td>
+    <td><a href="{{ url_for('hitefficiency.view', object=hiteff) }}">{{ hiteff.source }}</a> </td>
+    <td>{{ hiteff.location }}</td>
+    <td>{{ hiteff.nprimaries or 'N/A' }}{% if hiteff.biasweight and hiteff.biasweight != 1 %} biasweight={{ "{:.2g}".format(hiteff.biasweight) }}{% endif %}</td>
+    <td>{{ hiteff.primary_particle or '' }} {{ hiteff.primary_spectrum or '' }}</td>
+    <td>{{ hiteff.norm.name }}</td>
+    {% for col in settings.hiteffdbconfig.extra_columns %}
+    <td>{{ hiteff[col] | default('') }}</td>
+    {% endfor %}
+</tr>
+{% endfor %}
+{%- endmacro -%}
+
+
+{%- macro activatedmaterial(data) -%}
+{% for material in data %}
+<tr class="activatedmaterial" data-id="{{ material.id }}" data-original_id="{{ material.original_id }}">
+    <td><input type="checkbox" class="row-select" value="{{ material.original_id }}"></td>
+    <td><a href="{{ url_for('activatedmaterial.view', object=material) }}">{{ material.name }}</a> {{ material.description or '' }}</td>
+    <td>{{ material.material or '' }}</td>
+    <td>{{ material.isotopes | map(attribute='isotope') | join(', ') }}</td>
+    <td>{% if material.publication %}{{ material.publication.shortlabel or material.publication.reference or '' }}{% endif %}</td>
+    <td data-order="{{ material.modified.timestamp() }}">{{ pretty_date(material.modified) }}</td>
+</tr>
+{% endfor %}
+{%- endmacro -%}

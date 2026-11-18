@@ -1,4 +1,5 @@
 {%- import "datatable.html" as datatable -%}
+{%- import "overview_rows.html" as rows with context -%}
 {%- set embedded = request.args.embedded | default(false) -%}
 {%- if not embedded -%}
 {% extends "versionbase.html" %}
@@ -29,29 +30,8 @@
 {% endblock %}
 {%- endif -%}
 
-{% macro part(component) %}
-{{ component.purchaseinfo.vendor or '' }} {{ component.purchaseinfo.partnum or '' }}
-{% if component.purchaseinfo.batch or component.purchaseinfo.material_batch %}
-batch {{ component.purchaseinfo.batch or component.purchaseinfo.material_batch }}
-{% endif %}
-{% endmacro %}
-
 {% block pagecontent %}
 {% set headers = ['Name', 'Hierarchy', 'Description', 'Material',
                   'Mass (kg)', 'Confidence', 'Part', 'Modified'] %}
-{% call datatable.render(headers, bulk=true) %}
-    {% for component in data %}
-    <tr class="component{% if component.hierarchy_level is gt 1 %} assembly{% endif %}" data-id="{{ component.id }}" data-original_id="{{ component.original_id }}">
-        <td><input type="checkbox" class="row-select" value="{{ component.original_id }}"></td>
-        <td><a href="{{ url_for('.view', object=component) }}">{{ component.name }}</a> </td>
-        <td>{{ component.hierarchy_level }}</td>
-        <td>{{ component.description or '' }}</td>
-        <td>{{ component.material or '' }}</td>
-        <td data-order="{{ '%.6e' | format(component.mass.to('kg').m) }}">{{ "{:.3g}".format(component.mass.to('kg').m) }}</td>
-        <td>{{ component.confidence_rating if component.confidence_rating is not none else '' }}</td>
-        <td>{{ part(component) }} </td>
-        <td data-order="{{ component.modified.timestamp() }}">{{ pretty_date(component.modified) }}</td>
-    </tr>
-    {% endfor %}
-{% endcall %}
+{{ datatable.overview(headers, rows.component(data)) }}
 {% endblock %}

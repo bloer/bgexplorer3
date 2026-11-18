@@ -1,5 +1,6 @@
 {% extends "versionbase.html" %}
 {% import "datatable.html" as datatable %}
+{%- import "overview_rows.html" as rows with context -%}
 
 {% block pageheader %}
 <div class="col-5"><h1>Hit Efficiencies</h1></div>
@@ -14,21 +15,7 @@
 {% block pagecontent %}
 {% set headers = ['Source', 'Location', 'Nprimaries', 'Primary',
                   'Multiplier'] + settings.hiteffdbconfig.extra_columns %}
-{% call datatable.render(headers, bulk=true) %}
-    {% for hiteff in data %}
-    <tr class="hiteff" data-id="{{ hiteff.id }}" data-original_id="{{ hiteff.original_id }}">
-        <td><input type="checkbox" class="row-select" value="{{ hiteff.original_id }}"></td>
-        <td><a href="{{ url_for('.view', object=hiteff) }}">{{ hiteff.source }}</a> </td>
-        <td>{{ hiteff.location }}</td>
-        <td>{{ hiteff.nprimaries or 'N/A' }}{% if hiteff.biasweight and hiteff.biasweight != 1 %} biasweight={{ "{:.2g}".format(hiteff.biasweight) }}{% endif %}</td>
-        <td>{{ hiteff.primary_particle or '' }} {{ hiteff.primary_spectrum or '' }}</td>
-        <td>{{ hiteff.norm.name }}</td>
-        {% for col in settings.hiteffdbconfig.extra_columns %}
-        <td>{{ hiteff[col] | default('') }}</td>
-        {% endfor %}
-    </tr>
-    {% endfor %}
-{% endcall %}
+{{ datatable.overview(headers, rows.hitefficiency(data)) }}
 {% endblock %}
 
 {% block pagestyle %}

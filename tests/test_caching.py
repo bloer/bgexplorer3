@@ -38,6 +38,16 @@ class TestPageCaching(AppTestCase):
         etag = self.get(url).headers['ETag']
         self.assertEqual(self.get(url, etag).status_code, 304)
 
+    def test_table_data(self):
+        for url in (self.url('component.overview_data'),
+                    self.url('component.sourceterm_data', object=self.c1)
+                    + '?draw=1&start=0&length=10'):
+            with self.subTest(url=url):
+                response = self.get(url)
+                self.assertEqual(response.status_code, 200)
+                etag = response.headers['ETag']
+                self.assertEqual(self.get(url, etag).status_code, 304)
+
     def test_changes(self):
         etag = self.get(self.url_c1).headers['ETag']
         # a change to the component
