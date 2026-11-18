@@ -34,8 +34,9 @@ cell-by-cell comparison, but does not build the diff.
 - **Tooling:** the bundled DataTables (1.13.8 with Buttons 2.4.2,
   FixedColumns, FixedHeader, copy/CSV/Excel) lacks the Buttons
   column-visibility module (`colvis`). Add that module at the same Buttons
-  version, either by rebuilding `static/datatables.min.{js,css}` or by adding
-  the single `buttons.colVis` file; choose whichever is obtainable offline.
+  version. Built: the single `static/buttons.colVis.min.js` (Buttons 2.4.2),
+  loaded by the BoM page only. Excel export is not offered: it needs JSZip,
+  which the bundle lacks; copy and CSV are.
 - **Caching:** `ResultsCache` (see `models/budget/grouping.py`
   `cached_filtered`), keyed on the version's change token; self-invalidating,
   tags effectively permanent. No persisted store and no background job unless
@@ -73,7 +74,7 @@ Sub-assembly rows are shaded; long text cells are truncated with the full text
 in the `title` attribute. Ordering and paging are off, since the hierarchy is
 the order. Header fixed (FixedHeader or `scrollY`), Outline and Name pinned
 (FixedColumns, two left columns). Buttons: column visibility (with restore),
-copy, CSV, Excel.
+copy, CSV (visible columns, links as text, several links joined with "; ").
 
 ## Architecture
 
@@ -191,6 +192,9 @@ modelled on `test_budget.py` and `test_app_components.py`.
   source names.
 - Where the cosmogenic and radon summaries get their text (reuse existing
   display helpers if present).
-- Cost on large versions (the CDMS example): measure `bom()` build time before
-  deciding whether lazy `/rows` loading is enough.
+- Cost on large versions: measured on a synthetic 3,331-row hierarchy (60
+  components, real hit efficiencies and an assay each). `term_table` (shared
+  with the Results page, cached) 5.8 s cold; `bom()` itself 2.2 s on top of
+  that, 1 ms cached; rendering the cached rows 2.0 s for 4.2 MB of HTML. Lazy
+  `/rows` loading with a spinner is enough; no background job.
 - Leave the untracked `*.orig` files, `v1/` and `examples/cdms/` alone.

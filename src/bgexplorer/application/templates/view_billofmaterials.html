@@ -23,6 +23,7 @@
     #bom tr.bom-assembly td { background-color: var(--bs-tertiary-bg, #f1f3f5); font-weight: 500; }
     #bom td.bom-text { max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
     #bom td.bom-number { text-align: right; }
+    #bom_wrapper div.dt-buttons { margin-left: 1rem; }
 </style>
 {% endblock %}
 
@@ -50,6 +51,14 @@
         table.querySelectorAll('thead th').forEach(function (th, i) {
             if (th.dataset.visible === 'false') hidden.push(i);
         });
+        var exportOptions = {
+            columns: ':visible',
+            stripHtml: false,
+            format: {body: function (html) {
+                return new DOMParser().parseFromString(
+                    html.replace(/<br\s*\/?>/gi, '; '), 'text/html').body.textContent;
+            }}
+        };
         new DataTable(table, {
             dom: 'Bifrt',
             ordering: false,
@@ -57,9 +66,8 @@
             columnDefs: [{targets: hidden, visible: false}],
             buttons: [
                 {extend: 'colvis', text: 'Columns', postfixButtons: ['colvisRestore']},
-                {extend: 'copyHtml5', exportOptions: {columns: ':visible'}},
-                {extend: 'csvHtml5', title: 'bill_of_materials', exportOptions: {columns: ':visible'}},
-                {extend: 'excelHtml5', title: 'bill_of_materials', exportOptions: {columns: ':visible'}}
+                {extend: 'copyHtml5', exportOptions: exportOptions},
+                {extend: 'csvHtml5', title: 'bill_of_materials', exportOptions: exportOptions}
             ]
         });
     }).catch(function (error) {
