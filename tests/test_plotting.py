@@ -223,8 +223,9 @@ class TestPlots(AppTestCase):
         page = self.html(self.client.get(self.url('component.view',
                                                   object=self.a1)))
         for text in ('Background Contributions', 'spectrumplot', 'budgetplot',
-                     'plotly-basic.min.js', 'Bill of Materials', '>Budget<'):
+                     'plotly-basic.min.js', 'id="bom"', '>Budget<'):
             self.assertNotIn(text, page)
+        self.assertIn('>Bill of Materials</a>', page)
         self.assertIn('id="otherversions"', page)
         hiteff = HitEfficiency.select_version('main').get(source='K40')
         page = self.html(self.client.get(self.url('hitefficiency.view',

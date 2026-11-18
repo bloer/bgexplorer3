@@ -27,6 +27,38 @@ def table_columns(version: str) -> List[Tuple[str, str]]:
     return list(columns.items())
 
 
+def path_sums(tt, filters: BudgetFilter, levels_of) -> Tuple[dict, int]:
+    """ The numbers of the terms of `tt` passing `filters` that are summed into
+    each component path below `filters.root`, and how many pass.
+    `levels_of(path)` gives the lengths of the prefixes of a term's path that
+    it is summed into
+    """
+    sums = defaultdict(list)
+    count = 0
+    root = filters.root
+    for i, keys in enumerate(tt.keys):
+        if not filters.matches(keys):
+            continue
+        count += 1
+        path = keys['component'][len(root):]
+        for level in levels_of(path):
+            sums[path[:level]].append(i)
+    return sums, count
+
+
+def path_values(tt, outs: dict, sums: dict):
+    """ A function giving, for a component path, each of the scalars and ROIs
+    of `outs` (by key) summed over its terms in `sums`, as Quantities or None
+    """
+    having = {key: tt.having(key) for key in outs}
+
+    def values(path):
+        terms = np.array(sums.get(path, ()), dtype=np.int64)
+        return {key: out.quantity(out.total(tt, key,
+                                            terms[having[key][terms]]))
+                for key, out in outs.items()}
+    return values
+
 def table_headings(version: str) -> List[dict]:
     """ The columns of `table` (dict(key, name, units)) without calculating
     any of its rows """
@@ -60,22 +92,10 @@ def table(obj: Component, filters: Optional[BudgetFilter] = None,
     columns = table_headings(version)
     outs = {c['key']: Output(config.scalar_unit(c['key'])) for c in columns}
     root = filters.root
-    sums = defaultdict(list)
-    count = 0
-    for i, keys in enumerate(tt.keys):
-        if not filters.matches(keys):
-            continue
-        count += 1
-        path = keys['component'][len(root):]
-        for level in levels(path, depth, total=True):
-            sums[path[:level]].append(i)
-    having = {key: tt.having(key) for key in outs}
-
-    def values(path):
-        terms = np.array(sums.get(path, ()), dtype=np.int64)
-        return {key: out.quantity(out.total(tt, key,
-                                            terms[having[key][terms]]))
-                for key, out in outs.items()}
+    sums, count = path_sums(tt, filters,
+                            lambda path: levels(path, depth, total=True))
+    values = path_values(tt, outs, sums)
+    
     result = [dict(label=breadcrumb[-1][1], depth=0, values=values(()))]
     result += [dict(label=name, depth=len(path), values=values(path))
                for path, (name, children)

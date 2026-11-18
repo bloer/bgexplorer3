@@ -14,7 +14,7 @@
         </ul>
     </div>
     <div class="dropdown me-1">
-        <button class="btn btn-outline-primary dropdown-toggle" type="button" id="actions" data-bs-toggle="dropdown" aria-expanded="false">Actions</button>
+        <button class="btn btn-outline-primary dropdown-toggle" id="actionslink" type="button" id="actions" data-bs-toggle="dropdown" aria-expanded="false">Actions</button>
         <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item" id="exportlink" href="{{ url_for('export_version') }}" title="Download this version as a file">Export</a></li>
             {% if has_role('editor') %}

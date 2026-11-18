@@ -778,6 +778,7 @@ class TestMergeInBrowser(BrowserTestCase):
 
     def test_merge(self):
         page = self.open(self.url('overview', 'main'))
+        page.click('#actionslink')
         page.click('#mergelink')
         page.select_option('#source', 'b')
         page.check('#rule-source')

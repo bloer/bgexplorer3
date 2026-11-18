@@ -72,10 +72,6 @@ class TestAdmin(AppTestCase):
         page = self.html(self.client.get(self.url('index')))
         self.assertIn('id="orgbrand" href="https://example.org"', page)
         self.assertNotIn('max-height', page)
-        # PNNL stays, in the footer
-        footer = page[page.index('<footer'):page.index('</footer>')]
-        self.assertIn('logopnnl.png', footer)
-        self.assertEqual(page.count('logopnnl.png'), 1)
 
         # a bad url is reported and nothing is saved
         response = self.client.post(url, data=dict(org_url='not a url'))

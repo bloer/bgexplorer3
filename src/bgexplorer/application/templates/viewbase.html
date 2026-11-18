@@ -10,6 +10,9 @@
 <div class="col-7">
     <div class="nav nav-tabs justify-content-end">
         <a class="nav-link {% if activepage == 'summary' %}active{% endif %}" href="{{ url_for('.view', object=g.object) }}">Summary</a>
+        {% if clsname == 'component' %}
+        <a class="nav-link {% if activepage == 'billofmaterials' %}active{% endif %}" href="{{ url_for('.billofmaterials', object=g.object) }}">Bill of Materials</a>
+        {% endif %}
         {% if clsname != 'activatedmaterial' %}
         <a class="nav-link {% if activepage == 'sourceterms' %}active{% endif %}" href="{{ url_for('.sourceterms', object=g.object) }}">Source Terms</a>
         <a class="nav-link {% if activepage == 'results' %}active{% endif %}" href="{{ url_for('.results', object=g.object) }}">Results</a>

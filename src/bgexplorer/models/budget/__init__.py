@@ -12,10 +12,11 @@ from .termtable import TermTable
 from .grouping import COMPONENT_DEPTH, cached_filtered, filtered_cached
 from .dashboard import dashboard
 from .table import table, table_columns, table_headings
+from .bom import bom, bom_columns
 from .spectra import spectrum_breakdown, spectrum_names
 
 __all__ = ['GROUPBY', 'BudgetFilter', 'TermTable', 'available_scalars',
            'term_table', 'COMPONENT_DEPTH', 'cached_filtered',
-           'filtered_cached', 'dashboard', 'table', 'table_columns',
-           'table_headings',
+           'filtered_cached', 'dashboard', 'table', 'table_columns', 'bom',
+           'bom_columns', 'table_headings',
            'spectrum_breakdown', 'spectrum_names']
