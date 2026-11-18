@@ -1,4 +1,8 @@
 import flask
+import hashlib
+import os
+import time
+from flask_login import current_user
 from flask_bootstrap import Bootstrap5
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.exceptions import HTTPException
@@ -8,7 +12,7 @@ import logging
 import importlib
 from ..models.settings import (get_settings, get_application_settings,
                                get_secret_key, ApplicationSettings)
-from ..versioning.record import get_record
+from ..versioning.record import get_record, get_cache_token
 from ..models.common import UnitMismatchError
 from ..models.component import Component
 from ..models.emissionspec import EmissionSpec
@@ -107,6 +111,77 @@ def create_app(config_file=None, config=None):
             flask.abort(404, f"Version '{tag}' does not exist")
 
     relativeto.init_app(app)
+
+    # Pages and json under /explore/<version>/ carry an ETag, and are answered
+    # with 304 before rendering if the browser's copy is still good. Static
+    # files are cached for a long time under a url that changes with the file.
+    started = time.time()
+    app_version = importlib.metadata.version('bgexplorer')
+    csrf_limit = app.config.get('WTF_CSRF_TIME_LIMIT', 3600)
+    # the browser may keep the page but must ask before using it; private
+    # because the page depends on who is logged in
+    cache_control = 'private, no-cache'
+    # static has its own caching, downloads send their own validators
+    uncached = {'static', 'export_version', 'get_attachment'}
+
+    def page_state():
+        """ What the cacheable page depends on besides its url and csrf
+        token, or None if the page isn't cacheable
+        """
+        request = flask.request
+        if (request.method not in ('GET', 'HEAD')
+                or not flask.g.get('active_version') or not request.endpoint
+                or request.endpoint.rsplit('.', 1)[-1] in uncached
+                # a 304 would swallow the flash message
+                or '_flashes' in flask.session):
+            return None
+        tags = [flask.g.active_version,
+                (request.view_args or {}).get('other_version'),
+                request.args.get('with')]
+        tokens = [get_cache_token(tag) for tag in tags if tag]
+        if tokens[0] is None:
+            return None
+        return [tokens, current_user.get_id(), auth.current_role(),
+                auth.needs_setup(), org_branding(), app_version, started]
+
+    def etag_of(state):
+        # the form tokens in the page expire, and a 304 keeps the old page
+        bucket = csrf_limit and int(time.time() // (csrf_limit // 2))
+        return hashlib.sha1(repr([state, bucket, flask.session.get(
+            'csrf_token')]).encode()).hexdigest()
+
+    @app.before_request
+    def check_etag():
+        flask.g.etag_state = state = page_state()
+        if state is None:
+            return None
+        etag = etag_of(state)
+        if flask.request.if_none_match.contains_weak(etag):
+            response = flask.Response(status=304)
+            response.set_etag(etag)
+            response.headers['Cache-Control'] = cache_control
+            return response
+        return None
+
+    @app.after_request
+    def set_etag(response):
+        state = flask.g.get('etag_state')
+        if (state is not None and response.status_code == 200
+                and not response.direct_passthrough
+                and 'ETag' not in response.headers):
+            # computed again: rendering may have started the csrf token
+            response.set_etag(etag_of(state))
+            response.headers['Cache-Control'] = cache_control
+        return response
+
+    @app.url_defaults
+    def version_static_url(endpoint, values):
+        if endpoint == 'static' and 'filename' in values and 'v' not in values:
+            try:
+                values['v'] = int(os.path.getmtime(
+                    os.path.join(app.static_folder, values['filename'])))
+            except OSError:
+                pass
 
     def wants_json():
         return flask.request.path.startswith('/api/')
@@ -229,7 +304,9 @@ def create_app(config_file=None, config=None):
 
     @app.get('/favicon.ico')
     def favicon():
-        return app.send_static_file('favicon.ico')
+        # requested without the ?v= of other static files, so not for a year
+        return flask.send_from_directory(app.static_folder, 'favicon.ico',
+                                         max_age=86400)
 
     @app.get('/explore/<active_version>')
     def overview():

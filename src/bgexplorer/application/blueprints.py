@@ -227,12 +227,6 @@ class CollectionViews(flask.Blueprint):
                               "will use any other matching hit efficiencies")]
         return []
 
-    def get_mtime(self, objid):
-        obj = self.queryset.only('version_tags', 'original_id', 'modified')\
-            .get_or_404(objid)
-        mtime = find_sourceterms(obj).scalar('modified').first()
-        return mtime or obj.modified
-
     def _setup_processing(self):
         """ Create URL preprocessing rules """
         # before load_object, so a missing object isn't revealed first
@@ -256,17 +250,7 @@ class CollectionViews(flask.Blueprint):
         @self.before_request
         def load_object():
             if objid := flask.g.get('objid'):
-                # if self.test_cache(g.objid):
-                #    return ("Not Modified", 304)
                 flask.g.object = self.queryset.get_or_404(objid)
-
-        @self.after_request
-        def set_mtime(response):
-            try:
-                response.last_modified = self.get_mtime(flask.g.objid)
-            except:
-                pass
-            return response
 
         @self.context_processor
         def inject_bp_settings():
