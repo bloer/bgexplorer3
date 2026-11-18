@@ -1,6 +1,8 @@
 {%- macro styles() -%}
 <!-- css for jquery datatables -->
 <link rel="stylesheet" href="{{ url_for('static', filename='datatables.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='datatables.scroller.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='datatables.select.min.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='datatables_full_viewport.css') }}">
 {%- endmacro -%}
 
@@ -8,6 +10,8 @@
 <!-- libraries for jquery datatables -->
 <script src="{{ url_for('static', filename='jquery.min.js') }}"></script>
 <script src="{{ url_for('static', filename='datatables.min.js') }}"></script>
+<script src="{{ url_for('static', filename='datatables.scroller.min.js') }}"></script>
+<script src="{{ url_for('static', filename='datatables.select.min.js') }}"></script>
 <!-- set good defaults for datatables -->
 <script>
     if (typeof DataTable !== 'undefined') {
@@ -22,95 +26,81 @@
 </script>
 {%- if initialize %}
 <script>
+    // a table with `data-ajax-url` gets its rows as json from there and draws
+    // only those in view (Scroller). With `data-server-side`, the server also
+    // pages, sorts and searches them. Rows are selected with Select;
+    // `_selected` holds their ids and `_rowTexts` their cell text (for the
+    // CSV export) however far the table is scrolled
+    var _table = null;
+    var _selected = new Set();
+    var _rowTexts = new Map();
+    var _bar = document.getElementById('bulk-bar');
+    function _updateBar() {
+        if (!_bar) return;
+        _bar.style.visibility = _selected.size ? 'visible' : 'hidden';
+        document.getElementById('bulk-count').textContent = _selected.size + ' selected';
+    }
+    function _cellText(html) {
+        var div = document.createElement('div');
+        div.innerHTML = html;
+        return div.textContent.trim();
+    }
     if (typeof DataTable !== 'undefined') {
         document.querySelectorAll("table.datatable").forEach(function(table) {
-            var start = function(options) {
-                return new DataTable(table, Object.assign({columnDefs: [{targets: 0, orderable: false, searchable: false}]}, options));
-            };
-            if (!table.dataset.rowsUrl) {
-                start();
+            if (!table.dataset.ajaxUrl) {
+                new DataTable(table, {columnDefs: [{targets: 0, orderable: false, searchable: false}]});
                 return;
             }
-            var status = document.createElement('div');
-            status.className = 'text-center my-3';
-            status.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
-            table.before(status);
-            // rows come in chunks: the first now, the rest as the table is scrolled
-            var chunk = 100, next = 0, total = 0, loading = null, dt = null;
-            var fetchChunk = function() {
-                var url = new URL(table.dataset.rowsUrl, location.href);
-                url.searchParams.set('start', next);
-                url.searchParams.set('length', chunk);
-                return fetch(url).then(function(response) {
-                    if (!response.ok) throw new Error(response.status + ' ' + response.statusText);
-                    total = Number(response.headers.get('X-Total-Count'));
-                    return response.text();
+            var serverSide = table.dataset.serverSide === '1';
+            // after the checkbox column, each cell of a row's `c` is [html, sort value]
+            var columns = [{data: null, defaultContent: '', className: 'select-checkbox', orderable: false, searchable: false}];
+            for (var i = 1; i < table.tHead.rows[0].cells.length; i++) {
+                columns.push({data: {_: 'c.' + (i - 1) + '.0', sort: 'c.' + (i - 1) + '.1', type: 'c.' + (i - 1) + '.1'}});
+            }
+            var fail = function(message) {
+                var alert = document.createElement('div');
+                alert.className = 'alert alert-danger';
+                alert.textContent = 'Could not load the table: ' + message;
+                table.before(alert);
+            };
+            var dt = _table = new DataTable(table, {
+                ajax: {url: table.dataset.ajaxUrl, error: function(xhr, status, error) { fail(xhr.status + ' ' + (error || status)); }},
+                serverSide: serverSide, processing: true, columns: columns,
+                scroller: true, deferRender: true, scrollCollapse: false, paging: true,
+                scrollY: 'calc(100vh - 245px)',
+                select: {style: 'multi', selector: 'td:first-child', info: false}
+            });
+            // Select only restores the selection of rows still drawn
+            dt.on('draw', function() {
+                document.querySelectorAll('.select-all').forEach(function(cb) { cb.checked = false; });
+                dt.rows().every(function() { if (_selected.has(this.id())) this.select(); });
+            });
+            dt.on('select', function(e, api, type, indexes) {
+                if (type !== 'row') return;
+                api.rows(indexes).every(function() {
+                    var id = this.id();
+                    _selected.add(id);
+                    _rowTexts.set(id, this.data().c.map(function(cell) { return _cellText(cell[0]); }));
                 });
-            };
-            var fail = function(error) {
-                total = next;  // stop asking for more
-                status.className = 'alert alert-danger';
-                status.textContent = 'Could not load the table: ' + error.message;
-            };
-            var more = function() {
-                if (!loading && dt && next < total) {
-                    loading = fetchChunk().then(function(html) {
-                        dt.rows.add($(html).filter('tr')).draw(false);
-                        next += chunk;
-                    }).catch(fail).finally(function() { loading = null; });
-                }
-                return loading;
-            };
-            fetchChunk().then(function(html) {
-                table.tBodies[0].innerHTML = html;
-                next = chunk;
-                // until everything is loaded, the count is of all rows, not just those loaded
-                dt = start({infoCallback: function(settings, from, to, max, shown, text) {
-                    return next < total ? 'Showing ' + from + ' to ' + to + ' of ' + total + ' entries' : text;
-                }});
-                var body = dt.table().container().querySelector('.dataTables_scrollBody');
-                var fill = function() {
-                    if (body.scrollTop + body.clientHeight >= body.scrollHeight - 200) more();
-                };
-                body.addEventListener('scroll', fill);
-                // searching and sorting only see the loaded rows, so load the rest first
-                var all = false;
-                dt.on('search.dt order.dt', function() {
-                    if (all || next >= total) return;
-                    all = true;
-                    (async function() {
-                        while (next < total) await more();
-                        all = false;
-                    })();
-                });
-                status.remove();
-                fill();
-            }).catch(fail);
+                _updateBar();
+            });
+            dt.on('deselect', function(e, api, type, indexes) {
+                if (type !== 'row') return;
+                api.rows(indexes).ids().each(function(id) { _selected.delete(id); _rowTexts.delete(id); });
+                _updateBar();
+            });
         });
     }
-    var _bar = document.getElementById('bulk-bar');
-    console.log('bulk-bar:', _bar);
     if (_bar) {
         var _csrf = "{{ csrf_token() }}";
         var _base = window.location.pathname.replace(/\/$/, '');
-        var _selected = new Set();
-        function _updateBar() {
-            _bar.style.visibility = _selected.size ? 'visible' : 'hidden';
-            document.getElementById('bulk-count').textContent = _selected.size + ' selected';
-        }
         document.addEventListener('change', function(e) {
-            console.log('change:', e.target.className, e.target.checked);
-            if (e.target.classList.contains('select-all')) {
+            if (e.target.classList.contains('select-all') && _table) {
                 var checked = e.target.checked;
                 document.querySelectorAll('.select-all').forEach(function(cb) { cb.checked = checked; });
-                document.querySelectorAll('.row-select').forEach(function(cb) {
-                    cb.checked = checked;
-                    checked ? _selected.add(cb.value) : _selected.delete(cb.value);
-                });
-            } else if (e.target.classList.contains('row-select')) {
-                e.target.checked ? _selected.add(e.target.value) : _selected.delete(e.target.value);
+                var rows = _table.rows({search: 'applied'});
+                checked ? rows.select() : rows.deselect();
             }
-            _updateBar();
         });
         var _deleteModal = new bootstrap.Modal(document.getElementById('bulk-delete-modal'));
         document.getElementById('bulk-delete').addEventListener('click', function() {
@@ -127,11 +117,9 @@
             location.reload();
         });
         document.getElementById('bulk-export').addEventListener('click', function() {
-            var table = document.querySelector('table.datatable');
-            var headers = Array.from(table.querySelectorAll('thead th')).slice(1).map(function(th) { return '"' + th.textContent.trim().replace(/"/g, '""') + '"'; }).join(',');
-            var rows = Array.from(document.querySelectorAll('.row-select')).filter(function(cb) { return _selected.has(cb.value); }).map(function(cb) {
-                return Array.from(cb.closest('tr').querySelectorAll('td')).slice(1).map(function(td) { return '"' + td.textContent.trim().replace(/"/g, '""') + '"'; }).join(',');
-            });
+            var quote = function(text) { return '"' + text.replace(/"/g, '""') + '"'; };
+            var headers = Array.from(document.querySelectorAll('table.datatable thead th')).slice(1).map(function(th) { return quote(th.textContent.trim()); }).join(',');
+            var rows = Array.from(_selected).map(function(id) { return _rowTexts.get(id).map(quote).join(','); });
             var a = document.createElement('a');
             a.href = URL.createObjectURL(new Blob([[headers].concat(rows).join('\n')], {type: 'text/csv'}));
             a.download = 'export.csv';
@@ -142,8 +130,9 @@
 {% endif -%}
 {% endmacro %}
 
-{#- with `rows_url`, the body is the html at that url, fetched on load -#}
-{% macro render(headings, tableid="dtable", bulk=false, rows_url=none) %}
+{#- with `ajax_url`, the rows are the json at that url (see `table_rows`).
+    `unsortable` are the indexes of the headings that can't be sorted -#}
+{% macro render(headings, tableid="dtable", bulk=false, ajax_url=none, server_side=false, unsortable=()) %}
 {%- if bulk %}
 <div class="modal fade" id="bulk-delete-modal" tabindex="-1">
     <div class="modal-dialog">
@@ -170,12 +159,12 @@
 </div>
 {%- endif %}
 <table id="{{ tableid }}" class="table table-hover table-bordered table-sm  nowrap datatable" width="100%"
-    {%- if rows_url %} data-rows-url="{{ rows_url }}"{% endif %}>
+    {%- if ajax_url %} data-ajax-url="{{ ajax_url }}"{% if server_side %} data-server-side="1"{% endif %}{% endif %}>
     <thead class="table-light">
         <tr>
             {%- if bulk %}<th style="width:1px"><input type="checkbox" class="select-all"></th>{% endif %}
             {%- for col in headings %}
-            <th>{{ col }}</th>
+            <th{% if loop.index0 in unsortable %} data-orderable="false"{% endif %}>{{ col }}</th>
             {%- endfor %}
         </tr>
     </thead>
@@ -183,4 +172,14 @@
     {{ caller() }}
     </tbody>
 </table>
+{% endmacro %}
+
+{#- an overview table. In a reference picker (`embedded`) its rows are in the
+    page, otherwise they are fetched from `overview_data` -#}
+{% macro overview(headings, rows) %}
+{%- if request.args.get('embedded') %}
+{%- call render(headings, bulk=true) %}{{ rows }}{% endcall %}
+{%- else %}
+{%- call render(headings, bulk=true, ajax_url=url_for('.overview_data', **request.args)) %}{% endcall %}
+{%- endif %}
 {% endmacro %}

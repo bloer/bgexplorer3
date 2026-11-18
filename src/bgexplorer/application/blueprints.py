@@ -28,7 +28,50 @@ from ..models.histogram import Histogram
 from pint.errors import PintError
 from .plotting import histogram_json, scalar_json, unit_str
 import json
+import math
 import markupsafe
+from bs4 import BeautifulSoup
+
+
+# table column (the first is the checkbox) -> stored SourceTerm field that the
+# source terms table can be sorted by on the server
+_SOURCETERM_SORT = {1: 'assemblyPathStr', 3: 'source.name', 5: 'location'}
+_MAX_PAGE = 1000
+
+
+def table_rows(html, oneline=False):
+    """ The `<tr>`s in `html` as rows for a DataTables `ajax` source: `c` is
+    [html, sort value] for each cell after the checkbox column. Cell classes
+    and titles are kept on a span. With `oneline`, line breaks become '; ',
+    so the rows all have the same height.
+    """
+    rows = []
+    for tr in BeautifulSoup(str(html), 'html.parser').find_all('tr'):
+        cells = []
+        for td in tr.find_all('td', recursive=False):
+            if td.find('input', class_='row-select'):
+                continue
+            if oneline:
+                for br in td.find_all('br'):
+                    br.replace_with('; ')
+            content = td.decode_contents().strip()
+            if td.get('class') or td.get('title'):
+                content = markupsafe.Markup(
+                    '<span class="{}" title="{}">{}</span>').format(
+                        ' '.join(td.get('class', [])), td.get('title', ''),
+                        markupsafe.Markup(content))
+            sort = td.get('data-order')
+            try:
+                sort = float(sort)
+                if not math.isfinite(sort):
+                    raise ValueError
+            except (TypeError, ValueError):
+                sort = td.get_text(' ', strip=True)
+            cells.append([str(content), sort])
+        rows.append({'DT_RowId': tr.get('data-original_id'),
+                     'DT_RowClass': ' '.join(tr.get('class', [])),
+                     'c': cells})
+    return rows
 
 
 def get_or_404(queryset, objid):
@@ -257,8 +300,7 @@ class CollectionViews(flask.Blueprint):
             return dict(doc_cls=self.doc_cls, clsname=self.clsname)
 
     def _create_endpoints(self):
-        @self.get('/')
-        def overview():
+        def overview_queryset():
             data = self.queryset
             # specs belonging to one component are only listed on request
             if (self.clsname == 'emissionspec' and
@@ -267,8 +309,26 @@ class CollectionViews(flask.Blueprint):
             fields = self.OVERVIEW_FIELDS.get(self.clsname)
             if fields:
                 data = data.only(*fields)
-            return flask.render_template(f'overview_{self.clsname}.html',
-                                         cls=self.doc_cls, data=data)
+            return data
+
+        @self.get('/')
+        def overview():
+            # the table loads its rows from `overview_data`, unless it is
+            # embedded in a form's reference picker
+            return flask.render_template(
+                f'overview_{self.clsname}.html', cls=self.doc_cls,
+                data=overview_queryset()
+                if flask.request.args.get('embedded') else ())
+
+        @self.get('/data')
+        def overview_data():
+            """ All the rows of the `overview` table """
+            context = {}
+            flask.current_app.update_template_context(context)
+            rows = flask.current_app.jinja_env.get_template(
+                'overview_rows.html').make_module(context)
+            html = getattr(rows, self.clsname)(overview_queryset())
+            return flask.jsonify(data=table_rows(html))
 
         @self.get('/api/<objid>')
         @self.loads(*self.deferred_fields)
@@ -559,28 +619,43 @@ class CollectionViews(flask.Blueprint):
         def sourceterms():
             return flask.render_template('view_sourceterms.html')
 
-        @self.get('/<objid>/sourceterms/rows')
-        def sourceterm_rows():
-            """ The table rows of `sourceterms`, which the page loads. With
-            `length`, only that many from `start`; the total is in the
-            X-Total-Count header
+        @self.get('/<objid>/sourceterms/data')
+        def sourceterm_data():
+            """ One page of the `sourceterms` table, for DataTables'
+            server-side processing
             """
+            args = flask.request.args
             try:
-                start = max(int(flask.request.args.get('start', 0)), 0)
-                length = flask.request.args.get('length')
-                length = None if length is None else max(int(length), 0)
+                draw = int(args.get('draw', 0))
+                start = max(int(args.get('start', 0)), 0)
+                length = int(args.get('length', 100))
+                column = args.get('order[0][column]')
+                column = None if column is None else int(column)
             except ValueError:
-                flask.abort(400, "start and length must be integers")
-            terms = find_sourceterms(flask.g.object,
-                                     flask.g.get('relativeto')).order_by('id')
+                flask.abort(400, "draw, start, length and order must be "
+                                 "integers")
+            length = _MAX_PAGE if length < 0 else min(length, _MAX_PAGE)
+
+            terms = find_sourceterms(flask.g.object, flask.g.get('relativeto'))
             total = terms.count()
-            if length is not None:
-                terms = terms.skip(start).limit(length)
-            rows = listed_sourceterms(terms)
-            html = str(flask.get_template_attribute(
+            if search := args.get('search[value]', '').strip():
+                terms = terms.filter(
+                    me.Q(assemblyPathStr__icontains=search) |
+                    me.Q(source__name__icontains=search) |
+                    me.Q(location__icontains=search))
+            filtered = terms.count() if search else total
+            if column in _SOURCETERM_SORT:
+                desc = '-' if args.get('order[0][dir]') == 'desc' else ''
+                terms = terms.order_by(desc + _SOURCETERM_SORT[column], 'id')
+            else:
+                terms = terms.order_by('id')
+            html = flask.get_template_attribute(
                 'utils.html', 'print_sourceterm_rows')(
-                    rows, activecomponent=flask.g.object))
-            return flask.Response(html, headers={'X-Total-Count': str(total)})
+                    listed_sourceterms(terms.skip(start).limit(length)),
+                    activecomponent=flask.g.object)
+            return flask.jsonify(draw=draw, recordsTotal=total,
+                                 recordsFiltered=filtered,
+                                 data=table_rows(html, oneline=True))
 
         @self.post('/<objid>/sourceterms/bulk/delete')
         def sourceterms_bulk_delete():

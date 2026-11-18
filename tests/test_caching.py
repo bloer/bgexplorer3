@@ -1,6 +1,7 @@
 """ Pages carry an ETag and are answered with 304 until something changes """
 from bgexplorer.models.component import Component
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
+from bgexplorer.models.settings import get_settings
 from bgexplorer.models.users import Role
 from bgexplorer.versioning import control as vc
 from tests.test_app_components import AppTestCase
@@ -37,6 +38,16 @@ class TestPageCaching(AppTestCase):
         etag = self.get(url).headers['ETag']
         self.assertEqual(self.get(url, etag).status_code, 304)
 
+    def test_table_data(self):
+        for url in (self.url('component.overview_data'),
+                    self.url('component.sourceterm_data', object=self.c1)
+                    + '?draw=1&start=0&length=10'):
+            with self.subTest(url=url):
+                response = self.get(url)
+                self.assertEqual(response.status_code, 200)
+                etag = response.headers['ETag']
+                self.assertEqual(self.get(url, etag).status_code, 304)
+
     def test_changes(self):
         etag = self.get(self.url_c1).headers['ETag']
         # a change to the component
@@ -56,6 +67,19 @@ class TestPageCaching(AppTestCase):
         spec = EmissionSpec.select_version('main').get(name='e1')
         spec.name = 'e1 renamed'
         spec.save()
+        response = self.get(self.url_c1, etag)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(response.headers['ETag'], etag)
+
+    def test_settings_change(self):
+        """ the settings are saved with the version, so changing them changes
+        the version's pages
+        """
+        etag = self.get(self.url_c1).headers['ETag']
+        self.assertEqual(self.get(self.url_c1, etag).status_code, 304)
+        settings = get_settings('main')
+        settings.addsources = []
+        settings.save()
         response = self.get(self.url_c1, etag)
         self.assertEqual(response.status_code, 200)
         self.assertNotEqual(response.headers['ETag'], etag)
