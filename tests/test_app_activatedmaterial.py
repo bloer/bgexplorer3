@@ -26,8 +26,11 @@ class TestActivatedMaterialPages(AppTestCase):
         html = self.html(self.client.get(
             self.url('activatedmaterial.overview', 'b')))
         self.assertIn('id="newactivatedmaterial"', html)
-        self.assertIn('Co60, Mn54', html)
-        self.assertIn('Cu ref', html)
+        self.assertIn('data-ajax-url="', html)
+        data = self.html(self.client.get(
+            self.url('activatedmaterial.overview_data', 'b')))
+        self.assertIn('Co60, Mn54', data)
+        self.assertIn('Cu ref', data)
         self.assertIn(self.url('activatedmaterial.overview', 'b'),
                       self.html(self.client.get(self.url('overview', 'b'))))
         response = self.client.get(self.url('activatedmaterial.view', 'b',
