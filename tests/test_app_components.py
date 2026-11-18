@@ -156,6 +156,29 @@ class TestComponentPages(AppTestCase):
                          self.c1.original_id)
         self.assertEqual(Assembly.select_version('main').count(), 1)
 
+    def test_sourceterm_rows_chunks(self):
+        """ the page loads rows chunk by chunk, with none missed or repeated """
+        spec = EmissionSpec(name='e3', sources=[
+            EmissionSource(name=f'S{i}', rate='1 mBq/kg')
+            for i in range(5)]).save()
+        c3 = Component(name='c3', mass='1 kg', specs=[spec]).save()
+        url = self.url('component.sourceterm_rows', object=c3)
+
+        def rows(**query):
+            response = self.client.get(url, query_string=query)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers['X-Total-Count'], '5')
+            return [row.split('"', 1)[0] for row in self.html(response)
+                    .split('data-original_id="')[1:]]
+        everything = rows()
+        self.assertEqual(len(everything), 5)
+        chunks = [rows(start=start, length=2) for start in (0, 2, 4)]
+        self.assertEqual([len(chunk) for chunk in chunks], [2, 2, 1])
+        self.assertEqual(sum(chunks, []), everything)
+        self.assertEqual(rows(start=5, length=2), [])
+        self.assertEqual(self.client.get(url, query_string={
+            'start': 'x'}).status_code, 400)
+
     def test_spec_entries(self):
         """ confidence and location are edited with each attached spec, and
         change SourceTerm locations

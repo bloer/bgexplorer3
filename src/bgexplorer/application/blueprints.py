@@ -561,13 +561,26 @@ class CollectionViews(flask.Blueprint):
 
         @self.get('/<objid>/sourceterms/rows')
         def sourceterm_rows():
-            """ The table rows of `sourceterms`, which the page loads """
-            rows = listed_sourceterms(find_sourceterms(flask.g.object,
-                                                       flask.g.get('relativeto'))
-                                      )
-            return str(flask.get_template_attribute(
+            """ The table rows of `sourceterms`, which the page loads. With
+            `length`, only that many from `start`; the total is in the
+            X-Total-Count header
+            """
+            try:
+                start = max(int(flask.request.args.get('start', 0)), 0)
+                length = flask.request.args.get('length')
+                length = None if length is None else max(int(length), 0)
+            except ValueError:
+                flask.abort(400, "start and length must be integers")
+            terms = find_sourceterms(flask.g.object,
+                                     flask.g.get('relativeto')).order_by('id')
+            total = terms.count()
+            if length is not None:
+                terms = terms.skip(start).limit(length)
+            rows = listed_sourceterms(terms)
+            html = str(flask.get_template_attribute(
                 'utils.html', 'print_sourceterm_rows')(
                     rows, activecomponent=flask.g.object))
+            return flask.Response(html, headers={'X-Total-Count': str(total)})
 
         @self.post('/<objid>/sourceterms/bulk/delete')
         def sourceterms_bulk_delete():

@@ -24,8 +24,8 @@
 <script>
     if (typeof DataTable !== 'undefined') {
         document.querySelectorAll("table.datatable").forEach(function(table) {
-            var start = function() {
-                new DataTable(table, {columnDefs: [{targets: 0, orderable: false, searchable: false}]});
+            var start = function(options) {
+                return new DataTable(table, Object.assign({columnDefs: [{targets: 0, orderable: false, searchable: false}]}, options));
             };
             if (!table.dataset.rowsUrl) {
                 start();
@@ -35,17 +35,57 @@
             status.className = 'text-center my-3';
             status.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
             table.before(status);
-            fetch(table.dataset.rowsUrl).then(function(response) {
-                if (!response.ok) throw new Error(response.status + ' ' + response.statusText);
-                return response.text();
-            }).then(function(html) {
-                table.tBodies[0].innerHTML = html;
-                status.remove();
-                start();
-            }).catch(function(error) {
+            // rows come in chunks: the first now, the rest as the table is scrolled
+            var chunk = 100, next = 0, total = 0, loading = null, dt = null;
+            var fetchChunk = function() {
+                var url = new URL(table.dataset.rowsUrl, location.href);
+                url.searchParams.set('start', next);
+                url.searchParams.set('length', chunk);
+                return fetch(url).then(function(response) {
+                    if (!response.ok) throw new Error(response.status + ' ' + response.statusText);
+                    total = Number(response.headers.get('X-Total-Count'));
+                    return response.text();
+                });
+            };
+            var fail = function(error) {
+                total = next;  // stop asking for more
                 status.className = 'alert alert-danger';
                 status.textContent = 'Could not load the table: ' + error.message;
-            });
+            };
+            var more = function() {
+                if (!loading && dt && next < total) {
+                    loading = fetchChunk().then(function(html) {
+                        dt.rows.add($(html).filter('tr')).draw(false);
+                        next += chunk;
+                    }).catch(fail).finally(function() { loading = null; });
+                }
+                return loading;
+            };
+            fetchChunk().then(function(html) {
+                table.tBodies[0].innerHTML = html;
+                next = chunk;
+                // until everything is loaded, the count is of all rows, not just those loaded
+                dt = start({infoCallback: function(settings, from, to, max, shown, text) {
+                    return next < total ? 'Showing ' + from + ' to ' + to + ' of ' + total + ' entries' : text;
+                }});
+                var body = dt.table().container().querySelector('.dataTables_scrollBody');
+                var fill = function() {
+                    if (body.scrollTop + body.clientHeight >= body.scrollHeight - 200) more();
+                };
+                body.addEventListener('scroll', fill);
+                // searching and sorting only see the loaded rows, so load the rest first
+                var all = false;
+                dt.on('search.dt order.dt', function() {
+                    if (all || next >= total) return;
+                    all = true;
+                    (async function() {
+                        while (next < total) await more();
+                        all = false;
+                    })();
+                });
+                status.remove();
+                fill();
+            }).catch(fail);
         });
     }
     var _bar = document.getElementById('bulk-bar');
