@@ -680,12 +680,16 @@ class CollectionViews(flask.Blueprint):
 
             terms = find_sourceterms(flask.g.object, flask.g.get('relativeto'))
             total = terms.count()
+            nohiteff = args.get('nohiteff') == '1'
+            if nohiteff:
+                terms = terms.filter(me.Q(hiteffs__exists=False) |
+                                     me.Q(hiteffs__size=0))
             if search := args.get('search[value]', '').strip():
                 terms = terms.filter(
                     me.Q(assemblyPathStr__icontains=search) |
                     me.Q(source__name__icontains=search) |
                     me.Q(location__icontains=search))
-            filtered = terms.count() if search else total
+            filtered = terms.count() if search or nohiteff else total
             if column in _SOURCETERM_SORT:
                 desc = '-' if args.get('order[0][dir]') == 'desc' else ''
                 terms = terms.order_by(desc + _SOURCETERM_SORT[column], 'id')
