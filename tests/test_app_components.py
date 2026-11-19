@@ -203,6 +203,42 @@ class TestComponentPages(AppTestCase):
                 self.assertEqual(self.client.get(url, query_string=query)
                                  .status_code, 400)
 
+    def test_sourceterm_data_nohiteff(self):
+        """ the table can be limited to source terms with no hit efficiency,
+        and still carries the component it is relative to
+        """
+        spec = EmissionSpec(name='e3', sources=[
+            EmissionSource(name=f'S{i}', rate='1 mBq/kg')
+            for i in range(3)]).save()
+        c3 = Component(name='c3', mass='1 kg', specs=[spec]).save()
+        HitEfficiency(source='S0', location='c3',
+                      scalars=dict(v1='0.1 dru/mBq')).save()
+        url = self.url('component.sourceterm_data', object=c3)
+
+        def data(**query):
+            response = self.client.get(url, query_string=query)
+            self.assertEqual(response.status_code, 200)
+            return json.loads(response.get_data())
+
+        def names(page):
+            return sorted(row['c'][2][1].split(':')[0]
+                          for row in page['data'])
+        self.assertEqual(names(data()), ['S0', 'S1', 'S2'])
+        self.assertEqual(names(data(nohiteff=0)), ['S0', 'S1', 'S2'])
+        page = data(nohiteff=1)
+        self.assertEqual(names(page), ['S1', 'S2'])
+        self.assertEqual((page['recordsTotal'], page['recordsFiltered']),
+                         (3, 2))
+        found = data(nohiteff=1, **{'search[value]': 's2'})
+        self.assertEqual(names(found), ['S2'])
+        self.assertEqual((found['recordsTotal'], found['recordsFiltered']),
+                         (3, 1))
+        html = self.html(self.client.get(self.url(
+            'component.sourceterms', object=c3,
+            relativeto=str(c3.original_id))))
+        self.assertIn('/sourceterms/data?relativeto=', html)
+        self.assertIn('id="filter-nohiteff"', html)
+
     def test_overview_data(self):
         """ the overview tables load their rows as json, except in the
         reference picker

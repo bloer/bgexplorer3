@@ -63,13 +63,19 @@
                 alert.textContent = 'Could not load the table: ' + message;
                 table.before(alert);
             };
+            var nohiteff = document.getElementById('filter-nohiteff');
             var dt = _table = new DataTable(table, {
-                ajax: {url: table.dataset.ajaxUrl, error: function(xhr, status, error) { fail(xhr.status + ' ' + (error || status)); }},
+                ajax: {
+                    url: table.dataset.ajaxUrl,
+                    data: function(d) { if (nohiteff && nohiteff.checked) d.nohiteff = 1; },
+                    error: function(xhr, status, error) { fail(xhr.status + ' ' + (error || status)); }
+                },
                 serverSide: serverSide, processing: true, columns: columns,
                 scroller: true, deferRender: true, scrollCollapse: false, paging: true,
                 scrollY: 'calc(100vh - 245px)',
                 select: {style: 'multi', selector: 'td:first-child', info: false}
             });
+            if (nohiteff) nohiteff.addEventListener('change', function() { dt.ajax.reload(); });
             // Select only restores the selection of rows still drawn
             dt.on('draw', function() {
                 document.querySelectorAll('.select-all').forEach(function(cb) { cb.checked = false; });
@@ -118,7 +124,7 @@
         });
         document.getElementById('bulk-export').addEventListener('click', function() {
             var quote = function(text) { return '"' + text.replace(/"/g, '""') + '"'; };
-            var headers = Array.from(document.querySelectorAll('table.datatable thead th')).slice(1).map(function(th) { return quote(th.textContent.trim()); }).join(',');
+            var headers = Array.from(_table.columns().header()).slice(1).map(function(th) { return quote(th.textContent.trim()); }).join(',');
             var rows = Array.from(_selected).map(function(id) { return _rowTexts.get(id).map(quote).join(','); });
             var a = document.createElement('a');
             a.href = URL.createObjectURL(new Blob([[headers].concat(rows).join('\n')], {type: 'text/csv'}));

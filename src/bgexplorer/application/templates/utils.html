@@ -41,6 +41,10 @@
 {%- macro print_sourceterms(data_url) -%}
 {% set headers = ['Assembly Path', 'Emission spec', 'Source', 'Emission rate',
                   'Location', 'Hit Efficiencies'] %}
+<div class="form-check float-end">
+    <input type="checkbox" class="form-check-input" id="filter-nohiteff">
+    <label class="form-check-label" for="filter-nohiteff">Only without hit efficiencies</label>
+</div>
 {% call datatable.render(headers, bulk=true, ajax_url=data_url, server_side=true, unsortable=(1, 3, 5)) %}{% endcall %}
 {%- endmacro -%}
 

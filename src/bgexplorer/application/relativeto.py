@@ -15,7 +15,7 @@ BLUEPRINTS = ('component', 'emissionspec', 'hitefficiency')
 # endpoints in those blueprints whose links keep the component
 STICKY = ('overview', 'view', 'sourceterms', 'results', 'results_table',
           'dashboard_json', 'spectrum_json', 'choose_relativeto',
-          'sourceterm_rows')
+          'sourceterm_data')
 # the pages that a component can be chosen for, and are returned to after
 TARGETS = ('view', 'sourceterms', 'results')
 
