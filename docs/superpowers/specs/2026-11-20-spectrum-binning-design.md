@@ -30,6 +30,14 @@ can rely on.
   automatic clearing when the last spectrum is deleted: reset the binning, which
   is refused while any spectrum of that name exists. The workflow is: delete the
   old spectra, reset the binning, add the new hit efficiencies.
+- **Through the API**, the settings PATCH already replaces `display_spectra`
+  wholesale, so an entry can be deleted there. No new endpoint: deleting an
+  entry that has a configured binning is the reset, and is refused under the
+  same condition (spectra of that name exist). Clients can't set `bin_edges`.
+- Alpha: no migration and no audit command. Existing versions get their binning
+  the next time a hit efficiency is saved or a version is imported or merged.
+- A failed save lists the binning mismatch of every spectrum of the hit
+  efficiency, not just the first.
 
 ## Current behaviour
 
@@ -92,13 +100,15 @@ last bit.
 
 - **Check** in `HitEfficiency.check_dbconfig`, in the same loop over loaded
   spectra that checks units, for a spectrum whose config has `bin_edges`:
-  `check_bin_edges`, then `bins_match`. Raises `ValidationError` naming the
-  spectrum, the bins found (count, range, unit) and the configured ones, and
-  that an administrator can reset the binning if the spectra are to be replaced.
-  A `None` spectrum and a config without `bin_edges` are skipped. Spectra that
-  weren't loaded are left alone, as now.
+  `check_bin_edges`, then `bins_match`. The problems are collected over the
+  loop and raised as one `ValidationError`, a line per spectrum giving its name,
+  the bins found (count, range, unit) and the configured ones, ending with that
+  an administrator can reset the binning if the spectra are to be replaced.
+  Collecting costs a list and one `raise` after the loop; unit errors are
+  raised as they are now. A `None` spectrum and a config without `bin_edges`
+  are skipped. Spectra that weren't loaded are left alone, as now.
 - **Set** in `HitEffDbConfig.update_from`, which already runs after each hit
-  efficiency save and in the audit: a spectrum config with `bin_edges is None`
+  efficiency save and in `check_version_units`: a spectrum config with `bin_edges is None`
   takes the saved spectrum's edges. It is written by the same `update` as the
   units.
 
@@ -109,23 +119,41 @@ compared on save for the web, API and CLI alike, as all of them go through
 
 ### 4. Replacing a dataset: reset the binning
 
-An administrator action `reset_binning(settings, key)` in `hiteff.py`:
+Two functions in `hiteff.py`:
 
-1. for every tag in `settings.version_tags`, count the version's hit
-   efficiencies with `spectra_keys=key` (an indexed field); if any, raise an
-   error naming the tags and counts, and the delete-first workflow
-2. otherwise set `display_spectra[key].bin_edges = None`, written with `update`
-   like `update_from` (not a settings `save`, which would re-run the checks and
-   the ROIs), then `settings.touch(version)`
+- `require_no_spectra(settings, key)`: for every tag in `settings.version_tags`,
+  count the version's hit efficiencies with `spectra_keys=key` (an indexed
+  field); if any, raise `ValidationError` naming the tags and counts and the
+  delete-first workflow.
+- `reset_binning(settings, key)`: `require_no_spectra`, then set
+  `display_spectra[key].bin_edges = None`, written with `update` like
+  `update_from` (not a settings `save`, which would re-run the checks and the
+  ROIs), then `settings.touch(version)`.
 
-The UI is a button on the spectrum display table of the settings page, for
-admins (`require(Role.admin)`, as `unlock` does), next to a read-only summary of
-the configured binning ("1500 bins, 0-3000 keV"). It runs as a job like other
-settings edits, so it holds the version's lock and a concurrent save can't add a
-spectrum between the count and the update. There is no UI to delete a
-`display_spectra` entry; reset is the supported route, and an entry that is
-deleted through the API is rebuilt by `update_from` from whichever spectrum is
-saved next (see Limits).
+**UI**: a button on the spectrum display table of the settings page, for admins
+(`require(Role.admin)`, as `unlock` does), next to a read-only summary of the
+configured binning ("1500 bins, 0-3000 keV"). It is a new job kind in the
+`EDIT` class (`job_kinds.py`), submitted with the version as its scope. Those
+are serial per scope, so it can't run at the same time as a hit efficiency
+form save or a settings save for that version. The form has no way to delete a
+`display_spectra` entry; reset is the route there.
+
+**API**: the settings PATCH sets `display_spectra` as a whole (`update_settings`
+parses the JSON into new `HitEffConfig`s), which has two consequences handled
+in `update_settings`, with no new route:
+
+- `bin_edges` is not accepted from clients. Each entry that remains takes the
+  `bin_edges` of the existing entry with the same key, so a round trip of the
+  config, or a PATCH that omits it, can't change it. Settings JSON leaves
+  `bin_edges` out (it's compressed binary); the binning summary above is
+  worth adding there only if clients ask.
+- An existing entry with `bin_edges` that is not in the new map is a reset: it
+  calls `require_no_spectra` and fails with a 409-style `APIError` naming the
+  key if spectra of that name exist. With none, the entry is deleted, and the
+  next hit efficiency of that name creates it again. Deleting an entry without
+  a binning needs no check.
+
+Edits are serialised by the job scope, not by the version lock; see Limits.
 
 Resetting only affects the active version's settings. A branch has its own
 settings document from the first edit, so another version that still holds the
@@ -134,11 +162,9 @@ old spectra keeps the old binning, and merging the two reports the conflict (5).
 ### 5. Settings, import and merge
 
 - `bin_edges` is not a column of the settings form and must survive saving it:
-  `update_object` edits the existing `HitEffConfig` in place. The settings API
-  (`HITEFFDBCONFIG_FIELDS`, `display_spectra`) must not accept `bin_edges`, so
-  that it can only be changed by a hit efficiency or a reset. To verify while
-  implementing: that replacing `display_spectra` wholesale through the API keeps
-  the existing `bin_edges` of unchanged keys.
+  `update_object` edits the existing `HitEffConfig` in place (to verify while
+  implementing). The API is handled in 4, so `bin_edges` only changes through a
+  hit efficiency or a reset.
 - `check_settings` doesn't re-check stored hit efficiencies against
   `bin_edges`: it can't query for it (see Current behaviour), and the settings
   don't change it.
@@ -148,9 +174,8 @@ old spectra keeps the old binning, and merging the two reports the conflict (5).
   mismatched spectrum, with no further code. Its docstring and the message
   mentioned in `app.py` say "units"; they should say "units and binning".
 - Existing versions have no `bin_edges`. They get them the first time a hit
-  efficiency is saved or the audit runs. Run the audit once after upgrading to
-  find versions that already hold inconsistent spectra; a CLI command for that is
-  an open question.
+  efficiency is saved, or an import or merge runs `check_version_units`. There
+  is no migration or audit of data that is already inconsistent (alpha).
 
 ### 6. Combining
 
@@ -159,13 +184,23 @@ backstop for data that bypassed validation. Strict checking remains off.
 
 ## Limits
 
-- The first spectrum of a name defines the binning. If the entry is missing
-  while spectra exist (deleted through the API, or data from before this
-  change), whichever is saved first wins, and the others show up as mismatches in
-  the audit, not on save.
-- Two saves that both define the binning at the same moment can both pass the
-  check before either `update_from` runs. Job-based edits are serialised by the
-  version lock; direct API or CLI saves are not. The audit finds the result.
+- The first spectrum of a name defines the binning. If the binning is missing
+  while spectra exist (data from before this change), whichever is saved first
+  wins, and an older spectrum that disagrees is only noticed when it is saved
+  again or its version is imported or merged.
+- Concurrency. The web UI and the API submit their edits (documents, settings,
+  version updates) as the same serial jobs, one at a time per version, so those
+  can't race. They aren't serialised by the version lock: that is taken only by
+  the long whole-version operations (create, delete, import, merge), and the
+  write guard makes everyone else's writes to a locked version fail or wait.
+  Not serialised are the writers that skip the job queue: the spectrum import,
+  rename and delete routes of a hit efficiency, the bulk delete and clone
+  routes, and scripts or the CLI that save models directly. Two of them
+  defining the same binning at the same moment can both pass the check before
+  either `update_from` runs, and one adding a spectrum can land between the
+  count and the update of a reset. The window is a few milliseconds, but the
+  spectrum routes are the entry point for this feature, so moving them into
+  `EDIT` jobs is a worthwhile follow-up (not part of this design).
 - The configured edges keep the unit of the first spectrum. Later spectra are
   compared after conversion, and are stored as they were given, not rewritten.
 
@@ -183,11 +218,14 @@ backstop for data that bypassed validation. Strict checking remains off.
 - Reset: refused while any spectrum of that name exists in any tag of the
   settings; after deleting them it clears the binning, and new edges are
   accepted; it doesn't run the ROIs or change other settings; non-admins get 403;
-  the job holds the lock.
-- Settings form and API round trips keep `bin_edges`; the API rejects it as
-  input.
-- Import and merge: the audit sets missing binning and reports a conflict
-  between versions with different binning.
+  it is submitted as an `EDIT` job scoped to the version.
+- Settings form and API round trips keep `bin_edges`; a PATCH can't set or
+  clear it; a PATCH that drops an entry with a binning is refused while spectra
+  of that name exist and deletes it otherwise; dropping an entry without
+  binning is allowed.
+- A failed save with several mismatched spectra lists them all.
+- Import and merge: `check_version_units` sets missing binning and reports a
+  conflict between versions with different binning.
 - Existing tests that build hit efficiencies with differently binned spectra
   of the same name (to be found when running the suite) are fixed to be
   consistent, or are testing the backstop and keep going through `Histogram`
@@ -200,18 +238,10 @@ backstop for data that bypassed validation. Strict checking remains off.
 - `docs/admin.md`: the reset action.
 - `docs/model.md` or the hit efficiency section: what a valid histogram is.
 
-## Open questions
-
-- Tolerance: `1e-6` of the smallest bin width is a guess; is there data with
-  edges that differ by more through rounding in the writer?
-- Reset through the API and CLI as well as the UI, for scripted workflows?
-- A CLI command to run the audit (and so populate binning) over all versions
-  after upgrading, instead of waiting for the first save?
-- Should a failed save report all mismatched spectra of a hit efficiency at once,
-  rather than the first?
-
 ## Not in this design
 
+- Moving the hit efficiency spectrum routes and the bulk routes into serial
+  jobs (see Limits).
 - ROI weights computed once per ROI from the configured binning, which would
   also let settings validation reject an ROI outside the spectrum's range
   without any hit efficiency. This becomes possible once the binning is
