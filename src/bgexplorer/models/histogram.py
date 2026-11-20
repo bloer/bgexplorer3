@@ -1,4 +1,3 @@
-import hashlib
 import operator
 import numpy as np
 from .asymmetric import AsymmetricUncertainty
@@ -125,20 +124,6 @@ class Histogram(object):
         unit = getattr(edges, 'u', None)
         return np.asarray(edges.m if unit is not None else edges,
                           dtype=float), unit
-
-    def binning_key(self) -> tuple:
-        """ A hashable identity for the bin edges and their unit, equal for
-        histograms with exactly the same binning
-        """
-        memo = self.__dict__.get('_binning_memo')
-        if memo is not None and memo[0] is self.bin_edges:
-            return memo[1]
-        edges, unit = self._edges()
-        digest = hashlib.blake2b(np.ascontiguousarray(edges).tobytes(),
-                                 digest_size=16).digest()
-        key = (str(unit), edges.shape, digest)
-        self._binning_memo = (self.bin_edges, key)
-        return key
 
     @staticmethod
     def _add_overlaps(edges, out, low, high, sign):

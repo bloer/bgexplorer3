@@ -197,18 +197,6 @@ class TestHistogram(unittest.TestCase):
         with self.assertRaises(DimensionalityError):
             h.integrate(exclude=[(1 * units.kg, 2 * units.kg)])
 
-    def test6f_binning_key(self):
-        edges = np.linspace(0, 100, 21) * units.keV
-        h = Histogram(np.ones(20), edges)
-        self.assertEqual(h.binning_key(),
-                         Histogram(np.ones(20) * 2, edges.copy()).binning_key())
-        self.assertNotEqual(
-            h.binning_key(), Histogram(np.ones(20), edges + 1 * units.keV)
-            .binning_key())
-        self.assertNotEqual(
-            h.binning_key(), Histogram(np.ones(20), edges.to('MeV'))
-            .binning_key())
-
     def test7_default_bins(self):
         h = Histogram(np.array([1., 2.]))
         assert_array_almost_equal(h.bin_edges, [0, 1, 2])

@@ -12,12 +12,10 @@ from .fields import UnitField, QuantityField
 from ..versioning import control, hooks, record
 from ..versioning.verdoc import VersionedDocument
 from .ranges import parse_ranges
-from collections import OrderedDict
 from enum import Enum
 from functools import lru_cache
 from typing import Optional
 import secrets
-import threading
 import logging
 log = logging.getLogger(__name__)
 
@@ -246,40 +244,6 @@ class RangeListField(StringField):
             self.error(str(e))
 
 
-class _WeightsCache:
-    """ A small thread-safe LRU of ROI weights vectors. A key has the ROI's
-    definition and the binning of the histogram, which is all the weights
-    depend on, so an entry never goes stale and nothing has to invalidate it
-    """
-    def __init__(self, maxsize: int = 512):
-        self.maxsize = maxsize
-        self._data = OrderedDict()
-        self._lock = threading.Lock()
-
-    def get(self, key, make):
-        with self._lock:
-            try:
-                self._data.move_to_end(key)
-                return self._data[key]
-            except KeyError:
-                pass
-        weights = make()
-        # shared between callers
-        weights.setflags(write=False)
-        with self._lock:
-            self._data[key] = weights
-            while len(self._data) > self.maxsize:
-                self._data.popitem(last=False)
-        return weights
-
-    def clear(self):
-        with self._lock:
-            self._data.clear()
-
-
-weights_cache = _WeightsCache()
-
-
 class SpectrumROI(HitEffConfig):
     """ Integrate or average a spectrum over an ROI, optionally leaving out
     some ranges, such as gamma peaks.
@@ -349,17 +313,6 @@ class SpectrumROI(HitEffConfig):
         return (mag(self.start), mag(self.stop), self.binwidths,
                 self.mode.name, (self.exclude or '').strip())
 
-    def weights(self, hist):
-        """ The weights of the bins of `hist` for this ROI, see
-        `Histogram.roi_weights`. They only depend on the binning, so they are
-        remembered for every histogram with the same one.
-        """
-        average = self.mode is ROIType.average
-        return weights_cache.get(
-            (self._definition(), hist.binning_key()),
-            lambda: hist.roi_weights(self.start, self.stop, self.binwidths,
-                                     average, self.excluded_ranges))
-
     def evaluate(self, hiteff, store: bool = True):
         """ Evaluate the given ROI. Like a hit efficiency's scalars, the
         result must have units that `display_unit` accepts once multiplied
@@ -368,9 +321,11 @@ class SpectrumROI(HitEffConfig):
         result = None
         try:
             if (hist := hiteff.spectra.get(self.link_spectrum)) is not None:
-                result = hist.apply_weights(self.weights(hist),
-                                            self.binwidths,
-                                            self.mode is ROIType.average)
+                average = self.mode is ROIType.average
+                weights = hist.roi_weights(self.start, self.stop,
+                                           self.binwidths, average,
+                                           self.excluded_ranges)
+                result = hist.apply_weights(weights, self.binwidths, average)
         except (PintError, ValueError) as e:
             raise ValidationError(f"ROI {self.key} can't be evaluated for "
                                   f"hiteff {hiteff.id}: {e}") from e

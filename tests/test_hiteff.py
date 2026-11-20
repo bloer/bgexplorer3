@@ -317,28 +317,6 @@ class TestRoiUpdates(unittest.TestCase):
         settings.save()
         self.assertAlmostEqual(self.peak(), 2)
 
-    def test_weights_cache(self):
-        """ Histograms with the same binning share the ROI's weights, but
-        another ROI or binning has its own
-        """
-        from bgexplorer.models.settings import weights_cache
-        roi = SpectrumROI(spectrum='v1', start=0 * units.keV,
-                          stop=5 * units.keV, exclude='1-2')
-        h1 = Histogram(AsymmetricUncertainty.fromcounts(np.arange(10.))
-                       * units.dru, np.arange(11) * units.keV)
-        h2 = Histogram(AsymmetricUncertainty.fromcounts(np.ones(10))
-                       * units.dru, np.arange(11) * units.keV)
-        h3 = Histogram(h1.hist, np.arange(11) * units.keV * 2)
-        weights_cache.clear()
-        w = roi.weights(h1)
-        self.assertIs(roi.weights(h2), w)
-        self.assertIsNot(roi.weights(h3), w)
-        roi.exclude = '1-3'
-        self.assertIsNot(roi.weights(h1), w)
-        roi.exclude = '1-2'
-        self.assertIs(roi.weights(h1), w)
-        self.assertFalse(w.flags.writeable)
-
     def test_copy_on_write(self):
         """ Only the hit efficiencies of the version with the new settings
         change, and only those that have to
