@@ -315,17 +315,21 @@ def _check_display_unit(version_tag: str, type_: str, key: str, cfg) -> None:
                 field_name=f"hiteffdbconfig.display_{type_}")
 
 
-def _check_rois(version_tag: str, rois) -> None:
+def _check_rois(version_tag: str, rois) -> dict:
     """ Raise ValidationError if an ROI of `rois` can't be evaluated for, or
     has a display unit that conflicts with, a HitEfficiency. If it has no
     display unit, it is set from the HitEfficiencies. Each HitEfficiency is
-    loaded once, for all of the ROIs.
+    loaded once, for all of the ROIs. Returns the results for `store_rois`, as
+    `(revision, {roi key: result})` by the original_id of each HitEfficiency
+    that has a spectrum an ROI uses.
     """
+    results = {}
     if not rois:
-        return
+        return results
     spectra = [roi.link_spectrum for roi in rois]
     for he in HitEfficiency.select_version(version_tag)(
             spectra_keys__in=spectra).no_cache():
+        values = {}
         for roi in rois:
             try:
                 result = roi.evaluate(he, store=False)
@@ -334,18 +338,37 @@ def _check_rois(version_tag: str, rois) -> None:
                     str(e), field_name="hiteffdbconfig.rois") from e
             if result is not None and roi.display_unit is None:
                 roi.display_unit = he.get_result_unit(result)
+            values[roi.key] = result
+        results[he.original_id] = (he.revision, values)
+    return results
+
+
+def _roi_fingerprint(rois) -> list:
+    """ What the results of the ROIs depend on """
+    return [(roi.key, roi.link_spectrum, roi._definition()) for roi in rois]
 
 
 def check_settings(version_settings) -> None:
     """ Every scalar, spectrum and ROI needs a display unit that agrees with
-    all of the HitEfficiencies in the version
+    all of the HitEfficiencies in the version. The ROIs are evaluated for all
+    of the HitEfficiencies, and the results are kept on `version_settings` for
+    when it is saved, so that they are only evaluated once.
     """
     config = version_settings.hiteffdbconfig
+    for roi in config.rois:
+        try:
+            roi.clean()
+        except ValidationError:
+            # can't be evaluated. Validating the field that is wrong comes
+            # next, and reports it with the key of the field
+            return
+    results = {}
     for tag in version_settings.version_tags:
         for type_ in ('scalars', 'spectra'):
             for key, cfg in getattr(config, f'display_{type_}').items():
                 _check_display_unit(tag, type_, key, cfg)
-        _check_rois(tag, config.rois)
+        results[tag] = _check_rois(tag, config.rois)
+    version_settings._roi_results = (_roi_fingerprint(config.rois), results)
 
 
 def _without_ids(rois: dict) -> dict:
@@ -355,25 +378,43 @@ def _without_ids(rois: dict) -> dict:
             for key, value in rois.items()}
 
 
-def store_rois(version_tag: str, rois) -> int:
-    """ Evaluate all of `rois` for the HitEfficiencies of `version_tag` and
-    store the results of those that changed, returning how many that was.
-    Every ROI is evaluated, whatever its key, so one that was redefined
-    without being renamed is updated too. Each HitEfficiency is loaded once and
-    the results are written in a single bulk operation, after the
-    HitEfficiencies shared with other versions were split off.
+def store_rois(version_tag: str, rois, results: dict = None) -> int:
+    """ Store the results of all of `rois` for the HitEfficiencies of
+    `version_tag` that changed, returning how many that was. Every ROI is
+    evaluated, whatever its key, so one that was redefined without being
+    renamed is updated too. The results are written in a single bulk
+    operation, after the HitEfficiencies shared with other versions were
+    split off.
+
+    `results` is what `_check_rois` returned for `version_tag`. Without it,
+    each HitEfficiency is loaded and evaluated. With it, they are loaded
+    without their spectra, and are only evaluated again if they changed since
+    or have spectra that the ROIs use but weren't evaluated.
     """
     check_writable(version_tag)
     field = HitEfficiency._fields['rois']
+    spectra = {roi.link_spectrum for roi in rois}
     changes = []
     shared = []
     queryset = HitEfficiency.select_version(version_tag)
+    if results is not None:
+        queryset = queryset.exclude('spectra')
     total = queryset.count()
     for done, he in enumerate(queryset.no_cache(), 1):
         jobs.progress(done, total, stage='hit efficiencies')
+        known = None if results is None else results.get(he.original_id)
+        if known is not None and known[0] == he.revision:
+            evaluated = known[1]
+        elif (results is not None and known is None
+                and spectra.isdisjoint(he.spectra_keys or ())):
+            evaluated = {roi.key: None for roi in rois}
+        else:
+            full = he if results is None else HitEfficiency.select_version(
+                version_tag).get(id=he.id)
+            evaluated = {roi.key: roi.evaluate(full, store=False)
+                         for roi in rois}
         stored = field.to_mongo(he.rois)
-        values = field.to_mongo({roi.key: roi.evaluate(he, store=False)
-                                 for roi in rois})
+        values = field.to_mongo(evaluated)
         if _without_ids(values) == _without_ids(stored):
             continue
         changes.append((he.original_id, values))
@@ -394,9 +435,15 @@ def store_rois(version_tag: str, rois) -> int:
 
 
 def update_rois(sender, document, **kwargs) -> None:
-    """ Update the ROIs of all HitEfficiencies when the settings are saved """
+    """ Update the ROIs of all HitEfficiencies when the settings are saved,
+    using the results of `check_settings` if they are still valid
+    """
+    rois = document.hiteffdbconfig.rois
+    fingerprint, results = document.__dict__.pop('_roi_results', (None, {}))
+    if fingerprint != _roi_fingerprint(rois):
+        results = {}
     for tag in document.version_tags:
-        store_rois(tag, document.hiteffdbconfig.rois)
+        store_rois(tag, rois, results.get(tag))
 
 
 settings.VersionSettings.clean_hooks.append(check_settings)

@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 from mongoengine import connect, disconnect, ValidationError
 from bgexplorer.models.hiteff import HitEfficiency
 from bgexplorer.models.common import units
@@ -247,6 +248,96 @@ class TestRoiUpdates(unittest.TestCase):
         settings.save()
         # keV * dru/mBq per keV
         self.assertAlmostEqual(self.peak(), 210)
+
+    def test_evaluated_once(self):
+        """ Saving the settings evaluates each ROI once for each hit
+        efficiency, for the check and for the update together
+        """
+        settings = get_settings('main')
+        roi = settings.hiteffdbconfig.rois[0]
+        roi.stop = 6 * units.keV
+        with mock.patch.object(SpectrumROI, 'evaluate', autospec=True,
+                               side_effect=SpectrumROI.evaluate) as evaluate:
+            settings.save()
+        self.assertEqual(evaluate.call_count, 2)
+        self.assertAlmostEqual(self.peak(), 2.5)
+        self.assertAlmostEqual(self.peak(location='l2'), 2.5)
+        # nothing stale is left to be used by a later save
+        self.assertFalse(hasattr(settings, '_roi_results'))
+        # a later save sees hit efficiencies that were edited meanwhile
+        he = HitEfficiency.select_version('main').get(location='l1')
+        he.spectra['v1'] = he.spectra['v1'] * 2
+        he.save()
+        roi.stop = 5 * units.keV
+        settings.save()
+        self.assertAlmostEqual(self.peak(), 4)
+        self.assertAlmostEqual(self.peak(location='l2'), 2)
+
+    def test_exclude(self):
+        """ Excluded ranges are left out of the sum and the width averaged """
+        settings = get_settings('main')
+        roi = settings.hiteffdbconfig.rois[0]
+        # bins 0, 3 and 4 of v1 (counts 0..9) are left
+        for text in ('1-3 keV', '1 - 3', '0.001-0.003 MeV', ' 1-2, 2-3 keV ',
+                     '2.5-3, 1-2.5 keV'):
+            roi.exclude = text
+            settings.save()
+            self.assertAlmostEqual(self.peak(), 7 / 3, msg=text)
+        roi.exclude = '1-1.5 keV, 3.5-4 keV'
+        settings.save()
+        self.assertAlmostEqual(self.peak(), (0 + 1 * .5 + 2 + 3 * .5 + 4) / 4)
+        roi.mode = 'integrate'
+        roi.display_unit = None
+        roi.exclude = '1-3 keV'
+        settings.save()
+        self.assertAlmostEqual(self.peak(), 7)
+        # cleared again
+        roi.exclude = ''
+        settings.save()
+        self.assertAlmostEqual(self.peak(), 10)
+
+    def test_exclude_errors(self):
+        settings = get_settings('main')
+        roi = settings.hiteffdbconfig.rois[0]
+        for text in ('abc', '1-3 kg', '1-', '1-2 keV; 3'):
+            roi.exclude = text
+            with self.assertRaises(ValidationError, msg=text) as cm:
+                settings.save()
+            self.assertIn('exclude', str(cm.exception), msg=text)
+        # nothing is left to evaluate
+        roi.exclude = '0-5 keV'
+        with self.assertRaises(ValidationError):
+            settings.save()
+        roi.exclude = '-1-9 keV'
+        with self.assertRaises(ValidationError):
+            settings.save()
+        # nothing was changed in the database
+        self.assertAlmostEqual(self.peak(), 2)
+        roi.exclude = None
+        settings.save()
+        self.assertAlmostEqual(self.peak(), 2)
+
+    def test_weights_cache(self):
+        """ Histograms with the same binning share the ROI's weights, but
+        another ROI or binning has its own
+        """
+        from bgexplorer.models.settings import weights_cache
+        roi = SpectrumROI(spectrum='v1', start=0 * units.keV,
+                          stop=5 * units.keV, exclude='1-2')
+        h1 = Histogram(AsymmetricUncertainty.fromcounts(np.arange(10.))
+                       * units.dru, np.arange(11) * units.keV)
+        h2 = Histogram(AsymmetricUncertainty.fromcounts(np.ones(10))
+                       * units.dru, np.arange(11) * units.keV)
+        h3 = Histogram(h1.hist, np.arange(11) * units.keV * 2)
+        weights_cache.clear()
+        w = roi.weights(h1)
+        self.assertIs(roi.weights(h2), w)
+        self.assertIsNot(roi.weights(h3), w)
+        roi.exclude = '1-3'
+        self.assertIsNot(roi.weights(h1), w)
+        roi.exclude = '1-2'
+        self.assertIs(roi.weights(h1), w)
+        self.assertFalse(w.flags.writeable)
 
     def test_copy_on_write(self):
         """ Only the hit efficiencies of the version with the new settings

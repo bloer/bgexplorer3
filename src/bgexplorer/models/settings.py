@@ -11,9 +11,13 @@ from pymongo.errors import DuplicateKeyError
 from .fields import UnitField, QuantityField
 from ..versioning import control, hooks, record
 from ..versioning.verdoc import VersionedDocument
+from .ranges import parse_ranges
+from collections import OrderedDict
 from enum import Enum
+from functools import lru_cache
 from typing import Optional
 import secrets
+import threading
 import logging
 log = logging.getLogger(__name__)
 
@@ -224,12 +228,69 @@ class ROIType(Enum):
     integrate = "integrate"
 
 
+@lru_cache(maxsize=256)
+def _parse_exclude(text: str, unit: Optional[str]) -> tuple:
+    return tuple(parse_ranges(text, unit))
+
+
+class RangeListField(StringField):
+    """ Text like "10-15, 18-30 keV", see `parse_ranges`. Its errors are
+    reported for this field. Whether the units are right for the document it
+    is in is for the document to check
+    """
+    def validate(self, value):
+        super().validate(value)
+        try:
+            parse_ranges(value, 'dimensionless')
+        except ValueError as e:
+            self.error(str(e))
+
+
+class _WeightsCache:
+    """ A small thread-safe LRU of ROI weights vectors. A key has the ROI's
+    definition and the binning of the histogram, which is all the weights
+    depend on, so an entry never goes stale and nothing has to invalidate it
+    """
+    def __init__(self, maxsize: int = 512):
+        self.maxsize = maxsize
+        self._data = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key, make):
+        with self._lock:
+            try:
+                self._data.move_to_end(key)
+                return self._data[key]
+            except KeyError:
+                pass
+        weights = make()
+        # shared between callers
+        weights.setflags(write=False)
+        with self._lock:
+            self._data[key] = weights
+            while len(self._data) > self.maxsize:
+                self._data.popitem(last=False)
+        return weights
+
+    def clear(self):
+        with self._lock:
+            self._data.clear()
+
+
+weights_cache = _WeightsCache()
+
+
 class SpectrumROI(HitEffConfig):
-    """ Integrate or average a spectrum over an ROI """
+    """ Integrate or average a spectrum over an ROI, optionally leaving out
+    some ranges, such as gamma peaks.
+    """
     start = QuantityField(required=True)
     stop = QuantityField(required=True)
     mode = EnumField(ROIType, default=ROIType.average)
     binwidths = BooleanField(default=True)
+    exclude = RangeListField(default=None, help_text=(
+        "Ranges to leave out, like '10-15, 18-30 keV'. A range without a "
+        "unit has that of the next one with one, or of the start"))
 
     def __init__(self, spectrum=None, *args, **kwargs):
         if spectrum is not None:
@@ -257,6 +318,48 @@ class SpectrumROI(HitEffConfig):
     def key(self):
         return self.title
 
+    @property
+    def excluded_ranges(self) -> tuple:
+        """ The (low, high) Quantities in `exclude`. Raises ValueError if it
+        can't be read
+        """
+        if not self.exclude or not self.exclude.strip():
+            return ()
+        unit = getattr(self.start, 'u', None)
+        return _parse_exclude(self.exclude, None if unit is None else str(unit))
+
+    def clean(self):
+        super().clean()
+        try:
+            ranges = self.excluded_ranges
+            dimensionality = getattr(self.start, 'dimensionality', None)
+            for rng in ranges:
+                if (dimensionality is not None
+                        and any(x.dimensionality != dimensionality
+                                for x in rng)):
+                    raise ValueError(f"excluded ranges must have the units of "
+                                     f"the start, {self.start.u}")
+        except ValueError as e:
+            raise ValidationError(str(e), field_name='exclude') from e
+
+    def _definition(self) -> tuple:
+        """ What the weights depend on, other than the binning """
+        def mag(x):
+            return (float(x.m), str(x.u)) if hasattr(x, 'u') else (float(x),)
+        return (mag(self.start), mag(self.stop), self.binwidths,
+                self.mode.name, (self.exclude or '').strip())
+
+    def weights(self, hist):
+        """ The weights of the bins of `hist` for this ROI, see
+        `Histogram.roi_weights`. They only depend on the binning, so they are
+        remembered for every histogram with the same one.
+        """
+        average = self.mode is ROIType.average
+        return weights_cache.get(
+            (self._definition(), hist.binning_key()),
+            lambda: hist.roi_weights(self.start, self.stop, self.binwidths,
+                                     average, self.excluded_ranges))
+
     def evaluate(self, hiteff, store: bool = True):
         """ Evaluate the given ROI. Like a hit efficiency's scalars, the
         result must have units that `display_unit` accepts once multiplied
@@ -265,8 +368,9 @@ class SpectrumROI(HitEffConfig):
         result = None
         try:
             if (hist := hiteff.spectra.get(self.link_spectrum)) is not None:
-                func = getattr(hist, self.mode.name)
-                result = func(self.start, self.stop, self.binwidths)
+                result = hist.apply_weights(self.weights(hist),
+                                            self.binwidths,
+                                            self.mode is ROIType.average)
         except (PintError, ValueError) as e:
             raise ValidationError(f"ROI {self.key} can't be evaluated for "
                                   f"hiteff {hiteff.id}: {e}") from e
