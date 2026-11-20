@@ -298,6 +298,39 @@ def _binning_problem(key: str, found, configured):
             f"{describe_bins(configured)}")
 
 
+def require_no_spectra(version_settings, key: str) -> None:
+    """ Raise ValidationError if any HitEfficiency in a version that uses
+    `version_settings` has a spectrum named `key`
+    """
+    counts = {}
+    for tag in version_settings.version_tags:
+        n = HitEfficiency.select_version(tag)(spectra_keys=key).count()
+        if n:
+            counts[tag] = n
+    if counts:
+        found = ', '.join(f"{n} in {tag}" for tag, n in counts.items())
+        raise ValidationError(
+            f"Can't change the binning of spectrum {key} while hit "
+            f"efficiencies have it ({found}). Delete those spectra first")
+
+
+def reset_binning(version_settings, key: str) -> None:
+    """ Forget the bins that spectrum `key` must have, so the next spectrum of
+    that name defines them. Raises ValidationError if spectra of that name
+    exist. Nothing else in the settings changes
+    """
+    check_writable(version_settings.active_version)
+    require_no_spectra(version_settings, key)
+    config = version_settings.hiteffdbconfig
+    cfg = config.display_spectra.get(key)
+    if cfg is None or cfg.bin_edges is None:
+        return
+    cfg.bin_edges = None
+    # update rather than save, which would check the hit efficiencies and ROIs
+    version_settings.update(set__hiteffdbconfig=config)
+    settings.touch(version_settings.active_version)
+
+
 def _stored_units(version_tag: str, type_: str, key: str):
     """ (unit string, a value with that unit, norm) for each unique
     combination of unit and norm type of `key` in the version's

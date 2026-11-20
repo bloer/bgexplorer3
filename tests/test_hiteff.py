@@ -1,7 +1,7 @@
 import unittest
 from unittest import mock
 from mongoengine import connect, disconnect, ValidationError
-from bgexplorer.models.hiteff import HitEfficiency
+from bgexplorer.models.hiteff import HitEfficiency, reset_binning
 from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.histogram import Histogram
@@ -555,6 +555,50 @@ class TestBinning(unittest.TestCase):
         self.assertEqual(len(self.configured().bin_edges), 5)
         with self.assertRaises(ValidationError):
             self.hiteff('c2', s=np.arange(6.) * units.keV).save()
+
+    def reset(self, name='s', tag='main'):
+        reset_binning(get_settings(tag), name)
+
+    def test_refused_while_spectra_exist(self):
+        h = self.hiteff(s=np.arange(5.) * units.keV).save()
+        with self.assertRaisesRegex(ValidationError, "Delete") as cm:
+            self.reset()
+        self.assertIn('main', str(cm.exception))
+        self.assertEqual(len(self.configured().bin_edges), 5)
+        # a spectrum of another name doesn't matter
+        h.remove_spectrum('s')
+        self.hiteff('c2', t=np.arange(3.) * units.keV).save()
+        self.reset()
+
+    def test_reset_then_new_binning(self):
+        h = self.hiteff(s=np.arange(5.) * units.keV).save()
+        config = get_settings().hiteffdbconfig
+        config.display_spectra['s'].description = 'kept'
+        get_settings().update(set__hiteffdbconfig=config)
+        h.remove_spectrum('s')
+        self.reset()
+        self.assertIsNone(self.configured().bin_edges)
+        self.assertEqual(self.configured().description, 'kept')
+        self.hiteff('c2', s=np.arange(8.) * units.MeV).save()
+        self.assertEqual(len(self.configured().bin_edges), 8)
+        self.assertEqual(self.configured().bin_edges.u, units.MeV)
+
+    def test_unknown_or_unbinned_name(self):
+        self.reset('nothing')
+        config = get_settings()
+        config.hiteffdbconfig.display_spectra['plain'] = HitEffConfig()
+        config.save()
+        self.reset('plain')
+
+    def test_spectra_in_other_tag_of_settings(self):
+        self.hiteff(s=np.arange(5.) * units.keV).save()
+        create_branch('dev', 'main')
+        # the settings are shared until one is edited, and so are the spectra
+        self.assertCountEqual(get_settings('dev').version_tags, ['main', 'dev'])
+        with self.assertRaises(ValidationError) as cm:
+            self.reset('s', 'dev')
+        self.assertIn('1 in main', str(cm.exception))
+        self.assertIn('1 in dev', str(cm.exception))
 
 
 class TestSpectrumParsing(unittest.TestCase):
