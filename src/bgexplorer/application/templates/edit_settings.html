@@ -178,9 +178,9 @@
 
     <fieldset class="mb-4">
         <legend>Regions of interest (ROIs)</legend>
-        <p class="form-text">Scalars calculated from a spectrum. Mode "average" or "integrate" over [start, stop]</p>
+        <p class="form-text">Scalars calculated from a spectrum. Mode "average" or "integrate" over [start, stop], optionally leaving out the ranges in "exclude", such as gamma peaks: "10-15, 18-30 keV". A range without a unit has that of the next one with a unit, or of start.</p>
         {{ listtable('rois', config._fields['rois'].field.document_type,
-                     ['display_name', 'link_spectrum', 'start', 'stop', 'mode',
+                     ['display_name', 'link_spectrum', 'start', 'stop', 'exclude', 'mode',
                       'binwidths', 'display_unit', 'description', 'hide'],
                      'hiteffdbconfig.rois', config.rois) }}
     </fieldset>

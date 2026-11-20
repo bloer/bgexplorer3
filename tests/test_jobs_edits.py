@@ -7,6 +7,7 @@ from bgexplorer.jobs import models
 from bgexplorer.models.component import Component
 from bgexplorer.models.emissionspec import EmissionSpec, EmissionSource
 from bgexplorer.models.hiteff import HitEfficiency
+from bgexplorer.models.settings import get_settings
 from bgexplorer.models.users import Role
 from bgexplorer.versioning import control as vc
 from bgexplorer.versioning.locks import hold_locks
@@ -171,6 +172,34 @@ class TestEditsAreJobs(AppTestCase):
         progress = only_job('save_settings').progress
         self.assertEqual((progress.stage, progress.done, progress.total),
                          ('hit efficiencies', 3, 3))
+
+
+    def test_settings_roi_exclusions(self):
+        vc.create_version('x', 'main')
+        url = self.url('edit_settings', 'x')
+        data = {
+            'description': 'with exclusions',
+            '_listfields': ['hiteffdbconfig.rois'],
+            'hiteffdbconfig.rois.display_name': ['roi1'],
+            'hiteffdbconfig.rois.link_spectrum': ['s1'],
+            'hiteffdbconfig.rois.start': ['1 keV'],
+            'hiteffdbconfig.rois.stop': ['10 keV'],
+            'hiteffdbconfig.rois.exclude': ['abc'],
+            'hiteffdbconfig.rois.mode': ['integrate'],
+            'hiteffdbconfig.rois.binwidths': ['true'],
+            'hiteffdbconfig.rois.hide': ['false']}
+        response = self.client.post(url, data=data)
+        self.assertEqual(response.status_code, 400)
+        page = self.html(response)
+        self.assertIn('as a range', page)
+        self.assertIn('is-invalid', page)
+        data['hiteffdbconfig.rois.exclude'] = ['2-4, 6-7 keV']
+        response = self.client.post(url, data=data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            get_settings('x').hiteffdbconfig.rois[0].exclude, '2-4, 6-7 keV')
+        self.assertIn('2-4, 6-7 keV',
+                      self.html(self.client.get(url)))
 
 
 class ThreadedEditCase(AuthTestCase):
