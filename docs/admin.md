@@ -74,6 +74,12 @@ site admin can't be demoted or deactivated.
   files; they are removed after `JOBS_KEEP_DAYS` anyway. The same is done by
   [`bgexplorer-jobs`](cli.html#bgexplorer-jobs).
 
+## Spectrum binning
+
+Spectra of the same name share their bins, which the first one sets.
+Administrators reset them from a version's settings page, once the spectra are
+deleted; see [spectrum binning](settings.html#spectrum-binning).
+
 ## Background jobs
 
 Edits that can take minutes on a large model (changing a version's settings,

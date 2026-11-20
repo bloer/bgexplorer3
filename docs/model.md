@@ -300,6 +300,9 @@ Spectra are managed on a hit efficiency's **edit** page: import one from a
 file, rename it, or delete it. See [Importing data](import.html#spectra) for
 file formats.
 
+Spectra with the same name must have the same bins, which the first one sets;
+see [spectrum binning](settings.html#spectrum-binning).
+
 ## Matching hit efficiencies
 
 Each SourceTerm uses every hit efficiency whose `source` equals the source's

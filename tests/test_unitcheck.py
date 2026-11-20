@@ -414,6 +414,39 @@ class TestAudit(UnitTestCase):
         self.assertEqual(get_settings('main').hiteffdbconfig.scalar_unit('v1'),
                          unit)
 
+    @staticmethod
+    def spectrum(nbins):
+        return Histogram(AsymmetricUncertainty.fromcounts(np.arange(nbins))
+                         * units('dru/mBq'), np.arange(nbins + 1) * units.keV)
+
+    def test_adds_binning(self):
+        """ Settings without the bins of a spectrum get them from the hit
+        efficiencies
+        """
+        HitEfficiency(source='U238', location='c2',
+                      spectra=dict(s1=self.spectrum(4))).save()
+        settings = get_settings('main')
+        settings.update(set__hiteffdbconfig=HitEffDbConfig())
+        self.assertEqual(check_version_units('main'), [])
+        cfg = get_settings('main').hiteffdbconfig.display_spectra['s1']
+        self.assertEqual(cfg.bin_edges.m.tolist(), [0, 1, 2, 3, 4])
+
+    def test_reports_binning_conflicts(self):
+        """ Spectra that don't have the bins of the others of their name, e.g.
+        from different versions that were merged, are reported
+        """
+        HitEfficiency(source='U238', location='c2',
+                      spectra=dict(s1=self.spectrum(4))).save()
+        other = HitEfficiency(source='U238', location='c3',
+                              spectra=dict(s1=self.spectrum(5)))
+        other.save(validate=False)
+        problems = check_version_units('main')
+        self.assertEqual(len(problems), 1)
+        self.assertIn(str(other.id), problems[0])
+        self.assertIn('same bins', problems[0])
+        self.assertIn('5 bins', problems[0])
+        self.assertIn('4 bins', problems[0])
+
     def test_page_reports_mismatch(self):
         """ Saved data that is still mismatched is reported, not an
         unexplained error

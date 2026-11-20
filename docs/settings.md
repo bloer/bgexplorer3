@@ -63,6 +63,26 @@ unit. Imported and merged documents aren't validated as they are written, so
 afterwards they are checked the same way, and any mismatches are listed in the
 history event.
 
+### Spectrum binning
+
+All spectra with the same name must have the same bins. The first spectrum
+of a name sets them, and the Bins column of the spectrum table shows them. A
+spectrum with different bins is rejected, listing every spectrum of the hit
+efficiency that doesn't match (bin edges that differ by less than a millionth
+of the smallest bin width count as equal). Imported and merged hit efficiencies
+are checked afterwards, like units.
+
+To change the bins of a spectrum, an administrator resets them:
+
+1. delete the spectra of that name from the hit efficiencies,
+2. press **Reset** in the Bins column (refused while any spectrum of that name
+   remains, in any version sharing these settings),
+3. add the spectra with the new bins.
+
+Through the [API](api.html), dropping a `display_spectra` entry in a `PATCH`
+of the settings is the reset, refused with `409` in the same way. The bins
+themselves are never part of the settings the API shows or accepts.
+
 **Extra columns** lists extra hit efficiency fields, e.g. `material`, to show
 as columns on the Hit Efficiencies overview.
 
