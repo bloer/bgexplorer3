@@ -86,6 +86,7 @@
     <thead>
         <tr><th>Key</th>
             {%- for f in fieldnames %}<th>{{ f | replace('_', ' ') | title }}</th>{% endfor %}
+            {%- if type_ == 'spectra' %}<th>Bins</th>{% endif %}
         </tr>
     </thead>
     <tbody>
@@ -97,6 +98,16 @@
             {%- set value = entry[f] if entry else (field.default() if field.default is callable else field.default) -%}
             {{ cell(field, value, prefix~'['~key~'].'~f, prefix~'.'~key~'.'~f) }}
             {%- endfor -%}
+            {%- if type_ == 'spectra' %}
+            <td>
+                {%- if binnings.get(key) %}
+                {{ binnings[key] }}
+                {%- if has_role('admin') %}
+                <button type="submit" form="resetbinning" name="key" value="{{ key }}" class="btn btn-sm btn-outline-danger ms-1">Reset</button>
+                {%- endif %}
+                {%- else %}<span class="text-muted">set by the next spectrum</span>{% endif %}
+            </td>
+            {%- endif %}
         </tr>
         {%- else %}
         <tr><td colspan="{{ fieldnames | length + 1 }}">No {{ type_ }} in this version's hit efficiencies</td></tr>
@@ -172,6 +183,7 @@
 
     <fieldset class="mb-4">
         <legend>Spectrum display</legend>
+        <p class="form-text">All spectra with the same name must have the same bins, which the first one sets. To change them, delete the spectra, ask an administrator to reset the bins, then add the new spectra.</p>
         {{ maptable('display_spectra', 'spectra',
                     ['display_name', 'display_unit', 'description', 'hide']) }}
     </fieldset>
@@ -185,6 +197,11 @@
                      'hiteffdbconfig.rois', config.rois) }}
     </fieldset>
 </form>
+{%- if has_role('admin') %}
+<form method="POST" id="resetbinning" action="{{ url_for('versions.reset_binning') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+</form>
+{%- endif %}
 {% endblock pagecontent %}
 
 {% block pagescripts %}

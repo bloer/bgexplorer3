@@ -202,6 +202,93 @@ class TestEditsAreJobs(AppTestCase):
                       self.html(self.client.get(url)))
 
 
+def add_spectrum(tag, name='s1', location='c1'):
+    """ A hit efficiency in `tag` with a spectrum of 4 bins from 0 to 4 keV """
+    import numpy as np
+    from bgexplorer.models.asymmetric import AsymmetricUncertainty
+    from bgexplorer.models.common import units
+    from bgexplorer.models.histogram import Histogram
+    hist = Histogram(AsymmetricUncertainty.fromcounts(np.ones(4))
+                     * units('dru/mBq'), np.arange(5.) * units.keV)
+    return HitEfficiency(source='K40', location=location, version_tag=tag,
+                         spectra={name: hist}).save()
+
+
+def binning(tag, name='s1'):
+    config = get_settings(tag, create=False).hiteffdbconfig
+    return config.display_spectra[name].bin_edges
+
+
+class TestSpectrumBinning(AppTestCase):
+    def setUp(self):
+        super().setUp()
+        clear_jobs()
+        vc.create_version('main')
+        vc.create_version('b', 'main')
+        self.hiteff = add_spectrum('b')
+        self.settings_url = self.url('edit_settings', 'b')
+        self.reset = self.url('versions.reset_binning', 'b')
+
+    def test_the_form_shows_and_keeps_the_binning(self):
+        html = self.html(self.client.get(self.settings_url))
+        self.assertIn('4 bins from 0 to 4 keV', html)
+        self.assertIn('form="resetbinning"', html)
+        key = 'hiteffdbconfig.display_spectra[s1]'
+        response = self.client.post(self.settings_url, data={
+            f'{key}.display_name': 'Spectrum 1', f'{key}.display_unit': '',
+            f'{key}.description': '', f'{key}.hide': 'false'})
+        self.assertEqual(response.status_code, 302)
+        config = get_settings('b', create=False).hiteffdbconfig
+        self.assertEqual(config.display_spectra['s1'].display_name,
+                         'Spectrum 1')
+        self.assertEqual(binning('b').m.tolist(), [0, 1, 2, 3, 4])
+
+    def test_reset_is_refused_while_spectra_exist(self):
+        response = self.client.post(self.reset, data={'key': 's1'})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], self.settings_url)
+        job = only_job('reset_binning')
+        self.assertEqual((job.scope, job.status, job.params['key']),
+                         ('b', 'failed', 's1'))
+        self.assertIn('Delete those spectra', job.error)
+        self.assertIsNotNone(binning('b'))
+
+    def test_reset(self):
+        self.hiteff.remove_spectrum('s1')
+        response = self.client.post(self.reset, data={'key': 's1'})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(only_job('reset_binning').status, 'succeeded')
+        self.assertIsNone(binning('b'))
+        self.assertIn('set by the next spectrum',
+                      self.html(self.client.get(self.settings_url)))
+        # the next spectrum sets the binning again
+        add_spectrum('b', location='c2')
+        self.assertIsNotNone(binning('b'))
+
+    def test_a_missing_key_is_refused(self):
+        self.assertEqual(self.client.post(self.reset).status_code, 400)
+        self.assertEqual(models.Job.objects.count(), 0)
+
+
+class TestResetBindingPermission(AuthTestCase):
+    def test_only_admins_reset_the_binning(self):
+        vc.create_version('b', 'main')
+        add_spectrum('b')
+        self.make_user('ed', Role.editor)
+        self.make_user('boss', Role.admin)
+        url = self.url('versions.reset_binning', 'b')
+        self.login('ed')
+        html = self.html(self.client.get(self.url('edit_settings', 'b')))
+        self.assertIn('4 bins from 0 to 4 keV', html)
+        self.assertNotIn('id="resetbinning"', html)
+        self.assertEqual(self.client.post(url, data={'key': 's1'})
+                         .status_code, 403)
+        self.client.post(self.url('auth.logout'))
+        self.login('boss')
+        html = self.html(self.client.get(self.url('edit_settings', 'b')))
+        self.assertIn('id="resetbinning"', html)
+
+
 class ThreadedEditCase(AuthTestCase):
     """ Logins and a pool of worker threads, with a short grace period """
     @classmethod
