@@ -94,3 +94,24 @@ class TestKeyedMaps(unittest.TestCase):
         self.assertEqual(list(hiteff.scalars), ['a'])
         with self.assertRaises(ValueError):
             update_object(hiteff, self.form(('', '1 dru/mBq')))
+
+
+class TestEmbeddedMapEntries(unittest.TestCase):
+    def test_existing_entries_are_edited_in_place(self):
+        """ What the form has no field for, like the binning of a spectrum,
+        survives. An entry that is new has none
+        """
+        import numpy as np
+        from bgexplorer.models.common import units
+        from bgexplorer.models.settings import HitEffDbConfig, HitEffConfig
+        edges = np.arange(5.) * units.keV
+        config = HitEffDbConfig(display_spectra=dict(
+            s=HitEffConfig(display_name='S', bin_edges=edges)))
+        prefix = 'display_spectra[{}].'
+        form = MultiDict([(prefix.format('s') + 'display_name', 'Spectrum'),
+                          (prefix.format('t') + 'display_name', 'T')])
+        update_object(config, form)
+        self.assertEqual(config.display_spectra['s'].display_name, 'Spectrum')
+        np.testing.assert_array_equal(config.display_spectra['s'].bin_edges.m,
+                                      edges.m)
+        self.assertIsNone(config.display_spectra['t'].bin_edges)
