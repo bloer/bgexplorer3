@@ -13,7 +13,7 @@ from collections.abc import Mapping
 
 from .asymmetric import AsymmetricUncertainty, LinearExpression
 from .arrays import encode_array, decode_array, is_encoded_array
-from .histogram import Histogram
+from .histogram import Histogram, check_bin_edges
 from .common import units as unitreg
 from .common import pint
 
@@ -387,6 +387,10 @@ class HistogramField(UncertainQuantityField):
         if not isinstance(value, Histogram):
             self.error("Value must be a Histogram object")
         super().validate(value.hist)
+        try:
+            check_bin_edges(value.bin_edges)
+        except ValueError as e:
+            self.error(str(e))
         if len(value.hist) != len(value.bin_edges)-1:
             self.error("Histogram and bin lengths do not match")
         if self.binsunit is not None:
@@ -396,3 +400,31 @@ class HistogramField(UncertainQuantityField):
                                f" with {self.binsunit}")
             except AttributeError:
                 pass
+
+
+class BinEdgesField(BaseField):
+    """ The edges of histogram bins, a Quantity array stored compressed like
+    those of a `HistogramField`
+    """
+    def to_python(self, value):
+        if value is None:
+            return None
+        if isinstance(value, (bytes, Mapping)):
+            value = decompress(value)
+            value = pint.Quantity(value['bins'], value.get('binsunit'))
+        if not isinstance(value, pint.Quantity):
+            value = pint.Quantity(np.asarray(value, dtype=float))
+        return value
+
+    def to_mongo(self, value):
+        value = self.to_python(value)
+        result = {'bins': np.asarray(value.m, dtype=float)}
+        if not value.dimensionless:
+            result['binsunit'] = utostr(value.u)
+        return compress(result)
+
+    def validate(self, value):
+        try:
+            check_bin_edges(value)
+        except ValueError as e:
+            self.error(str(e))

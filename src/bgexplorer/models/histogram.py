@@ -1,8 +1,50 @@
 import operator
 import numpy as np
+from pint.errors import PintError
 from .asymmetric import AsymmetricUncertainty
 from .common import units
 from .ranges import merge_ranges
+
+
+def _as_quantity(edges):
+    return edges if hasattr(edges, 'to') else units.Quantity(
+        np.asarray(edges, dtype=float))
+
+
+def check_bin_edges(edges) -> None:
+    """ Raise ValueError if `edges`, an array or Quantity, can't be the edges
+    of histogram bins: they must be one-dimensional, at least two, finite and
+    strictly increasing
+    """
+    values = np.asarray(getattr(edges, 'm', edges), dtype=float)
+    if values.ndim != 1:
+        raise ValueError("bin edges must be one-dimensional")
+    if len(values) < 2:
+        raise ValueError("there must be at least two bin edges")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("bin edges must be finite")
+    steps = np.diff(values)
+    if np.any(steps <= 0):
+        raise ValueError("bin edges are not increasing at index "
+                         f"{int(np.argmax(steps <= 0)) + 1}")
+
+
+def bins_match(a, b) -> bool:
+    """ Whether the bin edges `a` are those of the reference `b`: the same
+    number of them, with compatible units, each within 1e-6 of the smallest
+    bin width of `b` of its counterpart
+    """
+    a, b = _as_quantity(a), _as_quantity(b)
+    if a.shape != b.shape:
+        return False
+    try:
+        converted = a.to(b.u).m
+    except PintError:
+        return False
+    reference = np.asarray(b.m, dtype=float)
+    steps = np.diff(reference)
+    tolerance = 1e-6 * steps.min() if len(steps) and steps.min() > 0 else 0
+    return bool(np.all(np.abs(converted - reference) <= tolerance))
 
 
 class Histogram(object):

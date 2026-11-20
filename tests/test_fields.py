@@ -176,6 +176,39 @@ class TestFields(unittest.TestCase):
             doc.validate()
         self.assertIn('keV', str(cm.exception.errors))
 
+    def test4_hist_malformed_bins(self):
+        doc = HistUnitsDoc()
+        values = units.Quantity(AsymmetricUncertainty(np.ones(3), 0), '1/keV')
+        for edges, text in [([0., 2., 1., 3.], 'increasing'),
+                            ([0., 1., 1., 3.], 'increasing'),
+                            ([0., np.nan, 2., 3.], 'finite'),
+                            ([0., 1., 2., np.inf], 'finite')]:
+            doc.hist = Histogram(values, np.array(edges))
+            with self.assertRaisesRegex(ValidationError, text) as cm:
+                doc.validate()
+            self.assertIn('hist', cm.exception.errors)
+        # one-dimensional values are required
+        doc.hist = Histogram(values, np.arange(4.).reshape(2, 2))
+        with self.assertRaises(ValidationError):
+            doc.validate()
+        # default, unit-less edges are fine
+        TestDoc(hval=Histogram(np.arange(5.))).validate()
+
+    def test4_bin_edges_field(self):
+        class EdgesDoc(Document):
+            edges = BinEdgesField()
+
+        doc = EdgesDoc(edges=np.arange(4.) * units.keV)
+        doc.validate()
+        loaded = EdgesDoc._from_son(doc.to_mongo()).edges
+        assert_equal(loaded.m, np.arange(4.))
+        self.assertEqual(loaded.u, units.keV)
+        self.assertIsNone(EdgesDoc().edges)
+        self.assertNotIn('edges', EdgesDoc().to_mongo())
+        doc.edges = np.array([0., 2., 1.]) * units.keV
+        with self.assertRaises(ValidationError):
+            doc.validate()
+
     def test5_json(self):
         test = TestDoc(val=1, qval=2, uval=AsymmetricUncertainty(3,1),
                        hval=Histogram(np.arange(50)))

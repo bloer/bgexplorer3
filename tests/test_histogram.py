@@ -1,7 +1,8 @@
 import unittest
 import numpy as np
 from numpy.testing import assert_array_equal, assert_array_almost_equal
-from bgexplorer.models.histogram import Histogram
+from bgexplorer.models.histogram import (Histogram, check_bin_edges,
+                                         bins_match)
 from bgexplorer.models.asymmetric import AsymmetricUncertainty, sum_values
 from bgexplorer.models.common import units, DimensionalityError
 
@@ -239,6 +240,38 @@ class TestHistogram(unittest.TestCase):
             sum_values([hists[0], self.uncertain('kg', a, b, c)])
         with self.assertRaises(ValueError):
             sum_values([hists[0], self.uncertain('dru', a, b)])
+
+
+class TestBinEdges(unittest.TestCase):
+    def test_check_bin_edges(self):
+        check_bin_edges(np.array([0., 1., 2.]))
+        check_bin_edges(np.array([0., 1., 2.]) * units.keV)
+        for bad, text in [(np.array([0., 2., 1.]), 'increasing'),
+                          (np.array([0., 1., 1.]), 'increasing'),
+                          (np.array([0., np.nan, 2.]), 'finite'),
+                          (np.array([0., 1., np.inf]), 'finite'),
+                          (np.array([[0., 1.], [2., 3.]]), 'one-dimensional'),
+                          (np.array([1.]), 'two'),
+                          (np.array([]), 'two')]:
+            with self.assertRaisesRegex(ValueError, text):
+                check_bin_edges(bad * units.keV)
+            with self.assertRaisesRegex(ValueError, text):
+                check_bin_edges(bad)
+
+    def test_bins_match(self):
+        ref = np.linspace(0, 100, 11) * units.keV
+        self.assertTrue(bins_match(ref, ref))
+        self.assertTrue(bins_match(ref.to('MeV'), ref))
+        self.assertTrue(bins_match(ref.m * units.keV + 1e-7 * units.keV, ref))
+        # tolerance is relative to the smallest bin width, 10 keV
+        self.assertFalse(bins_match(ref + 1e-4 * units.keV, ref))
+        self.assertFalse(bins_match(ref + 1 * units.keV, ref))
+        self.assertFalse(bins_match(np.linspace(0, 200, 11) * units.keV, ref))
+        self.assertFalse(bins_match(np.linspace(0, 100, 12) * units.keV, ref))
+        self.assertFalse(bins_match(ref.m * units.kg, ref))
+        # no units at all
+        self.assertTrue(bins_match(ref.m, ref.m))
+        self.assertFalse(bins_match(ref.m, ref))
 
 
 if __name__ == '__main__':
