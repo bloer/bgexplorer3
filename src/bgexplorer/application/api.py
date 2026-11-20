@@ -15,6 +15,7 @@ from mongoengine.errors import ValidationError, FieldDoesNotExist
 from pint.errors import PintError
 from werkzeug.exceptions import HTTPException
 from ..models.settings import VersionSettings, HitEffDbConfig, get_settings
+from ..models.hiteff import require_no_spectra
 from ..versioning.record import VersionRecord, get_record
 from ..versioning import control as vc
 from ..versioning.control import ProtectedVersionError
@@ -38,7 +39,7 @@ SETTINGS_FIELDS = ('description', 'addsources', 'hiteffdbconfig')
 HITEFFDBCONFIG_FIELDS = ('rois', 'display_scalars', 'display_spectra',
                          'extra_columns')
 # fields that are never returned
-HIDDEN_FIELDS = ('_id', '_cls', 'cache_token', 'calc_token')
+HIDDEN_FIELDS = ('_id', '_cls', 'cache_token', 'calc_token', 'bin_edges')
 # the VersionSettings fields returned with a version
 SETTINGS_RESULT_FIELDS = ('addsources', 'hiteffdbconfig')
 
@@ -144,6 +145,36 @@ def get_version_record(version_tag: str) -> VersionRecord:
         raise APIError(f"Version '{version_tag}' not found", 404) from None
 
 
+def parse_display_spectra(settings, value) -> dict:
+    """ The new `display_spectra` for `settings`. The bins that spectra must
+    have are set by the first spectrum, so they can't be given, but are kept.
+    Removing a spectrum from the map resets its bins, which is only allowed
+    when no hit efficiency has that spectrum
+    """
+    prefix = 'hiteffdbconfig.display_spectra'
+    if isinstance(value, dict):
+        for key, entry in value.items():
+            if isinstance(entry, dict) and 'bin_edges' in entry:
+                raise APIError(
+                    "The bins of a spectrum can't be set",
+                    fields={f"{prefix}.{key}.bin_edges":
+                            "set by the first spectrum with this name"})
+    new = parse_field(HitEffDbConfig, 'display_spectra', value,
+                      'hiteffdbconfig.')
+    for key, cfg in settings.hiteffdbconfig.display_spectra.items():
+        if cfg.bin_edges is None:
+            continue
+        if new.get(key) is not None:
+            new[key].bin_edges = cfg.bin_edges
+            continue
+        try:
+            require_no_spectra(settings, key)
+        except ValidationError as e:
+            raise APIError(e.message, 409,
+                           fields={f"{prefix}.{key}": e.message}) from e
+    return new
+
+
 def update_settings(record: VersionRecord, body: dict) -> None:
     """ Apply the changes in `body` to the version and save """
     unknown = set(body) - set(SETTINGS_FIELDS)
@@ -172,9 +203,12 @@ def update_settings(record: VersionRecord, body: dict) -> None:
                            fields={f"hiteffdbconfig.{name}": "unknown field"
                                    for name in unknown})
         for name, value in config.items():
-            setattr(settings.hiteffdbconfig, name,
-                    parse_field(HitEffDbConfig, name, value,
-                                'hiteffdbconfig.'))
+            if name == 'display_spectra':
+                parsed = parse_display_spectra(settings, value)
+            else:
+                parsed = parse_field(HitEffDbConfig, name, value,
+                                     'hiteffdbconfig.')
+            setattr(settings.hiteffdbconfig, name, parsed)
     try:
         if settings is not None:
             settings.save()

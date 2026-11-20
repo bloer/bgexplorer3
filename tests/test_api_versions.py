@@ -193,6 +193,73 @@ class TestAPIVersions(unittest.TestCase):
         self.assertError(patch({'description': 'x'}, 'v1'), 403)
         self.assertIsNone(get_record('v1').description)
 
+    def add_spectrum(self, name='s1'):
+        import numpy as np
+        from bgexplorer.models.asymmetric import AsymmetricUncertainty
+        from bgexplorer.models.common import units
+        from bgexplorer.models.histogram import Histogram
+        hist = Histogram(AsymmetricUncertainty.fromcounts(np.ones(4))
+                         * units('dru/mBq'), np.arange(5.) * units.keV)
+        HitEfficiency.select_version('main').get().add_spectrum(name, hist)
+
+    def binning(self, name='s1'):
+        settings = get_settings('main', create=False)
+        return settings.hiteffdbconfig.display_spectra[name].bin_edges
+
+    def test_patch_spectrum_binning(self):
+        def patch(spectra):
+            return self.client.patch(f'{API}/versions/main', json={
+                'hiteffdbconfig': {'display_spectra': spectra}})
+        self.add_spectrum()
+        self.assertIsNotNone(self.binning())
+        # not in the JSON
+        data = self.client.get(f'{API}/versions/main').get_json()
+        self.assertNotIn('bin_edges', data['hiteffdbconfig']
+                         ['display_spectra']['s1'])
+        self.assertNotIn('bins', str(data['hiteffdbconfig']
+                                     ['display_spectra']))
+        # can't be set
+        self.assertError(patch({'s1': {'bin_edges': [0, 1]}}), 400,
+                         'hiteffdbconfig.display_spectra.s1.bin_edges')
+        # kept when the entry is edited, or sent back as it was returned
+        before = self.binning()
+        self.assertEqual(patch({'s1': {'display_name': 'S1'}}).status_code,
+                         200)
+        self.assertEqual(self.binning().m.tolist(), before.m.tolist())
+        response = patch(data['hiteffdbconfig']['display_spectra'])
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(self.binning().m.tolist(), before.m.tolist())
+        # not in the body: unchanged
+        response = self.client.patch(f'{API}/versions/main', json={
+            'hiteffdbconfig': {'extra_columns': []}})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.binning().m.tolist(), before.m.tolist())
+
+    def test_patch_drop_spectrum_entry(self):
+        def patch(spectra):
+            return self.client.patch(f'{API}/versions/main', json={
+                'hiteffdbconfig': {'display_spectra': spectra}})
+        self.add_spectrum()
+        # the binning can't be reset while hit efficiencies have the spectrum
+        error = self.assertError(patch({}), 409,
+                                 'hiteffdbconfig.display_spectra.s1')
+        self.assertIn('Delete those spectra', error['message'])
+        self.assertIsNotNone(self.binning())
+        HitEfficiency.select_version('main').get().remove_spectrum('s1')
+        # the entry is still there, with the binning
+        self.assertIsNotNone(self.binning())
+        response = patch({})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        settings = get_settings('main', create=False)
+        self.assertNotIn('s1', settings.hiteffdbconfig.display_spectra)
+        # the next spectrum of that name sets the binning again
+        self.add_spectrum()
+        self.assertIsNotNone(self.binning())
+        HitEfficiency.select_version('main').get().remove_spectrum('s1')
+        # an entry without binning can always be dropped
+        self.assertEqual(patch({'s2': {'display_name': 'x'}}).status_code, 200)
+        self.assertEqual(patch({}).status_code, 200)
+
     def test_delete(self):
         create_tag('v1', 'main')
         self.assertError(self.client.delete(f'{API}/versions/v1'), 403)
