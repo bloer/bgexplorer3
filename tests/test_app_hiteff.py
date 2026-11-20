@@ -176,7 +176,14 @@ class TestHitEffPages(AppTestCase):
         self.assertIn("Imported spectrum 'mine'",
                       self.html(self.client.get(response.location)))
         self.assertEqual(sorted(self.get().spectra_keys), ['mine', 's1'])
+        # other bins than the other spectra of that name are refused
         js = json.dumps(dict(value=[3, 3], bins=[0, 5, 10])).encode()
+        response = self.post_spectrum(
+            'import_spectrum', file=(io.BytesIO(js), 'x.json'), name='s1',
+            units='dru/mBq/keV', binsunit='keV', overwrite='on')
+        self.assertIn('same bins', self.html(response))
+        self.assertNotIn("Imported spectrum 's1'", self.html(response))
+        js = json.dumps(dict(value=[3] * 10, bins=list(range(11)))).encode()
         response = self.post_spectrum(
             'import_spectrum', file=(io.BytesIO(js), 'x.json'), name='s1',
             units='dru/mBq/keV', binsunit='keV', overwrite='on')
