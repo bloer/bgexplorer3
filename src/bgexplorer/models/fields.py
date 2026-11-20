@@ -372,6 +372,8 @@ class HistogramField(UncertainQuantityField):
         return value
 
     def to_mongo(self, value):
+        if value is None:
+            return None
         result = QuantityField.to_mongo(self, value.hist)
         try:
             result['bins'] = value.bin_edges.m

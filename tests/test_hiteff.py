@@ -433,6 +433,130 @@ class TestPartialLoad(unittest.TestCase):
                 self.assertEqual(sorted(h.scalars_keys), ['v1', 'v2'])
 
 
+class TestBinning(unittest.TestCase):
+    """ Spectra with the same name must have the same bins """
+    @classmethod
+    def setUpClass(cls):
+        connect_test_db()
+
+    @classmethod
+    def tearDownClass(cls):
+        disconnect()
+
+    def setUp(self):
+        HitEfficiency.drop_collection()
+        VersionRecord.drop_collection()
+        VersionSettings.drop_collection()
+
+    @staticmethod
+    def spectrum(edges):
+        n = len(edges) - 1
+        return Histogram(AsymmetricUncertainty.fromcounts(np.ones(n))
+                         * units('dru/mBq'), edges)
+
+    def hiteff(self, location='c1', **spectra):
+        return HitEfficiency(source='h', location=location, spectra={
+            k: None if v is None else self.spectrum(v)
+            for k, v in spectra.items()})
+
+    def configured(self, name='s', tag='main'):
+        return get_settings(tag).hiteffdbconfig.display_spectra[name]
+
+    def test_first_spectrum_sets_binning(self):
+        self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        edges = self.configured().bin_edges
+        np.testing.assert_allclose(edges.m, np.linspace(0, 100, 11))
+        self.assertEqual(edges.u, units.keV)
+        # it is stored, not just set on the object
+        VersionSettings.objects.get().reload()
+        self.assertEqual(len(self.configured().bin_edges), 11)
+
+    def test_same_binning_accepted(self):
+        self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        # in other units, and with rounding error
+        self.hiteff('c2', s=np.linspace(0, 0.1, 11) * units.MeV).save()
+        self.hiteff('c3', s=(np.linspace(0, 100, 11) + 1e-8) * units.keV).save()
+        self.assertEqual(HitEfficiency.objects.count(), 3)
+        # the first one still defines it
+        self.assertEqual(self.configured().bin_edges.u, units.keV)
+
+    def test_other_binning_rejected(self):
+        self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        for bad in (np.linspace(0, 200, 11) * units.keV,
+                    np.linspace(0, 100, 11) * units.MeV,
+                    np.linspace(0, 100, 12) * units.keV,
+                    np.linspace(0, 100, 11) * units.kg,
+                    np.linspace(1, 101, 11) * units.keV):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValidationError, "spectrum s"):
+                    self.hiteff('c2', s=bad).save()
+        self.assertEqual(HitEfficiency.objects.count(), 1)
+
+    def test_other_names_unaffected(self):
+        self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        self.hiteff('c2', t=np.linspace(0, 5, 6) * units.MeV).save()
+        self.assertEqual(self.configured('t').bin_edges.u, units.MeV)
+        self.assertEqual(len(self.configured('s').bin_edges), 11)
+
+    def test_none_spectrum_skipped(self):
+        self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        self.hiteff('c2', s=None).save()
+        self.assertEqual(len(self.configured().bin_edges), 11)
+        # and doesn't define the binning
+        self.hiteff('c3', t=None).save()
+        self.assertIsNone(self.configured('t').bin_edges)
+
+    def test_all_mismatches_reported(self):
+        self.hiteff(a=np.arange(5.) * units.keV,
+                    b=np.arange(8.) * units.keV,
+                    c=np.arange(3.) * units.keV).save()
+        with self.assertRaises(ValidationError) as cm:
+            self.hiteff('c2', a=np.arange(6.) * units.keV,
+                        b=np.arange(8.) * units.keV,
+                        c=np.arange(9.) * units.keV).save()
+        message = str(cm.exception)
+        self.assertIn('spectrum a', message)
+        self.assertNotIn('spectrum b', message)
+        self.assertIn('spectrum c', message)
+        self.assertIn('reset', message)
+        # the bins found and the configured ones
+        self.assertIn('5 bins', message)
+        self.assertIn('4 bins', message)
+
+    def test_malformed_bins(self):
+        self.hiteff(s=np.arange(5.) * units.keV).save()
+        with self.assertRaisesRegex(ValidationError, "increasing"):
+            self.hiteff('c2', s=np.array([0, 1, 3, 2, 4.]) * units.keV).save()
+        # also for one that would be the first
+        with self.assertRaises(ValidationError):
+            self.hiteff('c2', t=np.array([0, 1, 1, 2.]) * units.keV).save()
+        self.assertNotIn('t', get_settings('main').hiteffdbconfig
+                         .display_spectra)
+
+    def test_resave_and_edit(self):
+        h = self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        h.source = 'other'
+        h.save()
+        h.add_spectrum('s', self.spectrum(np.linspace(0, 100, 11) * units.keV),
+                       overwrite=True)
+        with self.assertRaises(ValidationError):
+            h.add_spectrum('s', self.spectrum(np.arange(4.) * units.keV),
+                           overwrite=True)
+
+    def test_existing_config_without_binning(self):
+        """ Settings that have a unit but no binning, as saved before """
+        config = get_settings('main')
+        unit = HitEfficiency().get_result_unit(
+            self.spectrum(np.arange(2.) * units.keV))
+        config.hiteffdbconfig.display_spectra = dict(
+            s=HitEffConfig(display_unit=unit))
+        config.save()
+        self.hiteff(s=np.arange(5.) * units.keV).save()
+        self.assertEqual(len(self.configured().bin_edges), 5)
+        with self.assertRaises(ValidationError):
+            self.hiteff('c2', s=np.arange(6.) * units.keV).save()
+
+
 class TestSpectrumParsing(unittest.TestCase):
     def test_columns(self):
         text = """# a comment

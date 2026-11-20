@@ -8,7 +8,8 @@ from bson import ObjectId
 from pint.errors import PintError
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
-from .fields import UnitField, QuantityField
+from .fields import UnitField, QuantityField, BinEdgesField
+from .histogram import as_quantity
 from ..versioning import control, hooks, record
 from ..versioning.verdoc import VersionedDocument
 from .ranges import parse_ranges
@@ -217,6 +218,9 @@ class HitEffConfig(EmbeddedDocument):
     description = StringField(default=None)
     link_spectrum = StringField(required=False, default=None)
     hide = BooleanField(required=False, default=False)
+    # for spectra: the bins that all spectra of this name must have, set from
+    # the first one saved and cleared only by `hiteff.reset_binning`
+    bin_edges = BinEdgesField(default=None)
 
     meta = {'allow_inheritance': True}
 
@@ -367,7 +371,8 @@ class HitEffDbConfig(EmbeddedDocument):
 
     def update_from(self, hiteff):
         """ Give every scalar, spectrum and ROI of `hiteff` a display unit,
-        taken from `hiteff` if it doesn't have one
+        taken from `hiteff` if it doesn't have one, and every spectrum the
+        bins of the one in `hiteff` if it doesn't have any
         """
         for type_ in ('scalars', 'spectra'):
             for k, v in getattr(hiteff, type_).items():
@@ -375,6 +380,9 @@ class HitEffDbConfig(EmbeddedDocument):
                 cf = register.setdefault(k, HitEffConfig())
                 if cf.display_unit is None:
                     cf.display_unit = hiteff.get_result_unit(v)
+                if (type_ == 'spectra' and v is not None
+                        and cf.bin_edges is None):
+                    cf.bin_edges = as_quantity(v.bin_edges).copy()
         for roi in self.rois:
             if (roi.display_unit is None
                     and hiteff.rois.get(roi.key) is not None):

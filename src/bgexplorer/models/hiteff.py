@@ -8,7 +8,8 @@ from .. import jobs
 from ..versioning.verdoc import DynamicVersionedDocument, check_writable
 from .fields import QuantityField, UncertainQuantityField, HistogramField
 from .common import units as unitreg
-from .histogram import Histogram
+from .histogram import (Histogram, check_bin_edges, bins_match,
+                        describe_bins)
 from . import settings
 from enum import Enum
 import datetime
@@ -138,7 +139,9 @@ class HitEfficiency(DynamicVersionedDocument):
         Raise ValidationError if not. Scalars or spectra that weren't loaded
         from the database are left alone.
         """
-        # make sure units match the desired output
+        # make sure units match the desired output, and bins the other
+        # spectra of the same name
+        binning = []
         for type_ in ('scalars', 'spectra'):
             if not self.is_loaded(type_):
                 continue
@@ -147,12 +150,21 @@ class HitEfficiency(DynamicVersionedDocument):
                 display_register = getattr(dbconfig, f'display_{type_}')
                 if val is None or key not in display_register:
                     continue
-                display_unit = display_register[key].display_unit
-                if display_unit is None:
-                    continue
-                if not self.check_result_unit(val, display_unit):
+                cfg = display_register[key]
+                if (cfg.display_unit is not None
+                        and not self.check_result_unit(val, cfg.display_unit)):
                     msg = f"{type_} {key} {val} has incorrect units"
                     raise ValidationError(msg)
+                if type_ == 'spectra' and cfg.bin_edges is not None:
+                    if problem := _binning_problem(key, val.bin_edges,
+                                                   cfg.bin_edges):
+                        binning.append(problem)
+        if binning:
+            raise ValidationError(
+                "Spectra must have the same bins as the other spectra with "
+                "their name:\n" + "\n".join(binning) + "\nTo replace them all, "
+                "delete the spectra and ask an administrator to reset the "
+                "binning in the settings")
 
         # evaluate all ROIs
         if not self.is_loaded('spectra'):
@@ -270,6 +282,20 @@ class HitEfficiency(DynamicVersionedDocument):
             log.error("Error calculating livetime for HitEfficiency %s "
                       "(%s, %s)", self.key, self.source, self.location)
         return None
+
+
+def _binning_problem(key: str, found, configured):
+    """ A line saying what is wrong with the `found` bin edges of spectrum
+    `key` given the `configured` ones, or None if they're acceptable
+    """
+    try:
+        check_bin_edges(found)
+    except ValueError as e:
+        return f"spectrum {key}: {e}"
+    if bins_match(found, configured):
+        return None
+    return (f"spectrum {key} has {describe_bins(found)} but the others have "
+            f"{describe_bins(configured)}")
 
 
 def _stored_units(version_tag: str, type_: str, key: str):

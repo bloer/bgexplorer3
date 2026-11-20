@@ -6,9 +6,21 @@ from .common import units
 from .ranges import merge_ranges
 
 
-def _as_quantity(edges):
+def as_quantity(edges):
+    """ `edges` as a Quantity, dimensionless if it has no unit """
     return edges if hasattr(edges, 'to') else units.Quantity(
         np.asarray(edges, dtype=float))
+
+
+def describe_bins(edges) -> str:
+    """ Short text for the bins with these edges, like
+    '1500 bins from 0 to 3000 keV'
+    """
+    edges = as_quantity(edges)
+    unit = '' if edges.dimensionless else f' {edges.u:~}'
+    values = np.asarray(edges.m, dtype=float)
+    return (f"{len(values) - 1} bins from {values[0]:g} to {values[-1]:g}"
+            f"{unit}")
 
 
 def check_bin_edges(edges) -> None:
@@ -34,7 +46,7 @@ def bins_match(a, b) -> bool:
     number of them, with compatible units, each within 1e-6 of the smallest
     bin width of `b` of its counterpart
     """
-    a, b = _as_quantity(a), _as_quantity(b)
+    a, b = as_quantity(a), as_quantity(b)
     if a.shape != b.shape:
         return False
     try:
