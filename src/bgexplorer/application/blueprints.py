@@ -915,6 +915,11 @@ class CollectionViews(flask.Blueprint):
         def done(message=None, error=None):
             if error is not None:
                 message = error.args[0] if error.args else str(error)
+                if isinstance(error, me.ValidationError) and error.errors:
+                    # the message alone doesn't say what was wrong
+                    message = '; '.join(
+                        f"{name}: {text}" if name != 'settings' else text
+                        for name, text in validation_fields(error).items())
                 flask.flash(str(message), 'danger')
             else:
                 flask.flash(message, 'success')

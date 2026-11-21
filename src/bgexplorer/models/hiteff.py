@@ -8,7 +8,8 @@ from .. import jobs
 from ..versioning.verdoc import DynamicVersionedDocument, check_writable
 from .fields import QuantityField, UncertainQuantityField, HistogramField
 from .common import units as unitreg
-from .histogram import Histogram
+from .histogram import (Histogram, check_bin_edges, bins_match,
+                        describe_bins)
 from . import settings
 from enum import Enum
 import datetime
@@ -138,7 +139,9 @@ class HitEfficiency(DynamicVersionedDocument):
         Raise ValidationError if not. Scalars or spectra that weren't loaded
         from the database are left alone.
         """
-        # make sure units match the desired output
+        # make sure units match the desired output, and bins the other
+        # spectra of the same name
+        binning = []
         for type_ in ('scalars', 'spectra'):
             if not self.is_loaded(type_):
                 continue
@@ -147,12 +150,21 @@ class HitEfficiency(DynamicVersionedDocument):
                 display_register = getattr(dbconfig, f'display_{type_}')
                 if val is None or key not in display_register:
                     continue
-                display_unit = display_register[key].display_unit
-                if display_unit is None:
-                    continue
-                if not self.check_result_unit(val, display_unit):
+                cfg = display_register[key]
+                if (cfg.display_unit is not None
+                        and not self.check_result_unit(val, cfg.display_unit)):
                     msg = f"{type_} {key} {val} has incorrect units"
                     raise ValidationError(msg)
+                if type_ == 'spectra' and cfg.bin_edges is not None:
+                    if problem := _binning_problem(key, val.bin_edges,
+                                                   cfg.bin_edges):
+                        binning.append(problem)
+        if binning:
+            raise ValidationError(
+                "Spectra must have the same bins as the other spectra with "
+                "their name:\n" + "\n".join(binning) + "\nTo replace them all, "
+                "delete the spectra and ask an administrator to reset the "
+                "binning in the settings")
 
         # evaluate all ROIs
         if not self.is_loaded('spectra'):
@@ -272,6 +284,53 @@ class HitEfficiency(DynamicVersionedDocument):
         return None
 
 
+def _binning_problem(key: str, found, configured):
+    """ A line saying what is wrong with the `found` bin edges of spectrum
+    `key` given the `configured` ones, or None if they're acceptable
+    """
+    try:
+        check_bin_edges(found)
+    except ValueError as e:
+        return f"spectrum {key}: {e}"
+    if bins_match(found, configured):
+        return None
+    return (f"spectrum {key} has {describe_bins(found)} but the others have "
+            f"{describe_bins(configured)}")
+
+
+def require_no_spectra(version_settings, key: str) -> None:
+    """ Raise ValidationError if any HitEfficiency in a version that uses
+    `version_settings` has a spectrum named `key`
+    """
+    counts = {}
+    for tag in version_settings.version_tags:
+        n = HitEfficiency.select_version(tag)(spectra_keys=key).count()
+        if n:
+            counts[tag] = n
+    if counts:
+        found = ', '.join(f"{n} in {tag}" for tag, n in counts.items())
+        raise ValidationError(
+            f"Can't change the binning of spectrum {key} while hit "
+            f"efficiencies have it ({found}). Delete those spectra first")
+
+
+def reset_binning(version_settings, key: str) -> None:
+    """ Forget the bins that spectrum `key` must have, so the next spectrum of
+    that name defines them. Raises ValidationError if spectra of that name
+    exist. Nothing else in the settings changes
+    """
+    check_writable(version_settings.active_version)
+    require_no_spectra(version_settings, key)
+    config = version_settings.hiteffdbconfig
+    cfg = config.display_spectra.get(key)
+    if cfg is None or cfg.bin_edges is None:
+        return
+    cfg.bin_edges = None
+    # update rather than save, which would check the hit efficiencies and ROIs
+    version_settings.update(set__hiteffdbconfig=config)
+    settings.touch(version_settings.active_version)
+
+
 def _stored_units(version_tag: str, type_: str, key: str):
     """ (unit string, a value with that unit, norm) for each unique
     combination of unit and norm type of `key` in the version's
@@ -315,17 +374,21 @@ def _check_display_unit(version_tag: str, type_: str, key: str, cfg) -> None:
                 field_name=f"hiteffdbconfig.display_{type_}")
 
 
-def _check_rois(version_tag: str, rois) -> None:
+def _check_rois(version_tag: str, rois) -> dict:
     """ Raise ValidationError if an ROI of `rois` can't be evaluated for, or
     has a display unit that conflicts with, a HitEfficiency. If it has no
     display unit, it is set from the HitEfficiencies. Each HitEfficiency is
-    loaded once, for all of the ROIs.
+    loaded once, for all of the ROIs. Returns the results for `store_rois`, as
+    `(revision, {roi key: result})` by the original_id of each HitEfficiency
+    that has a spectrum an ROI uses.
     """
+    results = {}
     if not rois:
-        return
+        return results
     spectra = [roi.link_spectrum for roi in rois]
     for he in HitEfficiency.select_version(version_tag)(
             spectra_keys__in=spectra).no_cache():
+        values = {}
         for roi in rois:
             try:
                 result = roi.evaluate(he, store=False)
@@ -334,18 +397,37 @@ def _check_rois(version_tag: str, rois) -> None:
                     str(e), field_name="hiteffdbconfig.rois") from e
             if result is not None and roi.display_unit is None:
                 roi.display_unit = he.get_result_unit(result)
+            values[roi.key] = result
+        results[he.original_id] = (he.revision, values)
+    return results
+
+
+def _roi_fingerprint(rois) -> list:
+    """ What the results of the ROIs depend on """
+    return [(roi.key, roi.link_spectrum, roi._definition()) for roi in rois]
 
 
 def check_settings(version_settings) -> None:
     """ Every scalar, spectrum and ROI needs a display unit that agrees with
-    all of the HitEfficiencies in the version
+    all of the HitEfficiencies in the version. The ROIs are evaluated for all
+    of the HitEfficiencies, and the results are kept on `version_settings` for
+    when it is saved, so that they are only evaluated once.
     """
     config = version_settings.hiteffdbconfig
+    for roi in config.rois:
+        try:
+            roi.clean()
+        except ValidationError:
+            # can't be evaluated. Validating the field that is wrong comes
+            # next, and reports it with the key of the field
+            return
+    results = {}
     for tag in version_settings.version_tags:
         for type_ in ('scalars', 'spectra'):
             for key, cfg in getattr(config, f'display_{type_}').items():
                 _check_display_unit(tag, type_, key, cfg)
-        _check_rois(tag, config.rois)
+        results[tag] = _check_rois(tag, config.rois)
+    version_settings._roi_results = (_roi_fingerprint(config.rois), results)
 
 
 def _without_ids(rois: dict) -> dict:
@@ -355,25 +437,43 @@ def _without_ids(rois: dict) -> dict:
             for key, value in rois.items()}
 
 
-def store_rois(version_tag: str, rois) -> int:
-    """ Evaluate all of `rois` for the HitEfficiencies of `version_tag` and
-    store the results of those that changed, returning how many that was.
-    Every ROI is evaluated, whatever its key, so one that was redefined
-    without being renamed is updated too. Each HitEfficiency is loaded once and
-    the results are written in a single bulk operation, after the
-    HitEfficiencies shared with other versions were split off.
+def store_rois(version_tag: str, rois, results: dict = None) -> int:
+    """ Store the results of all of `rois` for the HitEfficiencies of
+    `version_tag` that changed, returning how many that was. Every ROI is
+    evaluated, whatever its key, so one that was redefined without being
+    renamed is updated too. The results are written in a single bulk
+    operation, after the HitEfficiencies shared with other versions were
+    split off.
+
+    `results` is what `_check_rois` returned for `version_tag`. Without it,
+    each HitEfficiency is loaded and evaluated. With it, they are loaded
+    without their spectra, and are only evaluated again if they changed since
+    or have spectra that the ROIs use but weren't evaluated.
     """
     check_writable(version_tag)
     field = HitEfficiency._fields['rois']
+    spectra = {roi.link_spectrum for roi in rois}
     changes = []
     shared = []
     queryset = HitEfficiency.select_version(version_tag)
+    if results is not None:
+        queryset = queryset.exclude('spectra')
     total = queryset.count()
     for done, he in enumerate(queryset.no_cache(), 1):
         jobs.progress(done, total, stage='hit efficiencies')
+        known = None if results is None else results.get(he.original_id)
+        if known is not None and known[0] == he.revision:
+            evaluated = known[1]
+        elif (results is not None and known is None
+                and spectra.isdisjoint(he.spectra_keys or ())):
+            evaluated = {roi.key: None for roi in rois}
+        else:
+            full = he if results is None else HitEfficiency.select_version(
+                version_tag).get(id=he.id)
+            evaluated = {roi.key: roi.evaluate(full, store=False)
+                         for roi in rois}
         stored = field.to_mongo(he.rois)
-        values = field.to_mongo({roi.key: roi.evaluate(he, store=False)
-                                 for roi in rois})
+        values = field.to_mongo(evaluated)
         if _without_ids(values) == _without_ids(stored):
             continue
         changes.append((he.original_id, values))
@@ -394,9 +494,15 @@ def store_rois(version_tag: str, rois) -> int:
 
 
 def update_rois(sender, document, **kwargs) -> None:
-    """ Update the ROIs of all HitEfficiencies when the settings are saved """
+    """ Update the ROIs of all HitEfficiencies when the settings are saved,
+    using the results of `check_settings` if they are still valid
+    """
+    rois = document.hiteffdbconfig.rois
+    fingerprint, results = document.__dict__.pop('_roi_results', (None, {}))
+    if fingerprint != _roi_fingerprint(rois):
+        results = {}
     for tag in document.version_tags:
-        store_rois(tag, document.hiteffdbconfig.rois)
+        store_rois(tag, rois, results.get(tag))
 
 
 settings.VersionSettings.clean_hooks.append(check_settings)

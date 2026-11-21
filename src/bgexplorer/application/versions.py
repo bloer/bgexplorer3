@@ -11,6 +11,7 @@ from ..models.settings import (get_settings, VersionSettings,
 from ..versioning.record import get_record
 from ..versioning.diff import diff_versions, compare_document
 from ..models.hiteff import HitEfficiency
+from ..models.histogram import describe_bins
 from .api import (APIError, validate_new_version, validation_fields,
                   prepare_import, check_deletable, job_error)
 from .forms import update_object, LISTFIELDS_KEY
@@ -151,6 +152,21 @@ def create_versions_blueprint() -> flask.Blueprint:
             flask.flash(f"Cleared the lock on '{tag}'", 'success')
         return flask.redirect(flask.url_for('overview'))
 
+    @bp.post('/<active_version>/reset-binning')
+    def reset_binning():
+        """ Make the next spectrum with the form's `key` set the bins that
+        spectra of that name must have, if there are no such spectra """
+        if (response := require(Role.admin)) is not None:
+            return response
+        tag = flask.g.active_version
+        check_writable(tag)
+        key = flask.request.form.get('key')
+        if not key:
+            flask.abort(400, "Choose a spectrum")
+        return appjobs.submit_and_redirect(
+            'reset_binning', {'version': tag, 'key': key}, tag,
+            flask.url_for('edit_settings', active_version=tag))
+
     return bp
 
 
@@ -198,8 +214,11 @@ def edit_settings():
                 list(getattr(config, f'display_{type_}'))
                 + sorted(hiteffs.distinct(f'{type_}_keys'))))
             for type_ in ('scalars', 'spectra')}
+    binnings = {key: describe_bins(cfg.bin_edges)
+                for key, cfg in config.display_spectra.items()
+                if cfg.bin_edges is not None}
     return flask.render_template('edit_settings.html', settings=settings,
-                                 version_record=record,
+                                 version_record=record, binnings=binnings,
                                  keys=keys, errors=errors), \
         400 if errors else 200
 

@@ -241,11 +241,17 @@ def update_object(obj, form, prefix=None, index=0, errors=None, path=None):
                 continue
             subfield = field.field
             value = {}
+            current = getattr(obj, fieldname, None) or {}
             for key in keys:
                 name = f"{fullfieldname}[{key}]"
                 if isinstance(subfield, me.EmbeddedDocumentField):
+                    # edit an existing entry, so what the form has no field
+                    # for is kept
+                    entry = current.get(key)
+                    if not isinstance(entry, subfield.document_type):
+                        entry = subfield.document_type()
                     value[key] = update_object(
-                        subfield.document_type(), form, prefix=name,
+                        entry, form, prefix=name,
                         index=index, errors=errors,
                         path=path + [fieldname, key])
                 else:

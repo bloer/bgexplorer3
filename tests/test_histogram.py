@@ -1,8 +1,8 @@
 import unittest
-from unittest import mock
 import numpy as np
 from numpy.testing import assert_array_equal, assert_array_almost_equal
-from bgexplorer.models.histogram import Histogram
+from bgexplorer.models.histogram import (Histogram, check_bin_edges,
+                                         bins_match)
 from bgexplorer.models.asymmetric import AsymmetricUncertainty, sum_values
 from bgexplorer.models.common import units, DimensionalityError
 
@@ -73,9 +73,33 @@ class TestHistogram(unittest.TestCase):
         self.assertAlmostEqual(h.average(), 2)
         self.assertAlmostEqual(h.average(20, 30), 2)
 
-    def test6b_integrate_plain_matches_generic(self):
-        """ The fast path for Quantities of AsymmetricUncertainty gives what
-        the generic code does, in values and units
+    @staticmethod
+    def reference(h, a, b, binwidth, average):
+        """ The weights bin by bin, the way they were once calculated: all of
+        the bins in [a, b], and fractions of the first and last
+        """
+        edges = h.bin_edges.to('keV').m
+        a = max(a.to('keV').m, edges[0])
+        b = min(b.to('keV').m, edges[-1])
+        first = np.searchsorted(edges, a, "right") - 1
+        last = np.searchsorted(edges, b, "left") - 1
+        weights = np.zeros(len(edges) - 1)
+        weights[first:last] = 1
+        if first == last:
+            weights[first] = (b - a) / (edges[first+1] - edges[first])
+        else:
+            weights[first] = ((edges[first+1] - a)
+                              / (edges[first+1] - edges[first]))
+            weights[last] = (b - edges[last]) / (edges[last+1] - edges[last])
+        if binwidth:
+            weights = weights * np.diff(edges)
+        if average:
+            weights = weights / (b - a)
+        return weights
+
+    def test6b_weights_match_reference(self):
+        """ The weights, values and units are those of a bin by bin
+        calculation, for random bins and ranges
         """
         rng = np.random.default_rng(3)
         checked = 0
@@ -93,29 +117,86 @@ class TestHistogram(unittest.TestCase):
                     a = edges[int(rng.integers(0, n))]
                 if i == 1:
                     b = edges[int(rng.integers(1, n + 1))]
-                if not a < b:
-                    continue
                 scale, unit = ((1, units.keV) if i % 2 else (1e-3, units.MeV))
                 a, b = a * scale * unit, b * scale * unit
+                if not (a.to('keV').m < b.to('keV').m
+                        and a.to('keV').m < edges[-1]
+                        and b.to('keV').m > edges[0]):
+                    continue
                 for binwidth in (True, False):
-                    for method in ('integrate', 'average'):
-                        try:
-                            fast = getattr(h, method)(a, b, binwidth)
-                        except IndexError:
-                            # a range with nothing in the bins is an error
-                            # of the generic code too
-                            continue
-                        with mock.patch.object(
-                                Histogram, '_integrate_plain',
-                                return_value=None):
-                            generic = getattr(h, method)(a, b, binwidth)
-                        self.assertEqual(fast.u, generic.u)
+                    for method, average in (('integrate', False),
+                                            ('average', True)):
+                        weights = h.roi_weights(a, b, binwidth, average)
                         assert_array_almost_equal(
-                            [fast.m.mode, fast.m.s0, fast.m.s1],
-                            [generic.m.mode, generic.m.s0, generic.m.s1],
-                            decimal=9)
+                            weights,
+                            self.reference(h, a, b, binwidth, average))
+                        if not weights.any():
+                            continue
+                        result = getattr(h, method)(a, b, binwidth)
+                        expected = h.hist.m.integrate(weights)
+                        power = int(binwidth) - int(average)
+                        self.assertEqual(
+                            result.u, units('dru/mBq').u * units.keV ** power)
+                        assert_array_almost_equal(
+                            [result.m.mode, result.m.s0, result.m.s1],
+                            [expected.mode, expected.s0, expected.s1])
                         checked += 1
-        self.assertGreater(checked, 1000)
+        self.assertGreater(checked, 500)
+
+    def test6c_no_bins_included(self):
+        with self.assertRaises(ValueError):
+            self.h.integrate(50, 60)
+        with self.assertRaises(ValueError):
+            self.h.integrate(15, 25, exclude=[(0, 100)])
+        self.assertFalse(self.h.roi_weights(50, 60).any())
+
+    def test6d_exclude(self):
+        h = self.h
+        # bins of 10 with contents 1, 2, 3
+        self.assertAlmostEqual(h.integrate(exclude=[(20, 30)]), 40)
+        self.assertAlmostEqual(h.integrate(15, 35, exclude=[(20, 30)]), 5 + 15)
+        # a part of a bin
+        self.assertAlmostEqual(h.integrate(exclude=[(12, 15)]), 60 - 3)
+        # inside one bin, and a range that spans bin edges
+        self.assertAlmostEqual(h.integrate(exclude=[(22, 24), (26, 34)]),
+                               60 - 4 - 2 * 4 - 3 * 4)
+        # the sum doesn't depend on the order or overlaps of the ranges
+        self.assertAlmostEqual(
+            h.integrate(exclude=[(26, 34), (12, 15), (22, 28), (14, 16)]),
+            h.integrate(exclude=[(12, 16), (22, 34)]))
+        # parts outside the range are ignored
+        self.assertAlmostEqual(
+            h.integrate(15, 25, exclude=[(0, 12), (24, 99)]),
+            15 - 2 * 1)
+        # the average is over the included width only
+        self.assertAlmostEqual(h.average(exclude=[(20, 30)]), 40 / 20)
+        self.assertAlmostEqual(h.average(10, 40, exclude=[(10, 20), (30, 40)]),
+                               2)
+        # without bin widths, the sum of the included fractions
+        self.assertAlmostEqual(h.integrate(binwidth=False,
+                                           exclude=[(15, 20), (25, 30)]),
+                               0.5 + 1 + 3)
+        self.assertAlmostEqual(h.average(binwidths=False, exclude=[(20, 30)]),
+                               4 / 20)
+
+    def test6e_exclude_with_units(self):
+        """ Excluded ranges are converted to the units of the bins """
+        n = 20
+        edges = np.linspace(0, 100, n + 1) * units.keV
+        rng = np.random.default_rng(5)
+        counts = rng.poisson(4, n).astype(float)
+        h = Histogram(AsymmetricUncertainty.fromcounts(counts) * units.dru,
+                      edges)
+        excluded = [(12.5 * units.keV, 31 * units.keV),
+                    (0.05 * units.MeV, 0.0625 * units.MeV)]
+        result = h.integrate(5 * units.keV, 90 * units.keV, exclude=excluded)
+        whole = h.integrate(5 * units.keV, 90 * units.keV)
+        parts = [h.integrate(lo, hi) for lo, hi in excluded]
+        self.assertAlmostEqual(result.m.mode,
+                               whole.m.mode - sum(p.m.mode for p in parts))
+        self.assertEqual(result.u, whole.u)
+        with self.assertRaises(DimensionalityError):
+            h.integrate(exclude=[(1 * units.kg, 2 * units.kg)])
 
     def test7_default_bins(self):
         h = Histogram(np.array([1., 2.]))
@@ -159,6 +240,38 @@ class TestHistogram(unittest.TestCase):
             sum_values([hists[0], self.uncertain('kg', a, b, c)])
         with self.assertRaises(ValueError):
             sum_values([hists[0], self.uncertain('dru', a, b)])
+
+
+class TestBinEdges(unittest.TestCase):
+    def test_check_bin_edges(self):
+        check_bin_edges(np.array([0., 1., 2.]))
+        check_bin_edges(np.array([0., 1., 2.]) * units.keV)
+        for bad, text in [(np.array([0., 2., 1.]), 'increasing'),
+                          (np.array([0., 1., 1.]), 'increasing'),
+                          (np.array([0., np.nan, 2.]), 'finite'),
+                          (np.array([0., 1., np.inf]), 'finite'),
+                          (np.array([[0., 1.], [2., 3.]]), 'one-dimensional'),
+                          (np.array([1.]), 'two'),
+                          (np.array([]), 'two')]:
+            with self.assertRaisesRegex(ValueError, text):
+                check_bin_edges(bad * units.keV)
+            with self.assertRaisesRegex(ValueError, text):
+                check_bin_edges(bad)
+
+    def test_bins_match(self):
+        ref = np.linspace(0, 100, 11) * units.keV
+        self.assertTrue(bins_match(ref, ref))
+        self.assertTrue(bins_match(ref.to('MeV'), ref))
+        self.assertTrue(bins_match(ref.m * units.keV + 1e-7 * units.keV, ref))
+        # tolerance is relative to the smallest bin width, 10 keV
+        self.assertFalse(bins_match(ref + 1e-4 * units.keV, ref))
+        self.assertFalse(bins_match(ref + 1 * units.keV, ref))
+        self.assertFalse(bins_match(np.linspace(0, 200, 11) * units.keV, ref))
+        self.assertFalse(bins_match(np.linspace(0, 100, 12) * units.keV, ref))
+        self.assertFalse(bins_match(ref.m * units.kg, ref))
+        # no units at all
+        self.assertTrue(bins_match(ref.m, ref.m))
+        self.assertFalse(bins_match(ref.m, ref))
 
 
 if __name__ == '__main__':

@@ -1,6 +1,62 @@
 import operator
 import numpy as np
+from pint.errors import PintError
 from .asymmetric import AsymmetricUncertainty
+from .common import units
+from .ranges import merge_ranges
+
+
+def as_quantity(edges):
+    """ `edges` as a Quantity, dimensionless if it has no unit """
+    return edges if hasattr(edges, 'to') else units.Quantity(
+        np.asarray(edges, dtype=float))
+
+
+def describe_bins(edges) -> str:
+    """ Short text for the bins with these edges, like
+    '1500 bins from 0 to 3000 keV'
+    """
+    edges = as_quantity(edges)
+    unit = '' if edges.dimensionless else f' {edges.u:~}'
+    values = np.asarray(edges.m, dtype=float)
+    return (f"{len(values) - 1} bins from {values[0]:g} to {values[-1]:g}"
+            f"{unit}")
+
+
+def check_bin_edges(edges) -> None:
+    """ Raise ValueError if `edges`, an array or Quantity, can't be the edges
+    of histogram bins: they must be one-dimensional, at least two, finite and
+    strictly increasing
+    """
+    values = np.asarray(getattr(edges, 'm', edges), dtype=float)
+    if values.ndim != 1:
+        raise ValueError("bin edges must be one-dimensional")
+    if len(values) < 2:
+        raise ValueError("there must be at least two bin edges")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("bin edges must be finite")
+    steps = np.diff(values)
+    if np.any(steps <= 0):
+        raise ValueError("bin edges are not increasing at index "
+                         f"{int(np.argmax(steps <= 0)) + 1}")
+
+
+def bins_match(a, b) -> bool:
+    """ Whether the bin edges `a` are those of the reference `b`: the same
+    number of them, with compatible units, each within 1e-6 of the smallest
+    bin width of `b` of its counterpart
+    """
+    a, b = as_quantity(a), as_quantity(b)
+    if a.shape != b.shape:
+        return False
+    try:
+        converted = a.to(b.u).m
+    except PintError:
+        return False
+    reference = np.asarray(b.m, dtype=float)
+    steps = np.diff(reference)
+    tolerance = 1e-6 * steps.min() if len(steps) and steps.min() > 0 else 0
+    return bool(np.all(np.abs(converted - reference) <= tolerance))
 
 
 class Histogram(object):
@@ -116,103 +172,122 @@ class Histogram(object):
             val += slope * (x-self.bin_edges[bin])
         return val
 
-    def _bound(self, a, b, bins=None):
-        """coerce a and b to the edges of bins"""
-        if bins is None:
-            bins = self.bin_edges
-        if a is None or a < bins[0]:
-            a = bins[0]
-        if b is None or b >= bins[-1]:
-            b = bins[-1]
-        return (a, b)
+    def _edges(self):
+        """ The bin edges as a plain float array, and their unit or None """
+        edges = self.bin_edges
+        unit = getattr(edges, 'u', None)
+        return np.asarray(edges.m if unit is not None else edges,
+                          dtype=float), unit
 
-    def _integrate_plain(self, a, b, binwidth):
-        """ `integrate` for the usual case, a Quantity of
-        AsymmetricUncertainty in bins that are a Quantity of an array, with
-        `a` and `b` already bounded Quantities. The weights are plain arrays in
-        the units of the edges and only the bins that overlap [a, b] are
-        summed, which is much faster than going through the units of every
-        bin. None if that doesn't apply.
+    @staticmethod
+    def _add_overlaps(edges, out, low, high, sign):
+        """ Add `sign` times the length of the overlap of [low, high] with
+        each bin to `out`, touching only the bins that overlap it
         """
-        try:
-            values, edges, unit = self.hist.m, self.bin_edges.m, self.bin_edges.u
-            low, high = a.to(unit).m, b.to(unit).m
-            hist_unit = self.hist.u
-        except AttributeError:
-            return None
-        if (not isinstance(values, AsymmetricUncertainty)
-                or not isinstance(edges, np.ndarray) or edges.ndim != 1
-                or np.ndim(values.mode) != 1):
-            return None
-        if not low < high:
-            return None
-        weights = np.zeros(len(values.mode))
-        first = int(np.searchsorted(edges, low, "right")) - 1
-        last = int(np.searchsorted(edges, high, "left")) - 1
-        weights[first:last] = 1
-        if first == last:
-            weights[first] = (high - low) / (edges[first+1] - edges[first])
-        else:
-            weights[first] = ((edges[first+1] - low)
-                              / (edges[first+1] - edges[first]))
-            weights[last] = ((high - edges[last])
-                             / (edges[last+1] - edges[last]))
-        if binwidth:
-            weights = weights * (edges[1:] - edges[:-1])
-        # the bins outside the range have no weight
-        support = np.flatnonzero(weights)
-        if len(support):
-            sl = slice(support[0], support[-1] + 1)
-            values, weights = values[sl], weights[sl]
-        result = values.integrate(weights)
-        return type(self.hist)(result, hist_unit * unit if binwidth
-                               else hist_unit)
+        first = max(int(np.searchsorted(edges, low, 'right')) - 1, 0)
+        last = min(int(np.searchsorted(edges, high, 'left')), len(edges) - 1)
+        if last <= first:
+            return
+        seg = edges[first:last + 1]
+        out[first:last] += sign * np.maximum(
+            np.minimum(seg[1:], high) - np.maximum(seg[:-1], low), 0)
 
-    def integrate(self, a=None, b=None, binwidth=True):
+    def roi_weights(self, a=None, b=None, binwidth: bool = True,
+                    average: bool = False, exclude=()) -> np.ndarray:
+        """ The weights of the bins in the sum that integrates (or averages)
+        the histogram from `a` to `b`, leaving out the `exclude` ranges. The
+        result is a plain array with the length of the histogram, in the
+        unit of the bin edges, to use with `apply_weights`.
+
+        The weight of a bin is the length of it that is included, which is
+        the fraction of the bin that is included times its width. If
+        `binwidth` is False it is just the fraction. If `average`, the
+        weights are then divided by the total included length, so they sum
+        to 1 (or the total of the fractions, if not `binwidth`).
+
+        Args:
+            a, b: the limits, with the same dimensionality as the bin edges if
+                  they have units. None uses the lowest or highest edge
+            exclude: (low, high) pairs, in any order, which can overlap. The
+                     parts outside [a, b] are ignored
+        """
+        edges, unit = self._edges()
+
+        def magnitude(x):
+            if hasattr(x, 'to'):
+                return float(x.to('dimensionless' if unit is None else unit).m)
+            return float(x)
+
+        low = edges[0] if a is None else max(magnitude(a), edges[0])
+        high = edges[-1] if b is None else min(magnitude(b), edges[-1])
+        lengths = np.zeros(len(edges) - 1)
+        if low < high:
+            self._add_overlaps(edges, lengths, low, high, 1)
+            for lo, hi in merge_ranges([(magnitude(x), magnitude(y))
+                                        for x, y in exclude]):
+                lo, hi = max(lo, low), min(hi, high)
+                if lo < hi:
+                    self._add_overlaps(edges, lengths, lo, hi, -1)
+            np.maximum(lengths, 0, out=lengths)
+        weights = lengths
+        if not binwidth:
+            widths = np.diff(edges)
+            weights = np.divide(lengths, widths, out=np.zeros_like(lengths),
+                                where=widths > 0)
+        if average and (total := lengths.sum()) > 0:
+            weights = weights / total
+        return weights
+
+    def apply_weights(self, weights, binwidth: bool = True,
+                      average: bool = False):
+        """ The sum of the histogram's values times `weights`, from
+        `roi_weights` called with the same `binwidth` and `average`. The
+        result has the unit of the values times that of the bin edges if
+        `binwidth` and not `average`, divided by it if `average` and not
+        `binwidth`, and the unit of the values otherwise. Raises ValueError if
+        no bin has a weight. Only the bins from the first to the last with a
+        weight are used.
+        """
+        support = np.flatnonzero(weights)
+        if not len(support):
+            raise ValueError("No bins are included")
+        span = slice(support[0], support[-1] + 1)
+        values = self.hist
+        unit = getattr(values, 'u', None)
+        if unit is not None:
+            values = values.m
+        # AsymmetricUncertainty.integrate handles the zeros within the span,
+        # such as in the weights of excluded ranges, correctly
+        result = values[span].dot(weights[span])
+        edge_unit = getattr(self.bin_edges, 'u', None)
+        power = int(binwidth) - int(average)
+        if edge_unit is not None and power:
+            unit = edge_unit ** power if unit is None else unit * edge_unit ** power
+        if unit is None:
+            return result
+        return units.Quantity(result, unit)
+
+    def integrate(self, a=None, b=None, binwidth=True, exclude=()):
         """Integrate the histogram from a to b. If a and b do not correspond to
         exact bin edges, the value in the bin will be interpolated.
 
         Args:
             a (float): low range. If bin_edges has units, this must have the
-                       same dimensionality. IF bin_edges is None, this will
-                       be treated as a bin index. if None, use low bound
+                       same dimensionality. if None, use low bound
             b (float): upper edge. if None, use upper bound
             binwidth (bool): if True (default), multiply each bin by the bin
                              width. If False, just add bin values
+            exclude: (low, high) pairs to leave out of the range
         """
-        bins = self.bin_edges
-        spec = self.hist
-        a, b = self._bound(a, b)
-        if (result := self._integrate_plain(a, b, binwidth)) is not None:
-            return result
-        weights = np.zeros_like(spec)
-        first = np.searchsorted(bins, a, "right") - 1
-        last = np.searchsorted(bins, b, "left") - 1
-        weights[first:last] = 1
-        # take fractions of the first and last bins
-        if first == last:
-            weights[first] = (b-a) / (bins[first+1] - bins[first])
-        else:
-            weights[first] = (bins[first+1]-a)/(bins[first+1]-bins[first])
-            weights[last] = (b-bins[last]) / (bins[last+1]-bins[last])
+        return self.apply_weights(
+            self.roi_weights(a, b, binwidth, False, exclude), binwidth, False)
 
-        if binwidth:
-            weights = weights * self.binwidths
-
-        result = self.hist.dot(weights)
-        # np.dot on a Quantity of AsymmetricUncertainty loses units
-        # so see if we need to find them again
-        if hasattr(self.hist, 'u') and not hasattr(result, 'u'):
-            result = result * (self.hist.u * getattr(self.bin_edges, 'u', 1))
-        return result
-
-    def average(self, a=None, b=None, binwidths=True):
+    def average(self, a=None, b=None, binwidths=True, exclude=()):
         """Calculate the average from a to b. See `integrate` for description
         of the arguments
         """
-        a, b = self._bound(a, b)
-        result = self.integrate(a, b, binwidths) / (b-a)
-        return result
+        return self.apply_weights(
+            self.roi_weights(a, b, binwidths, True, exclude), binwidths, True)
 
     @classmethod
     def sum_all(cls, hists) -> 'Histogram':

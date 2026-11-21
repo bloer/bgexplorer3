@@ -14,6 +14,7 @@ from werkzeug.datastructures import MultiDict
 from .. import jobs
 from ..models import signals
 from ..models.component import Component, LocationMode
+from ..models.hiteff import reset_binning
 from ..models.settings import get_settings
 from ..versioning import archive
 from ..versioning import control as vc
@@ -204,6 +205,23 @@ def update_version(params):
     check_writable(tag)
     update_settings(get_record(tag), params['body'])
     return {'version': tag}
+
+
+@jobs.job_kind('reset_binning', label='Resetting spectrum binning', **EDIT)
+@reported
+def reset_spectrum_binning(params):
+    """ `params`: version, key (of the spectrum) """
+    tag, key = params['version'], params['key']
+    check_writable(tag)
+    try:
+        reset_binning(get_settings(tag, create=False), key)
+    except ValidationError as e:
+        raise Reported(e.message, 409,
+                       {f'hiteffdbconfig.display_spectra.{key}': e.message}
+                       ) from e
+    return {'messages': [[f"The next spectrum '{key}' sets its binning",
+                          'success']],
+            'redirect': build_url('edit_settings', active_version=tag)}
 
 
 @jobs.job_kind('rebuild', label='Rebuilding source terms', **EDIT)

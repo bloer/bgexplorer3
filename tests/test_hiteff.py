@@ -1,6 +1,7 @@
 import unittest
+from unittest import mock
 from mongoengine import connect, disconnect, ValidationError
-from bgexplorer.models.hiteff import HitEfficiency
+from bgexplorer.models.hiteff import HitEfficiency, reset_binning
 from bgexplorer.models.common import units
 from bgexplorer.models.asymmetric import AsymmetricUncertainty
 from bgexplorer.models.histogram import Histogram
@@ -248,6 +249,74 @@ class TestRoiUpdates(unittest.TestCase):
         # keV * dru/mBq per keV
         self.assertAlmostEqual(self.peak(), 210)
 
+    def test_evaluated_once(self):
+        """ Saving the settings evaluates each ROI once for each hit
+        efficiency, for the check and for the update together
+        """
+        settings = get_settings('main')
+        roi = settings.hiteffdbconfig.rois[0]
+        roi.stop = 6 * units.keV
+        with mock.patch.object(SpectrumROI, 'evaluate', autospec=True,
+                               side_effect=SpectrumROI.evaluate) as evaluate:
+            settings.save()
+        self.assertEqual(evaluate.call_count, 2)
+        self.assertAlmostEqual(self.peak(), 2.5)
+        self.assertAlmostEqual(self.peak(location='l2'), 2.5)
+        # nothing stale is left to be used by a later save
+        self.assertFalse(hasattr(settings, '_roi_results'))
+        # a later save sees hit efficiencies that were edited meanwhile
+        he = HitEfficiency.select_version('main').get(location='l1')
+        he.spectra['v1'] = he.spectra['v1'] * 2
+        he.save()
+        roi.stop = 5 * units.keV
+        settings.save()
+        self.assertAlmostEqual(self.peak(), 4)
+        self.assertAlmostEqual(self.peak(location='l2'), 2)
+
+    def test_exclude(self):
+        """ Excluded ranges are left out of the sum and the width averaged """
+        settings = get_settings('main')
+        roi = settings.hiteffdbconfig.rois[0]
+        # bins 0, 3 and 4 of v1 (counts 0..9) are left
+        for text in ('1-3 keV', '1 - 3', '0.001-0.003 MeV', ' 1-2, 2-3 keV ',
+                     '2.5-3, 1-2.5 keV'):
+            roi.exclude = text
+            settings.save()
+            self.assertAlmostEqual(self.peak(), 7 / 3, msg=text)
+        roi.exclude = '1-1.5 keV, 3.5-4 keV'
+        settings.save()
+        self.assertAlmostEqual(self.peak(), (0 + 1 * .5 + 2 + 3 * .5 + 4) / 4)
+        roi.mode = 'integrate'
+        roi.display_unit = None
+        roi.exclude = '1-3 keV'
+        settings.save()
+        self.assertAlmostEqual(self.peak(), 7)
+        # cleared again
+        roi.exclude = ''
+        settings.save()
+        self.assertAlmostEqual(self.peak(), 10)
+
+    def test_exclude_errors(self):
+        settings = get_settings('main')
+        roi = settings.hiteffdbconfig.rois[0]
+        for text in ('abc', '1-3 kg', '1-', '1-2 keV; 3'):
+            roi.exclude = text
+            with self.assertRaises(ValidationError, msg=text) as cm:
+                settings.save()
+            self.assertIn('exclude', str(cm.exception), msg=text)
+        # nothing is left to evaluate
+        roi.exclude = '0-5 keV'
+        with self.assertRaises(ValidationError):
+            settings.save()
+        roi.exclude = '-1-9 keV'
+        with self.assertRaises(ValidationError):
+            settings.save()
+        # nothing was changed in the database
+        self.assertAlmostEqual(self.peak(), 2)
+        roi.exclude = None
+        settings.save()
+        self.assertAlmostEqual(self.peak(), 2)
+
     def test_copy_on_write(self):
         """ Only the hit efficiencies of the version with the new settings
         change, and only those that have to
@@ -362,6 +431,174 @@ class TestPartialLoad(unittest.TestCase):
                 h.save()
                 h = self.check_intact(tag)
                 self.assertEqual(sorted(h.scalars_keys), ['v1', 'v2'])
+
+
+class TestBinning(unittest.TestCase):
+    """ Spectra with the same name must have the same bins """
+    @classmethod
+    def setUpClass(cls):
+        connect_test_db()
+
+    @classmethod
+    def tearDownClass(cls):
+        disconnect()
+
+    def setUp(self):
+        HitEfficiency.drop_collection()
+        VersionRecord.drop_collection()
+        VersionSettings.drop_collection()
+
+    @staticmethod
+    def spectrum(edges):
+        n = len(edges) - 1
+        return Histogram(AsymmetricUncertainty.fromcounts(np.ones(n))
+                         * units('dru/mBq'), edges)
+
+    def hiteff(self, location='c1', **spectra):
+        return HitEfficiency(source='h', location=location, spectra={
+            k: None if v is None else self.spectrum(v)
+            for k, v in spectra.items()})
+
+    def configured(self, name='s', tag='main'):
+        return get_settings(tag).hiteffdbconfig.display_spectra[name]
+
+    def test_first_spectrum_sets_binning(self):
+        self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        edges = self.configured().bin_edges
+        np.testing.assert_allclose(edges.m, np.linspace(0, 100, 11))
+        self.assertEqual(edges.u, units.keV)
+        # it is stored, not just set on the object
+        VersionSettings.objects.get().reload()
+        self.assertEqual(len(self.configured().bin_edges), 11)
+
+    def test_same_binning_accepted(self):
+        self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        # in other units, and with rounding error
+        self.hiteff('c2', s=np.linspace(0, 0.1, 11) * units.MeV).save()
+        self.hiteff('c3', s=(np.linspace(0, 100, 11) + 1e-8) * units.keV).save()
+        self.assertEqual(HitEfficiency.objects.count(), 3)
+        # the first one still defines it
+        self.assertEqual(self.configured().bin_edges.u, units.keV)
+
+    def test_other_binning_rejected(self):
+        self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        for bad in (np.linspace(0, 200, 11) * units.keV,
+                    np.linspace(0, 100, 11) * units.MeV,
+                    np.linspace(0, 100, 12) * units.keV,
+                    np.linspace(0, 100, 11) * units.kg,
+                    np.linspace(1, 101, 11) * units.keV):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValidationError, "spectrum s"):
+                    self.hiteff('c2', s=bad).save()
+        self.assertEqual(HitEfficiency.objects.count(), 1)
+
+    def test_other_names_unaffected(self):
+        self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        self.hiteff('c2', t=np.linspace(0, 5, 6) * units.MeV).save()
+        self.assertEqual(self.configured('t').bin_edges.u, units.MeV)
+        self.assertEqual(len(self.configured('s').bin_edges), 11)
+
+    def test_none_spectrum_skipped(self):
+        self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        self.hiteff('c2', s=None).save()
+        self.assertEqual(len(self.configured().bin_edges), 11)
+        # and doesn't define the binning
+        self.hiteff('c3', t=None).save()
+        self.assertIsNone(self.configured('t').bin_edges)
+
+    def test_all_mismatches_reported(self):
+        self.hiteff(a=np.arange(5.) * units.keV,
+                    b=np.arange(8.) * units.keV,
+                    c=np.arange(3.) * units.keV).save()
+        with self.assertRaises(ValidationError) as cm:
+            self.hiteff('c2', a=np.arange(6.) * units.keV,
+                        b=np.arange(8.) * units.keV,
+                        c=np.arange(9.) * units.keV).save()
+        message = str(cm.exception)
+        self.assertIn('spectrum a', message)
+        self.assertNotIn('spectrum b', message)
+        self.assertIn('spectrum c', message)
+        self.assertIn('reset', message)
+        # the bins found and the configured ones
+        self.assertIn('5 bins', message)
+        self.assertIn('4 bins', message)
+
+    def test_malformed_bins(self):
+        self.hiteff(s=np.arange(5.) * units.keV).save()
+        with self.assertRaisesRegex(ValidationError, "increasing"):
+            self.hiteff('c2', s=np.array([0, 1, 3, 2, 4.]) * units.keV).save()
+        # also for one that would be the first
+        with self.assertRaises(ValidationError):
+            self.hiteff('c2', t=np.array([0, 1, 1, 2.]) * units.keV).save()
+        self.assertNotIn('t', get_settings('main').hiteffdbconfig
+                         .display_spectra)
+
+    def test_resave_and_edit(self):
+        h = self.hiteff(s=np.linspace(0, 100, 11) * units.keV).save()
+        h.source = 'other'
+        h.save()
+        h.add_spectrum('s', self.spectrum(np.linspace(0, 100, 11) * units.keV),
+                       overwrite=True)
+        with self.assertRaises(ValidationError):
+            h.add_spectrum('s', self.spectrum(np.arange(4.) * units.keV),
+                           overwrite=True)
+
+    def test_existing_config_without_binning(self):
+        """ Settings that have a unit but no binning, as saved before """
+        config = get_settings('main')
+        unit = HitEfficiency().get_result_unit(
+            self.spectrum(np.arange(2.) * units.keV))
+        config.hiteffdbconfig.display_spectra = dict(
+            s=HitEffConfig(display_unit=unit))
+        config.save()
+        self.hiteff(s=np.arange(5.) * units.keV).save()
+        self.assertEqual(len(self.configured().bin_edges), 5)
+        with self.assertRaises(ValidationError):
+            self.hiteff('c2', s=np.arange(6.) * units.keV).save()
+
+    def reset(self, name='s', tag='main'):
+        reset_binning(get_settings(tag), name)
+
+    def test_refused_while_spectra_exist(self):
+        h = self.hiteff(s=np.arange(5.) * units.keV).save()
+        with self.assertRaisesRegex(ValidationError, "Delete") as cm:
+            self.reset()
+        self.assertIn('main', str(cm.exception))
+        self.assertEqual(len(self.configured().bin_edges), 5)
+        # a spectrum of another name doesn't matter
+        h.remove_spectrum('s')
+        self.hiteff('c2', t=np.arange(3.) * units.keV).save()
+        self.reset()
+
+    def test_reset_then_new_binning(self):
+        h = self.hiteff(s=np.arange(5.) * units.keV).save()
+        config = get_settings().hiteffdbconfig
+        config.display_spectra['s'].description = 'kept'
+        get_settings().update(set__hiteffdbconfig=config)
+        h.remove_spectrum('s')
+        self.reset()
+        self.assertIsNone(self.configured().bin_edges)
+        self.assertEqual(self.configured().description, 'kept')
+        self.hiteff('c2', s=np.arange(8.) * units.MeV).save()
+        self.assertEqual(len(self.configured().bin_edges), 8)
+        self.assertEqual(self.configured().bin_edges.u, units.MeV)
+
+    def test_unknown_or_unbinned_name(self):
+        self.reset('nothing')
+        config = get_settings()
+        config.hiteffdbconfig.display_spectra['plain'] = HitEffConfig()
+        config.save()
+        self.reset('plain')
+
+    def test_spectra_in_other_tag_of_settings(self):
+        self.hiteff(s=np.arange(5.) * units.keV).save()
+        create_branch('dev', 'main')
+        # the settings are shared until one is edited, and so are the spectra
+        self.assertCountEqual(get_settings('dev').version_tags, ['main', 'dev'])
+        with self.assertRaises(ValidationError) as cm:
+            self.reset('s', 'dev')
+        self.assertIn('1 in main', str(cm.exception))
+        self.assertIn('1 in dev', str(cm.exception))
 
 
 class TestSpectrumParsing(unittest.TestCase):

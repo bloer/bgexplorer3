@@ -630,12 +630,13 @@ def load_hiteffs(sourceterms: Iterable[SourceTerm],
 
 
 def check_version_units(version: str) -> List[str]:
-    """ Audit the units of everything in `version`, for data that was written
-    without being validated, such as an import or a merge. HitEfficiencies'
-    scalars, spectra and ROIs without a display unit in the settings are
-    given one, and every HitEfficiency and EmissionSource is checked as
-    saving it would be. Returns a description of each problem found, which
-    is empty if the units all agree.
+    """ Audit the units and spectrum binning of everything in `version`, for
+    data that was written without being validated, such as an import or a
+    merge. HitEfficiencies' scalars, spectra and ROIs without a display unit
+    in the settings are given one, spectra without bins in the settings set
+    them, and every HitEfficiency and EmissionSource is checked as saving it
+    would be. Returns a description of each problem found, which is empty if
+    the units and bins all agree.
     """
     vsettings = settings.get_settings(version, create=False)
     config = vsettings.hiteffdbconfig
