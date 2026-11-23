@@ -1,5 +1,4 @@
 {%- import "datatable.html" as datatable -%}
-{%- import "overview_rows.html" as rows with context -%}
 {%- set embedded = request.args.embedded | default(false) -%}
 {%- if not embedded -%}
 {% extends "versionbase.html" %}
@@ -24,5 +23,5 @@
 {%- endif -%}
 
 {% block pagecontent %}
-{{ datatable.overview(['Name', 'Material', 'Isotopes', 'Reference', 'Modified'], rows.activatedmaterial(data)) }}
+{{ datatable.overview(['Name', 'Material', 'Isotopes', 'Reference', 'Modified']) }}
 {% endblock %}

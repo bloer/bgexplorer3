@@ -650,6 +650,164 @@ class TestSpecEntryEditor(BrowserTestCase):
         self.assertIn('Hot Package', page.locator('#specstable').inner_text())
 
 
+class TestMultiReferencePicker(BrowserTestCase):
+    """ Add on a list of references opens a picker where any number of rows
+    can be ticked; rows are made for what is chosen only
+    """
+    SPECS = '#spec_entries tbody tr'
+    ROWS = '#selectReferenceModalBody tbody tr'
+
+    def setUp(self):
+        super().setUp()
+        vc.create_version('main')
+        for name in ('BeCu', 'radon', 'steel', 'teflon'):
+            EmissionSpec(name=name, sources=dict(U238='1 mBq/kg')).save()
+        self.c1 = Component(name='c1', mass='1 kg').save()
+        self.c2 = Component(name='c2', mass='1 kg').save()
+        self.package = Component(name='package', mass='1 kg').save()
+        self.assembly = Assembly(name='asm', children=[
+            Placement(component=self.c1)]).save()
+
+    def open_picker(self, page, button):
+        page.click(button)
+        page.wait_for_selector('#selectReferenceModal.show')
+        # the rows are loaded after the modal opens
+        page.wait_for_selector(self.ROWS + ' a')
+        page.wait_for_timeout(500)
+
+    def edit_package(self):
+        page = self.open(self.url('component.edit', object=self.package))
+        self.open_picker(page, '#specsfieldset button:text-is("Add")')
+        return page
+
+    def tick(self, page, name):
+        page.locator(self.ROWS, has_text=name).locator(
+            'td.select-checkbox').click()
+
+    def summary(self, page):
+        return page.inner_text('#selectReferenceSummary')
+
+    def test_dismissing_adds_nothing(self):
+        page = self.edit_package()
+        # a ticked row doesn't count until it is added
+        self.tick(page, 'radon')
+        page.click('#selectReferenceModal .btn-close')
+        page.wait_for_selector('#selectReferenceModal', state='hidden')
+        self.assertEqual(page.locator(self.SPECS).count(), 0)
+        self.open_picker(page, '#specsfieldset button:text-is("Add")')
+        self.assertIn('Tick rows', self.summary(page))
+        page.keyboard.press('Escape')
+        page.wait_for_selector('#selectReferenceModal', state='hidden')
+        self.assertEqual(page.locator(self.SPECS).count(), 0)
+        self.open_picker(page, '#specsfieldset button:text-is("Add")')
+        page.click('#selectReferenceModal .modal-footer button:text-is("Cancel")')
+        page.wait_for_selector('#selectReferenceModal', state='hidden')
+        self.assertEqual(page.locator(self.SPECS).count(), 0)
+        # so the form can be saved as it was
+        page.click('#mainform button[type=submit] >> nth=0')
+        page.wait_for_url(self.base + self.url('component.view',
+                                               object=self.package))
+        self.assertEqual(Component.objects.get(name='package').specs, [])
+
+    def test_dismissing_adds_no_child(self):
+        page = self.open(self.url('component.edit', object=self.assembly))
+        self.open_picker(page, 'button[data-tableid="children"]')
+        page.click('#selectReferenceModal .btn-close')
+        page.wait_for_selector('#selectReferenceModal', state='hidden')
+        self.assertEqual(page.locator('#children tbody tr').count(), 1)
+        page.click('#mainform button[type=submit] >> nth=0')
+        page.wait_for_url(self.base + self.url('component.view',
+                                               object=self.assembly))
+        self.assertEqual(len(Assembly.objects.get(name='asm').children), 1)
+
+    def test_add_several(self):
+        page = self.edit_package()
+        self.tick(page, 'radon')
+        self.tick(page, 'steel')
+        self.assertIn('2 selected', self.summary(page))
+        self.assertIn('radon', self.summary(page))
+        self.assertIn('steel', self.summary(page))
+        self.assertEqual(page.inner_text('#selectReferenceAdd'),
+                         'Add 2 selected')
+        page.click('#selectReferenceAdd')
+        page.wait_for_selector('#selectReferenceModal', state='hidden')
+        self.assertEqual(page.locator(self.SPECS).count(), 2)
+        page.click('#mainform button[type=submit] >> nth=0')
+        page.wait_for_url(self.base + self.url('component.view',
+                                               object=self.package))
+        package = Component.objects.get(name='package')
+        self.assertEqual(sorted(entry.spec.name
+                                for entry in package.spec_entries),
+                         ['radon', 'steel'])
+
+    def test_add_several_children(self):
+        page = self.open(self.url('component.edit', object=self.assembly))
+        self.open_picker(page, 'button[data-tableid="children"]')
+        self.tick(page, 'c2')
+        self.tick(page, 'package')
+        page.click('#selectReferenceAdd')
+        page.wait_for_selector('#selectReferenceModal', state='hidden')
+        self.assertEqual(page.locator('#children tbody tr').count(), 3)
+        page.click('#mainform button[type=submit] >> nth=0')
+        page.wait_for_url(self.base + self.url('component.view',
+                                               object=self.assembly))
+        assembly = Assembly.objects.get(name='asm')
+        self.assertEqual(sorted(child.component.name
+                                for child in assembly.children),
+                         ['c1', 'c2', 'package'])
+
+    def test_search_keeps_the_selection(self):
+        page = self.edit_package()
+        search = page.locator('#selectReferenceModalBody input[type=search]')
+        self.tick(page, 'BeCu')
+        search.fill('steel')
+        self.assertEqual(page.locator(self.ROWS).count(), 1)
+        self.tick(page, 'steel')
+        # the row the search hides is still counted and named
+        self.assertIn('2 selected', self.summary(page))
+        self.assertIn('BeCu', self.summary(page))
+        # the header checkbox ticks only what the search shows
+        search.fill('teflon')
+        page.locator('#selectReferenceModal .dataTables_scrollHead '
+                     '.select-all').check()
+        self.assertIn('3 selected', self.summary(page))
+        self.assertNotIn('radon', self.summary(page))
+        search.fill('')
+        self.assertEqual(page.locator(self.ROWS + '.selected').count(), 3)
+        page.click('#selectReferenceAdd')
+        page.wait_for_selector('#selectReferenceModal', state='hidden')
+        self.assertEqual(page.locator(self.SPECS).count(), 3)
+
+    def test_clear_selection(self):
+        page = self.edit_package()
+        self.tick(page, 'radon')
+        self.assertTrue(page.locator('#selectReferenceAdd').is_enabled())
+        page.click('#selectReferenceClear')
+        self.assertIn('Tick rows', self.summary(page))
+        self.assertTrue(page.locator('#selectReferenceAdd').is_disabled())
+        self.assertEqual(page.locator(self.ROWS + '.selected').count(), 0)
+
+    def test_name_adds_just_that_one(self):
+        page = self.edit_package()
+        self.tick(page, 'BeCu')
+        page.locator('#selectReferenceModalBody a:text-is("radon")').click()
+        page.wait_for_selector('#selectReferenceModal', state='hidden')
+        self.assertEqual(page.locator(self.SPECS).count(), 1)
+        self.assertEqual(page.locator(self.SPECS + ' a').inner_text(), 'radon')
+
+    def test_single_picker_has_no_checkboxes(self):
+        cu = ActivatedMaterial(name='Cu', isotopes=[CosmogenicIsotope(
+            isotope='Co60', activationrate='97 1/kg/day')]).save()
+        spec = CosmogenicActivation(name='a1', material=cu).save()
+        page = self.open(self.url('emissionspec.edit', object=spec))
+        page.click('#material button.referenceSelector')
+        page.wait_for_selector('#selectReferenceModal.show')
+        page.wait_for_selector(self.ROWS + ' a')
+        self.assertEqual(page.locator(
+            '#selectReferenceModalBody .select-checkbox').count(), 0)
+        self.assertFalse(page.locator('#selectReferenceFooter').is_visible())
+
+
 class TestRadonExposureEditor(BrowserTestCase):
     def setUp(self):
         super().setUp()
