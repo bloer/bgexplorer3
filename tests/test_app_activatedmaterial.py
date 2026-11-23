@@ -1,4 +1,5 @@
 """ Creating and editing activated materials through the web interface """
+import json
 from io import BytesIO
 from werkzeug.datastructures import MultiDict
 from bgexplorer.models.component import Component
@@ -173,7 +174,14 @@ class TestCosmogenicActivationPages(AppTestCase):
             self.url('activatedmaterial.overview', 'b', embedded=1)))
         self.assertNotIn('<nav', html)
         self.assertIn('class="table', html)
-        self.assertIn(f'data-original_id="{self.cu.original_id}"', html)
+        # its rows are loaded like those of the overview
+        self.assertIn(self.url('activatedmaterial.overview_data', 'b',
+                               embedded=1), html)
+        data = json.loads(self.client.get(self.url(
+            'activatedmaterial.overview_data', 'b', embedded=1)).get_data()
+        )['data']
+        self.assertEqual([row['DT_RowId'] for row in data],
+                         [str(self.cu.original_id)])
 
     def test_delete(self):
         html = self.html(self.client.get(

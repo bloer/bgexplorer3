@@ -20,16 +20,22 @@
     function addDynamicTableRow(caller){
         const tbody = document.querySelector("#"+caller.dataset.tableid+" tbody");
         const template = document.getElementById(caller.dataset.templateid);
-        const clone = template.content.cloneNode(true);
-        // datalists in templates weren't there to load with the page
-        clone.querySelectorAll('datalist[data-url]').forEach(loadDatalist);
-        tbody.appendChild(clone);
-        // if clone contains a referenceSelector button, click it
-        setTimeout(function(){
-            var referenceSelector = tbody.lastElementChild.querySelector("button.referenceSelector");
-            if(referenceSelector)
-                referenceSelector.click();
-        }, 10);
+        const addRow = function(pick){
+            const clone = template.content.cloneNode(true);
+            // datalists in templates weren't there to load with the page
+            clone.querySelectorAll('datalist[data-url]').forEach(loadDatalist);
+            if(pick)
+                setReference(clone.querySelector("button.referenceSelector"), pick);
+            tbody.appendChild(clone);
+        };
+        const selector = template.content.querySelector("button.referenceSelector");
+        if(!selector)
+            return addRow();
+        // rows that refer to something are only made for what is chosen
+        showReferencePicker(selector.dataset.url, {
+            multiple: true,
+            onPick: picks => picks.forEach(addRow)
+        });
     }
     function removeDynamicTableRow(caller){
         event.preventDefault();
@@ -40,44 +46,171 @@
     function loadReferenceSelector(caller){
         event.preventDefault();
         event.stopPropagation();
-        var modal = new bootstrap.Modal(document.getElementById('selectReferenceModal'));
-        modal.show();
-        fetch(caller.dataset.url)
+        showReferencePicker(caller.dataset.url, {onPick: picks => setReference(caller, picks[0])});
+    }
+
+    function setReference(button, pick){
+        const cell = button.parentNode;
+        cell.querySelector("input").value = pick.id;
+        if(button.dataset.picker){
+            // referencepicker keeps its buttons to change or clear
+            cell.querySelector(".referencename").replaceChildren(pick.link.cloneNode(true));
+        } else {
+            button.remove();
+            cell.appendChild(pick.link.cloneNode(true));
+        }
+    }
+
+    // The reference picker shows an overview table in the shared modal. The
+    // rows are loaded by DataTables as on the overview pages, and the rows
+    // ticked are Select's, so they stay selected while searching or scrolling.
+    // `picker` is set while it is open.
+    let picker = null;
+    let pickerRequest = 0;
+
+    function htmlText(html){
+        const div = document.createElement('div');
+        div.innerHTML = html;
+        return div.textContent.trim();
+    }
+
+    // [{id, link}] for the selected rows, including any the search hides
+    function pickedRows(){
+        const picks = [];
+        picker.dtable.rows({selected: true}).every(function(){
+            const div = document.createElement('div');
+            div.innerHTML = this.data().c[0][0];
+            picks.push({id: this.id(), link: div.querySelector('a') ||
+                                             document.createTextNode(div.textContent.trim())});
+        });
+        return picks;
+    }
+
+    // everything the user is told about the selection is set here
+    function showSelection(){
+        const dtable = picker.dtable;
+        const names = dtable.rows({selected: true}).data().toArray().map(row => htmlText(row.c[0][0]));
+        const n = names.length;
+        const footer = document.getElementById('selectReferenceFooter');
+        const summary = document.getElementById('selectReferenceSummary');
+        summary.textContent = n ?
+            `${n} selected: ${names.slice(0, 5).join(', ')}${n > 5 ? ` and ${n - 5} more` : ''}` :
+            'Tick rows to add several at once, or click a name to add just that one.';
+        summary.classList.toggle('fw-bold', n > 0);
+        footer.classList.toggle('bg-primary', n > 0);
+        footer.classList.toggle('bg-opacity-10', n > 0);
+        const add = document.getElementById('selectReferenceAdd');
+        add.disabled = !n;
+        add.textContent = n ? `Add ${n} selected` : 'Add';
+        document.getElementById('selectReferenceClear').hidden = !n;
+        // the header checkbox is for the rows the search shows
+        const shown = dtable.rows({search: 'applied'}).count();
+        const allticked = shown > 0 && dtable.rows({search: 'applied', selected: true}).count() === shown;
+        document.querySelectorAll('#selectReferenceModal .select-all').forEach(cb => cb.checked = allticked);
+    }
+
+    function fitReferencePicker(){
+        if(!picker) return;
+        picker.dtable.columns.adjust();
+        if(picker.dtable.scroller) picker.dtable.scroller.measure();
+        bootstrap.Modal.getInstance(document.getElementById('selectReferenceModal')).handleUpdate();
+    }
+
+    function closeReferencePicker(){
+        pickerRequest++;
+        if(picker){
+            const xhr = picker.dtable.settings()[0].jqXHR;
+            if(xhr && xhr.readyState !== 4) xhr.abort();
+            picker.dtable.destroy();
+            picker = null;
+        }
+        document.getElementById('selectReferenceModalBody').innerHTML = '';
+    }
+
+    // `options.multiple`: rows can be ticked; `options.onPick` is called with
+    // [{id, link}] for what was chosen, and not at all if the modal is dismissed
+    function showReferencePicker(url, options){
+        closeReferencePicker();
+        const request = pickerRequest;
+        const modalEl = document.getElementById('selectReferenceModal');
+        const body = document.getElementById('selectReferenceModalBody');
+        body.innerHTML = '<div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div>';
+        document.getElementById('selectReferenceFooter').hidden = !options.multiple;
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        const fail = message => {
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-danger';
+            alert.textContent = 'Could not load the table: ' + message;
+            body.replaceChildren(alert);
+        };
+        fetch(url)
         .then(response => response.text())
         .then(text => {
-            var modalBody = document.getElementById("selectReferenceModalBody");
-            modalBody.innerHTML = text;
-            var table = modalBody.querySelector("table.datatable");
-            var dtable = new DataTable(table);
-            // column headers aren't being set right, so brute-force it
-            setTimeout(function(){
-                dtable.columns.adjust().draw();
-                modal.handleUpdate();
-                }, 50);
-            // update all the first-child links to set the value
-            var cell = caller.parentNode;
-            var input = cell.querySelector("input");
-            // the name link is the first link in each row; a leading checkbox column may precede it
-            var links = Array.from(table.querySelectorAll("tbody tr")).map(row => row.querySelector("td a")).filter(Boolean);
-            links.forEach(link => {
-                link.onclick = function(){
-                    event.preventDefault();
-                    event.stopPropagation();
-                    var id = link.parentNode.parentNode.dataset.original_id;
-                    id = id || link.parentNode.parentNode.dataset.id;
-                    input.value = id;
-                    if(caller.dataset.picker){
-                        // referencepicker keeps its buttons to change or clear
-                        cell.querySelector(".referencename").replaceChildren(link.cloneNode(true));
-                    } else {
-                        caller.remove();
-                        cell.appendChild(link.cloneNode(true));
-                    }
-                    modal.hide();
-                };
+            if(request !== pickerRequest) return;  // dismissed meanwhile
+            body.innerHTML = text;
+            const table = body.querySelector("table.datatable");
+            const dtOptions = ajaxTableOptions(table);
+            dtOptions.scrollY = '50vh';
+            dtOptions.ajax.error = (xhr, status, error) => {
+                if(status !== 'abort') fail(xhr.status + ' ' + (error || status));
+            };
+            if(!options.multiple){
+                dtOptions.select = false;
+                dtOptions.columns[0].visible = false;
+            }
+            const dtable = new DataTable(table, dtOptions);
+            picker = {dtable: dtable, onPick: options.onPick, done: false};
+            if(options.multiple){
+                dtable.on('select deselect draw', showSelection);
+                showSelection();
+            }
+            dtable.on('init', () => {
+                fitReferencePicker();
+                const search = body.querySelector('input[type=search]');
+                if(search) search.focus();
             });
-        });
+        })
+        .catch(error => request === pickerRequest && fail(error));
     }
+
+    function finishReferencePicker(picks){
+        const onPick = picker.onPick;
+        picker.done = true;
+        bootstrap.Modal.getInstance(document.getElementById('selectReferenceModal')).hide();
+        onPick(picks);
+    }
+
+    document.addEventListener('click', e => {
+        if(!picker || picker.done) return;
+        if(e.target.closest('#selectReferenceAdd')){
+            finishReferencePicker(pickedRows());
+        } else if(e.target.closest('#selectReferenceClear')){
+            picker.dtable.rows().deselect();
+        } else {
+            // the name link of a row adds just that row
+            const link = e.target.closest('#selectReferenceModalBody tbody a');
+            const tr = link && link.closest('tr');
+            if(tr && link.closest('td') === tr.querySelector('td:not(.select-checkbox)')){
+                e.preventDefault();
+                finishReferencePicker([{id: picker.dtable.row(tr).id(), link: link}]);
+            }
+        }
+    });
+    document.addEventListener('change', e => {
+        if(picker && e.target.classList.contains('select-all') && e.target.closest('#selectReferenceModal')){
+            const rows = picker.dtable.rows({search: 'applied'});
+            e.target.checked ? rows.select() : rows.deselect();
+        }
+    });
+    document.addEventListener('shown.bs.modal', e => {
+        if(e.target.id !== 'selectReferenceModal') return;
+        // hide() is ignored while the modal is still opening
+        if(picker && picker.done) bootstrap.Modal.getInstance(e.target).hide();
+        else fitReferencePicker();
+    });
+    document.addEventListener('hidden.bs.modal', e => {
+        if(e.target.id === 'selectReferenceModal') closeReferencePicker();
+    });
     function clearReference(caller){
         const picker = caller.closest(".referencepicker");
         picker.querySelector("input").value = "";
@@ -331,15 +464,7 @@ input{% if open %} type="{{ type }}"{% endif -%}
 
 
 {# ~~~~~~~~~~~~~~~~~~~~~~~ #}
-{# TODO:
-    - Macros to add a modal target to each edit form that takes references (probably all of them)
-    - reference fields create an a or button that opens the modal
-    - on show.bs.modal, fetch the associated table, then call DataTable once received
-    - override the first-child td a click to
-        - set the relatedTarget sibling input to the tr.dataset.original_id or id
-        - set the relatedTarget href and text to the clicked one
-        - close the modal and remove click handler from relatedTarget
-#}
+{# the modal of the reference picker, see `showReferencePicker` #}
 {%- macro modal() -%}
 <!-- Modal -->
 <div class="modal fade" id="selectReferenceModal" tabindex="-1" aria-labelledby="selectReferenceModalLabel" aria-hidden="true">
@@ -354,11 +479,13 @@ input{% if open %} type="{{ type }}"{% endif -%}
             <span class="visually-hidden">Loading...</span>
         </div>
       </div>
-      <!--
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      {#- shown when several rows can be ticked; `showSelection` fills it -#}
+      <div class="modal-footer" id="selectReferenceFooter" hidden>
+        <span id="selectReferenceSummary" class="me-auto"></span>
+        <button type="button" class="btn btn-link" id="selectReferenceClear" hidden>Clear selection</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="selectReferenceAdd" disabled>Add</button>
       </div>
-      -->
     </div>
   </div>
 </div>

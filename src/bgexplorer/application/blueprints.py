@@ -330,12 +330,10 @@ class CollectionViews(flask.Blueprint):
 
         @self.get('/')
         def overview():
-            # the table loads its rows from `overview_data`, unless it is
+            # the table loads its rows from `overview_data`, also when it is
             # embedded in a form's reference picker
             return flask.render_template(
-                f'overview_{self.clsname}.html', cls=self.doc_cls,
-                data=overview_queryset()
-                if flask.request.args.get('embedded') else ())
+                f'overview_{self.clsname}.html', cls=self.doc_cls, data=())
 
         @self.get('/data')
         def overview_data():

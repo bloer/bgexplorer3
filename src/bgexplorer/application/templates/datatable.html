@@ -23,6 +23,24 @@
         DataTable.defaults.order = [];
         DataTable.defaults.dom = 'iftr';
     }
+    // options of a table with `data-ajax-url` (rows as json from there, see
+    // `table_rows`): a checkbox column that Select uses to select rows, then
+    // for each heading the [html, sort value] cell of the row's `c`. Also used
+    // by the reference picker of the edit forms
+    function ajaxTableOptions(table) {
+        var columns = [{data: null, defaultContent: '', className: 'select-checkbox', orderable: false, searchable: false}];
+        for (var i = 1; i < table.tHead.rows[0].cells.length; i++) {
+            columns.push({data: {_: 'c.' + (i - 1) + '.0', sort: 'c.' + (i - 1) + '.1', type: 'c.' + (i - 1) + '.1'}});
+        }
+        return {
+            ajax: {url: table.dataset.ajaxUrl},
+            serverSide: table.dataset.serverSide === '1',
+            processing: true, columns: columns,
+            scroller: true, deferRender: true, scrollCollapse: false, paging: true,
+            scrollY: 'calc(100vh - 245px)',
+            select: {style: 'multi', selector: 'td:first-child', info: false}
+        };
+    }
 </script>
 {%- if initialize %}
 <script>
@@ -51,12 +69,6 @@
                 new DataTable(table, {columnDefs: [{targets: 0, orderable: false, searchable: false}]});
                 return;
             }
-            var serverSide = table.dataset.serverSide === '1';
-            // after the checkbox column, each cell of a row's `c` is [html, sort value]
-            var columns = [{data: null, defaultContent: '', className: 'select-checkbox', orderable: false, searchable: false}];
-            for (var i = 1; i < table.tHead.rows[0].cells.length; i++) {
-                columns.push({data: {_: 'c.' + (i - 1) + '.0', sort: 'c.' + (i - 1) + '.1', type: 'c.' + (i - 1) + '.1'}});
-            }
             var fail = function(message) {
                 var alert = document.createElement('div');
                 alert.className = 'alert alert-danger';
@@ -64,17 +76,10 @@
                 table.before(alert);
             };
             var nohiteff = document.getElementById('filter-nohiteff');
-            var dt = _table = new DataTable(table, {
-                ajax: {
-                    url: table.dataset.ajaxUrl,
-                    data: function(d) { if (nohiteff && nohiteff.checked) d.nohiteff = 1; },
-                    error: function(xhr, status, error) { fail(xhr.status + ' ' + (error || status)); }
-                },
-                serverSide: serverSide, processing: true, columns: columns,
-                scroller: true, deferRender: true, scrollCollapse: false, paging: true,
-                scrollY: 'calc(100vh - 245px)',
-                select: {style: 'multi', selector: 'td:first-child', info: false}
-            });
+            var options = ajaxTableOptions(table);
+            options.ajax.data = function(d) { if (nohiteff && nohiteff.checked) d.nohiteff = 1; };
+            options.ajax.error = function(xhr, status, error) { fail(xhr.status + ' ' + (error || status)); };
+            var dt = _table = new DataTable(table, options);
             if (nohiteff) nohiteff.addEventListener('change', function() { dt.ajax.reload(); });
             // Select only restores the selection of rows still drawn
             dt.on('draw', function() {
@@ -139,7 +144,8 @@
 {#- with `ajax_url`, the rows are the json at that url (see `table_rows`).
     `unsortable` are the indexes of the headings that can't be sorted -#}
 {% macro render(headings, tableid="dtable", bulk=false, ajax_url=none, server_side=false, unsortable=()) %}
-{%- if bulk %}
+{#- the bulk actions don't belong in a reference picker, which is in a form -#}
+{%- if bulk and not request.args.get('embedded') %}
 <div class="modal fade" id="bulk-delete-modal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -180,12 +186,8 @@
 </table>
 {% endmacro %}
 
-{#- an overview table. In a reference picker (`embedded`) its rows are in the
-    page, otherwise they are fetched from `overview_data` -#}
-{% macro overview(headings, rows) %}
-{%- if request.args.get('embedded') %}
-{%- call render(headings, bulk=true) %}{{ rows }}{% endcall %}
-{%- else %}
+{#- an overview table, with its rows fetched from `overview_data`, also in a
+    reference picker (`embedded`) -#}
+{% macro overview(headings) %}
 {%- call render(headings, bulk=true, ajax_url=url_for('.overview_data', **request.args)) %}{% endcall %}
-{%- endif %}
 {% endmacro %}

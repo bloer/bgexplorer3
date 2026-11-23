@@ -1,5 +1,4 @@
 {%- import "datatable.html" as datatable -%}
-{%- import "overview_rows.html" as rows with context -%}
 {%- set embedded = request.args.embedded | default(false) -%}
 {%- if not embedded -%}
 {% extends "versionbase.html" %}
@@ -33,5 +32,5 @@
 {% block pagecontent %}
 {% set headers = ['Name', 'Hierarchy', 'Description', 'Material',
                   'Mass (kg)', 'Confidence', 'Part', 'Modified'] %}
-{{ datatable.overview(headers, rows.component(data)) }}
+{{ datatable.overview(headers) }}
 {% endblock %}

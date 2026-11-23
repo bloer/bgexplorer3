@@ -240,8 +240,8 @@ class TestComponentPages(AppTestCase):
         self.assertIn('id="filter-nohiteff"', html)
 
     def test_overview_data(self):
-        """ the overview tables load their rows as json, except in the
-        reference picker
+        """ the overview tables load their rows as json, also in the
+        reference picker, which has no bulk actions
         """
         HitEfficiency(source='K40', location='c1',
                       scalars=dict(v1='0.1 dru/mBq')).save()
@@ -260,9 +260,16 @@ class TestComponentPages(AppTestCase):
                 self.assertTrue(rows[0]['DT_RowId'])
                 self.assertTrue(any(f'>{name}</a>' in row['c'][0][0]
                                     for row in rows))
+                self.assertIn('id="bulk-bar"', html)
                 picker = self.html(self.client.get(url + '?embedded=1'))
-                self.assertIn('<tr class=', picker)
-                self.assertNotIn('data-ajax-url="', picker)
+                self.assertIn('data-ajax-url="'
+                              f'{self.url(f"{clsname}.overview_data", embedded=1)}"',
+                              picker)
+                self.assertNotIn('<tr class=', picker)
+                self.assertNotIn('id="bulk-bar"', picker)
+                self.assertNotIn('id="bulk-delete-modal"', picker)
+                # the header checkbox selects all the rows shown
+                self.assertIn('class="select-all"', picker)
         # the sort value of a mass is in kg, a spec has a column per source
         mass = self.client.get(self.url('component.overview_data'))
         c1 = [row for row in json.loads(mass.get_data())['data']
@@ -407,8 +414,8 @@ class TestComponentPages(AppTestCase):
         overview = self.url('emissionspec.overview_data', 'b')
         link = '>c1 own</a>'
         self.assertNotIn(link, self.client.get(overview).get_data(as_text=True))
-        self.assertNotIn(link, self.html(self.client.get(
-            self.url('emissionspec.overview', 'b', embedded=1))))
+        self.assertNotIn(link, self.client.get(self.url(
+            'emissionspec.overview_data', 'b', embedded=1)).get_data(as_text=True))
         self.assertIn(link, self.client.get(
             overview, query_string={'owned': 1}).get_data(as_text=True))
 
